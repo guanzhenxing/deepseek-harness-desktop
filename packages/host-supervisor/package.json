@@ -1,0 +1,31 @@
+{
+  "name": "@dsh-desktop/host-supervisor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./host-runner": {
+      "types": "./lib/host-runner.d.ts",
+      "default": "./lib/host-runner.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-app-boot": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-base": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-launch-environment": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-web-app": "0.1.2-alpha.3",
+    "@dsh-desktop/desktop-contracts": "workspace:*",
+    "@dsh-desktop/desktop-plugin": "workspace:*",
+    "@dsh-desktop/profile-manager": "workspace:*"
+  }
+}
