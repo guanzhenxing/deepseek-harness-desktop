@@ -1,7 +1,7 @@
 # ADR-0001：自建独立的 DSH Desktop 插件与 Electron launcher
 
 - 日期：2026-08-31
-- 修订：2026-09-01（独立 Host 进程与扩展控制面）
+- 修订：2026-09-01（独立 Host、恢复 surface 与扩展控制面）
 - 状态：已接受
 - 决策人：Jesen（guanzhenxing）
 
@@ -30,11 +30,15 @@ launcher 在独立的 Node-capable 子进程中 boot DSH Host，DSH Loader 在�
 
 插件通过 Host runner 注入的窄化 `desktopSurface` proxy 发布本地 surface。proxy 经可序列化的私有控制通道把结构化消息交给 launcher；插件再通过官方 `connection` 服务取得 authenticated URL，并通知 launcher 创建窗口。
 
+Safe Mode 不加载正常 `desktop-plugin`，而是加载最小第一方 `desktop-recovery-bridge`。它只通过相同的 `desktopSurface` 契约发布 authenticated recovery URL；launcher-owned 的最低恢复面仍不依赖任何 Host 成功启动。具体决策见 [ADR-0002](0002-use-a-minimal-recovery-bridge.md)。
+
 控制通道绑定一次性 capability、protocol version、lease generation 与 Host 身份，不接受任意 Electron 方法或 stdout 文案协议。
 
-Host 与 launcher 之间不提供通用 `desktopRuntime`。后续原生能力各自拥有独立契约，例如 `desktopUpdater`、`desktopSecureStore` 或 `desktopProfileManager`。
+Host 与 launcher 之间不提供通用 `desktopRuntime`。后续原生能力各自拥有独立契约，例如 `desktopUpdater`、`desktopSecureStore` 或 `desktopProfileManager`。这些能力可以暂时位于同一个 `desktop-contracts` 包，但必须使用独立 subpath export 和协议版本；具体决策见 [ADR-0004](0004-version-native-capabilities-independently.md)。
 
-只有实际使用某项能力的功能插件才能依赖对应契约。
+第一方功能插件只声明自身实际使用的能力契约；这种依赖最小化用于缩小接口面，不构成插件身份或权限隔离。敏感操作仍按 ADR-0004 执行能力策略和 launcher-owned 用户确认。
+
+profile 组装、修订恢复、Safe Mode 投影与未来 generation 事务由 Electron-independent `profile-manager` 统一拥有，`shell-core` 只负责编排；具体决策见 [ADR-0003](0003-separate-profile-manager.md)。
 
 插件市场、远程访问和桌面升级不会继续堆入 `desktop-plugin`。它们分别作为独立 DSH bundle/plugin 组合，并由 launcher 提供不能在插件内完成的最小原生机制。更新和恢复中必须在 Host boot 失败时工作的最低控制面是 launcher 职责，正常产品策略与 UI 仍属于相应插件。
 
@@ -85,7 +89,7 @@ Host 与 Electron Main 采用独立进程，原因是第三方插件或 Host 的
 
 直接启动不存在的 `desktop` profile 时，上游会报错。只有通过 `dsh plugin` 首次管理时，上游才使用仅含 `dsh-base` 的默认 bundle 做最小初始化。
 
-profile 的组装与修复由本项目 `shell-core` 中的 `reconcileDesktopProfile()` 完成。它修复 `dsh-base`、`dsh-web-app` 和本插件的前缀，保留第三方 bundle，且不能用固定清单覆盖整个 profile。
+profile 的组装与修复由本项目 `profile-manager` 中的 `reconcileDesktopProfile()` 完成。它修复 `dsh-base`、`dsh-web-app` 和本插件的前缀，保留第三方 bundle，且不能用固定清单覆盖整个 profile。
 
 桌面端的自动恢复也只能在修订校验通过时修改 `~/.dsh/profiles/desktop` 下的白名单文件。
 
@@ -115,7 +119,7 @@ home lease 是覆盖整个受支持入口写入生命周期的进程所有权协
 
 launcher 只提供操作系统机制和 boot-independent 控制面。市场 catalog、远程授权策略、升级 channel 与兼容性解释等产品逻辑仍属于 DSH 插件，不能转移到 Electron 主进程形成第二套业务系统。
 
-更新是明确例外中的分层，而不是放弃插件化：launcher 必须在 Host 无法 boot 时仍能校验可信更新元数据、停止 Host、替换应用和 relaunch；`desktop-updater` 插件负责正常应用内提示、策略和兼容性解释。Safe Mode 与定点 profile 修复同理，由 launcher 提供可用控制面，由明确的 profile manager 事务执行修改。
+更新是明确例外中的分层，而不是放弃插件化：launcher 必须在 Host 无法 boot 时仍能校验可信更新元数据、停止 Host、替换应用和 relaunch；`desktop-updater` 插件负责正常应用内提示、策略和兼容性解释。launcher 必须保存经过校验的 last-effective policy，并内置不可由 Host 替换的签名信任根和 emergency stable source。Safe Mode 与定点 profile 修复同理，由 launcher 提供可用控制面，由明确的 profile manager 事务执行修改。
 
 ### 3.7 远程连接需要独立身份与 Host 端授权
 
@@ -123,13 +127,15 @@ loopback browser session 适合 v1 本机访问，但不能直接扩展成远程
 
 客户端的 `isLoopback` 只用于呈现，不能决定某次写入是否获准。bridge allowlist 和远端 IP 也不能替代 Host 授权。远程 principal 默认无权安装插件、写凭据、切换 profile 或更新 Desktop。
 
+进入远程实现前必须用当时固定的 DSH 基线完成 feasibility prototype，证明 principal 可以传播到 Host，并在每个目标方法执行前强制检查 scope、审计和撤销。若上游缺少相应扩展点，先补授权中间层或推动上游能力，不得以 bridge 检查代替 Host 授权。
+
 ### 3.8 升级由多条版本轴共同约束
 
 Desktop 应用、内置 DSH runtime、profile 插件和持久化格式分别拥有版本。上一版 DMG 只能回退应用二进制，不能保证读取新版本已经写入的数据。
 
 因此发行版必须携带兼容性清单。未来 updater 在替换应用前执行签名校验、迁移预检和降级检查；插件升级与 Desktop 升级保持为两个独立事务。
 
-插件升级采用不可变 generation：在隔离 staging 中解析和校验，停止 Host 后才切换 `active`，失败只回退本次事务，并保留 `lastKnownGood`。开放市场安装前必须先具备不读取正常第三方组合的 Safe Mode 和定点禁用能力。
+插件升级采用不可变 generation：在隔离 staging 中解析和校验，停止 Host 后才切换 `active`，失败只回退本次事务，并保留 `lastKnownGood`。profile-manager 使用持久化事务 journal 记录 `staging`、`verified`、`prepared`、`activating`、`health-checking`、`committed` 与 `rolled-back`，确保 launcher 在任一阶段崩溃后可以幂等继续或回退。开放市场安装前必须先具备不读取正常第三方组合的 Safe Mode 和定点禁用能力。
 
 ## 4. 被否决的备选
 

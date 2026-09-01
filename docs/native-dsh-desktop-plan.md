@@ -74,8 +74,8 @@ anywhere-labs 与 dataelement 的桌面项目只作为固定 commit 的外部参
 | home patch | `~/.dsh/cordis.patch.yml` | 用户 | 否 |
 | 会话日志 | `~/.dsh/sessions/**` | DSH | 否 |
 | domain storage | `~/.dsh/storages` | DSH/用户 | 否 |
-| 桌面 profile | `~/.dsh/profiles/desktop` | 桌面壳与用户共同使用 | 仅满足修订校验时 |
-| Safe Mode profile（市场前置能力） | `~/.dsh/profiles/desktop-safe-mode` | launcher/profile manager | 只管理自身文件，不自动修改正常 profile |
+| 桌面 profile | `~/.dsh/profiles/desktop` | `profile-manager` 与用户共同使用 | 仅满足修订校验时 |
+| Safe Mode profile（市场前置能力） | `~/.dsh/profiles/desktop-safe-mode` | launcher/`profile-manager` | 只管理自身文件，不自动修改正常 profile |
 | Electron userData | macOS Application Support 下的专属目录 | 桌面壳 | 是 |
 | 渲染会话 | `persist:dsh-desktop-renderer` | 桌面壳 | 是 |
 
@@ -87,7 +87,7 @@ profile 名采用 `desktop`。它不是上游官方模板名；上游 `PROFILE_T
 
 只有通过 `dsh plugin --profile desktop ...` 首次管理时，上游才以 `DEFAULT_PROFILE_BUNDLES` 做最小初始化，初始 bundle 仅有 `@deepseek-ai/dsh-base`。
 
-上游不会为已存在的非模板 profile 重排 bundle。把 `dsh-base`、`dsh-web-app` 与本插件写入新 profile，并修复其前缀、保留第三方 bundle 顺序，属于本项目 `shell-core` 的 `reconcileDesktopProfile()`。
+上游不会为已存在的非模板 profile 重排 bundle。把 `dsh-base`、`dsh-web-app` 与本插件写入新 profile，并修复其前缀、保留第三方 bundle 顺序，属于本项目 `profile-manager` 的 `reconcileDesktopProfile()`。
 
 `reconcileDesktopProfile()` 不能用固定清单覆盖整个 profile，也不能修改其他 profile。
 
@@ -176,7 +176,7 @@ v1 不采用把 profile 文件与 home 级 `settings.yaml`、`cordis.patch.yml` 
 
 1. 取得 home lease。
 2. 在自动修改 profile 前，记录目标文件的存在性、内容和 SHA-256。
-3. 运行 `reconcileDesktopProfile()`，记录本次自动修改后的 SHA-256。
+3. 由 `profile-manager` 运行 `reconcileDesktopProfile()`，记录本次自动修改后的 SHA-256。
 4. 候选 Host 子进程完成结构化握手、通过稳定性窗口且 BrowserWindow 挂载成功后，将修改后版本标记为 healthy。
 5. 如果本次启动失败且确实自动修改过 profile，只在当前文件仍等于“本次修改后 SHA”时恢复修改前内容。
 6. 如果当前 SHA 已变化，说明用户或其他程序做过修改；停止自动恢复并给出诊断，绝不覆盖。
@@ -204,7 +204,9 @@ Electron launcher 在 Host 启动前已经存在，并且不加载 DSH 或第三
 
 v1 的 launcher-owned 恢复面只提供启动日志摘要、重试、退出和 lease 诊断，不在 Electron Main 中复制 DSH 设置、会话或市场业务。
 
-引入插件市场前必须增加非破坏性的 Safe Mode：停止正常 Host 后，以独立的 `desktop-safe-mode` profile 启动 `@deepseek-ai/dsh-base` 与 `@deepseek-ai/dsh-web-app`；该 profile 不读取正常 `desktop` profile 的第三方 bundle、依赖树或 patch layer，但仍复用同一 home 中的凭据、会话和用户数据。
+引入插件市场前必须增加非破坏性的 Safe Mode：停止正常 Host 后，以独立的 `desktop-safe-mode` profile 启动 `@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app` 与本项目最小第一方 bundle `desktop-recovery-bridge`。该 profile 不读取正常 `desktop` profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，但仍复用同一 home 中的凭据、会话和用户数据。
+
+`desktop-recovery-bridge` 只等待官方 `connection` 服务，并通过与正常 Desktop 相同的 Host-control surface 契约发布 authenticated recovery URL。它不包含市场 catalog、产品 settings、profile 变更、窗口逻辑或更新策略。即使 Safe Mode Host 或该 bridge 失败，launcher-owned 的日志摘要、lease 诊断、重试和退出仍然可用。
 
 Safe Mode 不自动改写正常 profile。禁用或卸载某个第三方插件必须由用户明确选择，并经 `desktopProfileManager` 对准确插件 generation 执行事务。故障归因应综合 Host 日志、renderer 错误、profile manifest、lockfile、bundle/loader id、依赖关系和 patch row，不得仅凭“最后安装”猜测责任插件。
 
@@ -218,9 +220,11 @@ deepseek-harness-desktop/
 │   └── desktop-launcher/        # Electron 自举入口、应用身份、素材与打包配置
 ├── packages/
 │   ├── desktop-plugin/          # DSH bundle 插件，Desktop 产品集成主体
-│   ├── desktop-contracts/       # Host 插件与 launcher 之间可序列化的窄控制契约
+│   ├── desktop-recovery-bridge/ # E3 前置的最小第一方 Safe Mode surface bridge
+│   ├── desktop-contracts/       # 按能力分入口、独立版本的可序列化窄控制契约
 │   ├── host-supervisor/         # 独立 Host 进程、握手、就绪探测、重启与有界关停
-│   ├── shell-core/              # Electron 生命周期、窗口、托盘、日志、profile 准备与恢复
+│   ├── profile-manager/         # ProfileRef、reconcile、修订恢复与未来 generation 事务
+│   ├── shell-core/              # Electron 生命周期、窗口、托盘、日志与跨组件编排
 │   └── home-lease/              # DSH home 排他 lease 与 CLI 复用
 ├── scripts/
 │   ├── dsh-native.mjs           # 带 lease 的配套 CLI 入口
@@ -285,23 +289,37 @@ Electron launcher 负责：
 
 这条边界保证“Desktop 是插件”，同时承认插件不能创建加载它的 Host。launcher 是自举适配器，不是第二套 Desktop 产品逻辑。
 
-`desktop-contracts` 只放置跨边界消息、服务定义和契约测试，不依赖 Electron。所有消息使用显式 schema 与 protocol version；未知类型、错误 generation、重复 ready 和失效 capability 一律拒绝。
+Safe Mode 使用相同链路，但 surface publisher 换成 `desktop-recovery-bridge`。Host-control 契约不根据 publisher 包名改变；launcher 只接受满足 mode、profile、capability、lease generation、Host 身份与消息 schema 的 surface。
+
+`desktop-contracts` 只放置跨边界消息、服务定义和契约测试，不依赖 Electron。一个物理包内按 `host-control`、`profile-manager`、`updater`、`secure-store`、`remote-bridge` 等 subpath export 隔离能力，每项能力拥有独立的 `{ name, major, minor }` 版本。
+
+同一 major 内只允许增加可选字段或协商后的新消息，major 不匹配直接失败。双方先协商 minor，发送方不得发送协商版本不支持的消息；未知类型、错误 generation、重复 ready 和失效 capability 一律拒绝。每个受支持版本都保留双向契约 fixture。
 
 以后新增原生能力时，每项能力使用独立服务，例如 `desktopUpdater` 或 `desktopSecureStore`；不得扩展成万能对象。
 
-### 4.2 `shell-core` 的职责
+Host 控制通道的 capability 只认证 launcher 所启动的 Host 进程，不能证明 Host 内是哪一个插件调用了服务。第三方插件与第一方插件同进程运行时，包依赖或服务名不是安全边界。profile 变更、Desktop 更新和密钥支持的操作必须再经过能力自身的策略校验与 launcher-owned 本地用户确认；`desktopSecureStore` 只提供签名、解密、封装或删除等窄操作，不向 Host 返回原始私钥。
+
+### 4.2 `profile-manager` 的职责
+
+- 定义和校验 `ProfileRef`，不硬编码 `desktop`。
+- 通过 `reconcileDesktopProfile(ProfileRef)` 初始化或修复本项目拥有的 profile 投影。
+- 在修改前记录存在性和 SHA-256，并执行白名单、修订校验和原子恢复。
+- 创建和校验 Safe Mode profile 投影，但不在 Safe Mode 启动时自动修改正常 profile。
+- 在 E3 引入后拥有不可变 generation ledger、事务 journal、drift 检测、定点禁用与回滚；Electron 和产品 UI 不成为第二权威。
+- 不依赖 Electron；所有写入必须发生在调用方已经持有对应 home lease 时。
+
+### 4.3 `shell-core` 的职责
 
 - 解析但不篡改 DSH home。
-- 获取和释放 home lease。
-- 通过 `reconcileDesktopProfile(ProfileRef)` 初始化或修复指定桌面 profile。
-- 为 launcher 编排 profile 准备、`host-supervisor`、窗口和恢复状态；官方 `boot()`、`provideCmdline()` 与 `desktopSurface` proxy 的注入只发生在 Host runner 子进程。
+- 通过 `home-lease` 获取和释放 lease，通过 `profile-manager` 准备或恢复 profile。
+- 为 launcher 编排 `profile-manager`、`host-supervisor`、窗口和恢复状态；官方 `boot()`、`provideCmdline()` 与 `desktopSurface` proxy 的注入只发生在 Host runner 子进程。
 - 管理 BrowserWindow、Tray、全局快捷键、窗口状态和外链策略。
 - 有界关停 Host 子进程和 Electron 资源。
 - 输出结构化本地日志。
-- 执行 profile 所有权范围内的启动恢复。
+- 编排 `profile-manager` 在所有权范围内执行启动恢复。
 - 提供测试探针，但不包含产品或 PKM 文案。
 
-### 4.3 产品配置的职责
+### 4.4 产品配置的职责
 
 `desktop-launcher` 与 `desktop-plugin` 共享一份只含产品差异的配置：
 
@@ -318,7 +336,7 @@ Electron launcher 负责：
 
 纯壳不得包含任何 PKM workspace seed、memoryRoot/PARA 创建、PKM 路由、工作台状态或领域专用冒烟。本仓库独立拥有自己的需求、代码、发布和升级验证，不依赖其他产品仓库。
 
-### 4.4 后续功能的插件与原生边界
+### 4.5 后续功能的插件与原生边界
 
 后续功能独立组合，不继续扩张 `desktop-plugin`：
 
@@ -334,11 +352,15 @@ Electron launcher 负责：
 
 每个插件版本安装为不可变 generation；generation id 至少绑定 package name、精确版本和解析后 lockfile/制品摘要。generation 提升后不得原地修改，升级必须创建新 generation。
 
-每个 `ProfileRef` 分别记录 `desired`、`active` 与 `lastKnownGood`。profile manifest、依赖链接和 bundle 列表是 active generation 的物化投影，不能与 generation ledger 形成两个互相竞争的权威来源。
+每个 `ProfileRef` 分别记录 `desired`、`active` 与 `lastKnownGood`。这三个字段只记录已经提交或明确请求的 generation 引用，不能代替事务 journal。profile manifest、依赖链接和 bundle 列表是 active generation 的物化投影，不能与 generation ledger 形成两个互相竞争的权威来源。
+
+每次 profile 变更都写入可恢复的事务 journal，状态依次为 `staging`、`verified`、`prepared`、`activating`、`health-checking`，最后进入 `committed` 或 `rolled-back`。每个状态转移先原子持久化意图和前后 generation，再执行外部副作用；重启后由 `profile-manager` 根据 journal、当前投影和 Host 健康记录幂等继续或回退，不能只靠目录是否存在猜测。
 
 进入生效阶段前先停止接收新任务并 dispose Host，再原子切换 profile generation。候选 Host 启动失败时，只回退本次 profile 事务，然后重新启动旧 generation。
 
 候选 Host 通过稳定性窗口后才更新 `active` 与 `lastKnownGood`。至少保留上一组健康 generation；清理只处理超过保留策略且未被 `desired`、`active`、`lastKnownGood` 引用的 generation。
+
+v1 在 Desktop 完全退出后仍允许用户通过标准 `dsh plugin` 管理 `desktop` profile。E3 把某个 `ProfileRef` 纳入 generation 管理后，直接修改其 manifest、lockfile、bundle 或依赖链接会被标记为 `drift`；`profile-manager` 只能让用户显式选择“导入为新 generation”或“恢复 active 投影”，不得静默覆盖或把未知状态直接标记为 healthy。
 
 React、Cordis 和 `@deepseek-ai/*` 等 Host singleton 由发行版兼容性清单声明所有权与支持范围。generation 校验必须确认这些依赖解析到 Host 的安装闭包，不能仅靠包名正则猜测兼容性。
 
@@ -350,9 +372,13 @@ React、Cordis 和 `@deepseek-ai/*` 等 Host singleton 由发行版兼容性清�
 
 远程访问保持 DSH Host 只绑定随机 loopback 端口。显式启用时由独立 bridge 暴露受限远程 surface；配对使用短期随机挑战和本机确认，互联网 tunnel/relay 只能转发 bridge，绝不能把 Harness 重新绑定到公网。bridge 不得根据远端 IP 自动授权，也不得把本地 browser session 或拥有全部权限的 Host session 直接升级为设备身份。
 
-更新控制面必须能在普通 Host 和 `desktop-updater` 插件都无法启动时工作。launcher 只实现更新状态机、可信元数据/签名校验、下载、停止 Host、替换和 relaunch；兼容性解释、channel 策略和正常应用内 UI 仍属于插件。默认流程是先提示、用户同意后下载、再次明确选择后安装；跳过一个版本不能永久屏蔽后续版本。
+进入 E4 前必须针对当时固定的 DSH 基线完成授权可行性 prototype，证明 principal 可以从 carrier 传播到 Host，并在每个目标方法执行前强制检查 scope、审计和撤销。如果上游没有足够扩展点，E4 必须停在设计阶段，先实现或向上游贡献授权中间层；不能把检查下沉为 bridge allowlist 或 UI 隐藏。
 
-本节固定职责边界，不提前冻结具体协议。市场 provider、远程 relay、设备凭据格式和 updater channel 在进入实现前分别建立 ADR。
+更新控制面必须能在普通 Host 和 `desktop-updater` 插件都无法启动时工作。launcher 只实现更新状态机、可信元数据/签名校验、下载、停止 Host、替换和 relaunch；兼容性解释、channel 策略和正常应用内 UI 仍属于插件。
+
+插件提出的 channel 或 feed 策略必须由 launcher 校验并保存为 last-effective policy。应用内同时固化不可由 Host 插件替换的签名信任根与 emergency stable source；Host 无法启动时，launcher 只使用 last-effective policy，校验失败或缺失时退回 emergency stable source。默认流程是先提示、用户同意后下载、再次明确选择后安装；跳过一个版本不能永久屏蔽后续版本。
+
+Host-control v1 的精确 envelope、消息与协商规则由 [`docs/protocols/host-control.md`](protocols/host-control.md) 固定。市场 provider、generation 持久化布局、远程 relay、设备凭据格式和 updater channel 在各自进入实现前分别建立 ADR 与契约文档。
 
 ## 5. 启动与关停状态机
 
@@ -419,6 +445,8 @@ Host 在 ready 前失败时，launcher 保持运行并显示结构化失败阶�
 14. 远程授权必须在 Host 方法执行前强制检查，不能依赖 bridge allowlist、客户端隐藏按钮或 `isLoopback` 分支。
 15. 远程传输必须使用 TLS 或具有等价机密性与服务端认证的可信中继，并支持逐设备撤销和审计。
 16. 远程 principal 默认无权安装插件、写入凭据、切换 profile 或更新 Desktop；开放这些能力需要单独策略和本地确认。
+17. Host 控制通道只能认证 Host 进程，不能认证 Host 内的调用插件；敏感原生操作必须执行能力级策略，并在 launcher-owned UI 中取得本地用户确认。
+18. `desktopSecureStore` 不向 Host 返回原始私钥或可长期复用的主秘密，只提供用途受限的密码学操作。
 
 ## 7. DSH 依赖与升级
 
@@ -505,10 +533,11 @@ README、关于页和诊断输出中的 DSH 版本必须从兼容性清单或依
 - home lease 进程树：supervisor/Host 身份记录、Host 重启期间持续持有、launcher 异常退出后的存活 Host 拒绝解锁。
 - lease 诊断：身份不明错误包含可复制的 `dsh-native doctor --unlock`，并在 profile 写入前退出。
 - desktop-plugin：bundle patch 可组合、无 `desktopSurface` 时降级、非 loopback 拒绝、connection 就绪后只 schedule 一次。
-- desktop-contracts：surface 描述严格校验，未知 kind/protocol 拒绝，错误 capability 或 lease generation 拒绝，契约包不依赖 Electron，也不存在通用原生调用入口。
+- desktop-contracts：surface 描述严格校验，major 不匹配、未知 kind、错误 capability 或 lease generation 被拒绝；minor 只允许 additive 演进；每个 subpath 有独立版本和双向 fixture；契约包不依赖 Electron，也不存在通用原生调用入口。
 - host-supervisor：独立 PID、握手超时、稳定性窗口、启动失败、异常退出、dispose ack、terminate/force-kill 升级和幂等停止。
 - profile reconcile：缺失 profile 初始化、官方 bundle 前缀修复、第三方 bundle 保序、无关 profile 不变。
 - profile 恢复：只恢复白名单、SHA 不匹配拒绝、缺失文件恢复、一次性 relaunch。
+- profile manager 边界：不依赖 Electron，只在调用方持有 home lease 时写入；未来受管 profile 的外部修改识别为 drift，不自动覆盖。
 - 关停：并发请求合并、dispose 超时、资源只释放一次。
 - 窗口状态：离屏回退、最大化、崩溃重载上限。
 - 设置：坏 YAML 可读报错，不覆盖用户文件。
@@ -558,13 +587,13 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ### M0：独立最小闭环（3–5 天）
 
-- 建立 workspace、`apps/desktop-launcher`、`packages/desktop-plugin`、`packages/desktop-contracts`、`packages/host-supervisor` 与 `packages/shell-core`。
+- 建立 workspace、`apps/desktop-launcher`、`packages/desktop-plugin`、`packages/desktop-contracts`、`packages/host-supervisor`、`packages/profile-manager` 与 `packages/shell-core`。`desktop-recovery-bridge` 是 E3 前置交付，不在 M0 实现。
 - 实现独立 Host runner、私有控制通道、结构化握手、稳定性窗口与有界关停；Electron Main 不直接调用 DSH `boot()`。
-- 在 `shell-core` 实现并测试 `reconcileDesktopProfile()`：初始化缺失 profile，修复本项目拥有的 bundle 前缀，并保留第三方 bundle。
+- 在 `profile-manager` 实现并测试 `reconcileDesktopProfile()`：初始化缺失 profile，修复本项目拥有的 bundle 前缀，并保留第三方 bundle。
 - 以本项目为唯一 source of truth 实现 Desktop 插件、Electron 自举和通用 shell 机制，不引入其他产品的领域行为或运行时依赖。
 - 仍使用隔离测试 home，跑通 `smoke:dsh-ui`。
 
-验收：新建与已有 `desktop` profile 都通过 reconcile 测试；独立 Host 子进程加载 `desktop-plugin`，插件经窄化的 `desktopSurface` 控制契约调度官方 DSH UI；终止 Host 不会同时终止 Electron 壳。
+验收：新建与已有 `desktop` profile 都通过 Electron-independent `profile-manager` 的 reconcile 测试；独立 Host 子进程加载 `desktop-plugin`，插件经窄化且 publisher-neutral 的 `desktopSurface` 控制契约调度官方 DSH UI；终止 Host 不会同时终止 Electron 壳。
 
 ### M1：共享 home 与单 Host（1–1.5 天）
 
@@ -614,6 +643,8 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 - DSH Host 在独立子进程运行；Electron Main 与 renderer 不加载 Host 或第三方插件代码，Host 崩溃时壳仍可恢复。
 - 缺少 `desktopSurface` 时插件可读降级，普通 DSH 组合仍能继续启动。
 - Host 与 launcher 之间不存在通用 `desktopRuntime`；v1 只暴露经 schema、capability 和 generation 校验的窄 surface 控制能力。
+- `profile-manager` 独立于 Electron，`shell-core` 不直接拥有 profile 状态或 generation 权威。
+- `desktop-contracts` 按能力分入口和版本；Host-process capability 不被当作插件身份。
 - 桌面端和配套 CLI 的会话能够双向、顺序继续。
 - 受支持入口遵守同 home 单 Host 规则。
 - 任意桌面启动失败都不会自动覆盖 home 级设置、patch、会话或 storage。
@@ -638,6 +669,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 - 增加 Developer ID 签名、hardened runtime、notarization 和可信发布通道。
 - 发布机器可读兼容性清单，建立升级前备份、迁移预检和禁止不安全降级规则。
 - launcher 提供 Host 无法启动时仍可用的最小更新状态机，`desktop-updater` 提供正常应用内 UI、兼容性解释与 channel 策略。
+- launcher 持久化通过校验的 last-effective policy，并内置不可由 Host 替换的签名信任根与 emergency stable source。
 - 先实现手动检查、下载确认和安装确认，再评估后台下载；不默认退出时自动安装。
 - 支持跳过单个版本，后续新版本仍应提示；系统长时间休眠恢复后按节流策略重新检查。
 - 更新请求默认不发送持久 installation id；需要灰度时另行评估最小标识。
@@ -646,9 +678,11 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 - 先发布只读 catalog 和兼容性检查，再开放安装。
 - 建立 `MarketProvider`、`PluginPackageManager` 与 `PluginTrustPolicy` 三个独立边界。
-- 开放安装前先交付 `desktop-safe-mode` 与可追溯的故障归因/定点禁用流程。
+- 开放安装前先交付由 `dsh-base`、`dsh-web-app`、`desktop-recovery-bridge` 组成的 `desktop-safe-mode`，以及可追溯的故障归因/定点禁用流程。
 - 安装使用 staging、精确版本、校验和、发行者信息、不可变 generation、事务记录和失败回滚。
 - 每个 `ProfileRef` 维护 `desired`、`active`、`lastKnownGood`；停止 Host 后才切换，至少保留上一组健康 generation。
+- generation 事务 journal 使用 `staging`、`verified`、`prepared`、`activating`、`health-checking`、`committed`、`rolled-back` 状态，并能在任一 launcher 崩溃点幂等恢复。
+- 受管 profile 的外部修改作为 drift 处理，只能显式导入为新 generation 或恢复 active 投影。
 - 使用兼容性清单验证 Host singleton 和 peer resolution，不能让插件私带第二份 React、Cordis 或不兼容的 `@deepseek-ai/*` runtime。
 - 解决第三方 client bundle 的公开构建契约，不能要求开发者复制仓库私有 preset。
 - 把可执行插件与 preset/配置包定义为不同制品类型，后者采用预览、冲突处理和原子导入，不继承代码安装授权。
@@ -656,6 +690,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ### E4：配对式远程访问
 
+- 先在固定 DSH 基线上验证 principal 传播、逐方法 scope 强制、审计和撤销扩展点；验证失败时不进入远程实现。
 - 第一阶段只做显式启用的 LAN/可信网络访问，第二阶段才评估互联网 relay。
 - Harness 始终只绑定 loopback；独立 bridge 暴露受限 surface，公网 tunnel/relay 只能指向 bridge。
 - 每台设备单独配对、授权和撤销，Host 记录 principal、scope 与审计事件。
