@@ -1,0 +1,16 @@
+{
+  "name": "deepseek-harness-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "check": "pnpm run check:docs",
+    "check:docs": "node scripts/verify-docs.mjs"
+  }
+}
+

@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.pnpm-store/
+.tmp/
+coverage/
+dist/
+node_modules/
+out/
+playwright-report/
+release/
+test-results/
+*.dmg
+*.log
+*.zip
+
