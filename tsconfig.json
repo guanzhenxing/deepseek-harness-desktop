@@ -6,6 +6,11 @@
     "declarationMap": false,
     "noEmit": true
   },
-  "include": ["vitest.config.ts", "vitest.integration.config.ts"],
-  "references": []
+  "include": [
+    "vitest.config.ts",
+    "vitest.integration.config.ts",
+    "packages/*/test/**/*.ts",
+    "apps/*/test/**/*.ts"
+  ],
+  "references": [{ "path": "packages/desktop-contracts" }]
 }
