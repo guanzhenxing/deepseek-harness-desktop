@@ -12,5 +12,8 @@
     "packages/*/test/**/*.ts",
     "apps/*/test/**/*.ts"
   ],
-  "references": [{ "path": "packages/desktop-contracts" }]
+  "references": [
+    { "path": "packages/desktop-contracts" },
+    { "path": "packages/profile-manager" }
+  ]
 }

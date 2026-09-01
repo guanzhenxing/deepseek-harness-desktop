@@ -19,7 +19,7 @@
     "smoke:host-crash": "node tests/smoke/host-crash.mjs",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:unit": "node --test scripts/verify-boundaries.test.mjs && vitest run",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --force --pretty false"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

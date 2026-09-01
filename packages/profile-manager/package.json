@@ -1,0 +1,19 @@
+{
+  "name": "@dsh-desktop/profile-manager",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-app-boot": "0.1.2-alpha.3"
+  }
+}
