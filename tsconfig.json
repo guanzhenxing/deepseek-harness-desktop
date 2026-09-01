@@ -14,6 +14,7 @@
   ],
   "references": [
     { "path": "packages/desktop-contracts" },
+    { "path": "packages/desktop-plugin" },
     { "path": "packages/profile-manager" }
   ]
 }

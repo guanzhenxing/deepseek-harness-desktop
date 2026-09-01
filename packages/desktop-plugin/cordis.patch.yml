@@ -1,0 +1,11 @@
+# Desktop owns browser handoff; the official Web runtime keeps all other keys.
+- id: web-runtime
+  config:
+    openBrowser: false
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+
+- insert:
+    - id: desktop-surface
+      name: '@dsh-desktop/desktop-plugin'
