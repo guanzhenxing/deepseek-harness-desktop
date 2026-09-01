@@ -10,6 +10,10 @@
 
 **Spec:** `docs/native-dsh-desktop-plan.md` and `docs/adr/0001-build-own-native-dsh-shell.md`
 
+**Completed:** 2026-09-01
+
+**Result:** Repository bootstrap, accepted ADRs, Host-control 1.0, operating documents, and the executable documentation gate were completed without implementing M0 product code.
+
 ## Global Constraints
 
 - v1 targets macOS and personal local use; it does not implement public distribution, remote access, plugin market installation, or automatic updates.
@@ -39,7 +43,7 @@
 - Consumes: Node.js 24.11.1 and pnpm 11.7.0.
 - Produces: `pnpm check` and `pnpm check:docs`, which later tasks and CI use as the repository-wide pre-M0 gate.
 
-- [ ] **Step 1: Initialize Git and preserve the reviewed design as the repository baseline**
+- [x] **Step 1: Initialize Git and preserve the reviewed design as the repository baseline**
 
 Run:
 
@@ -51,7 +55,7 @@ git commit -m "docs: record initial desktop design"
 
 Expected: the repository has a `main` branch and one baseline commit containing the two reviewed design documents and this execution plan.
 
-- [ ] **Step 2: Add deterministic workspace metadata**
+- [x] **Step 2: Add deterministic workspace metadata**
 
 Create a private ESM root package named `deepseek-harness-desktop`, pin `packageManager` to `pnpm@11.7.0`, set Node engines to `^22.19.0 || >=24.0.0`, and define these scripts:
 
@@ -64,7 +68,7 @@ Create a private ESM root package named `deepseek-harness-desktop`, pin `package
 
 The workspace globs are `apps/*` and `packages/*`. `.node-version` contains `24.11.1`. The root remains `private: true` and `license: UNLICENSED` because public licensing is not part of the personal-use v1 decision.
 
-- [ ] **Step 3: Add the documentation verifier**
+- [x] **Step 3: Add the documentation verifier**
 
 Implement `scripts/verify-docs.mjs` using only Node built-ins. It must:
 
@@ -74,11 +78,11 @@ Implement `scripts/verify-docs.mjs` using only Node built-ins. It must:
 4. parse local Markdown link targets, remove anchors and line suffixes, and reject links whose target file does not exist;
 5. print a concise success summary and exit non-zero on any violation.
 
-- [ ] **Step 4: Add the CI job**
+- [x] **Step 4: Add the CI job**
 
 Create one GitHub Actions job on `ubuntu-latest` for pushes and pull requests. It checks out the repository, installs Node.js 24.11.1 and pnpm 11.7.0, installs with `--frozen-lockfile`, and runs `pnpm check`.
 
-- [ ] **Step 5: Generate and verify the lockfile**
+- [x] **Step 5: Generate and verify the lockfile**
 
 Run:
 
@@ -89,7 +93,7 @@ corepack pnpm@11.7.0 check
 
 Expected at this intermediate point: lockfile generation succeeds; `check` may report the required documentation that Tasks 3 and 4 create, but it must not crash or report an implementation error.
 
-- [ ] **Step 6: Commit the repository foundation**
+- [x] **Step 6: Commit the repository foundation**
 
 Run:
 
@@ -111,27 +115,27 @@ git commit -m "chore: bootstrap repository checks"
 - Consumes: the accepted launcher/plugin boundary in ADR-0001.
 - Produces: accepted decisions for recovery surface publication, profile state ownership, and independently versioned native capabilities.
 
-- [ ] **Step 1: Make Safe Mode surface publication internally consistent**
+- [x] **Step 1: Make Safe Mode surface publication internally consistent**
 
 Change Safe Mode from `dsh-base + dsh-web-app` to `dsh-base + dsh-web-app + desktop-recovery-bridge`. Specify that the bridge is a minimal first-party bundle, contains no market or product settings logic, and only publishes the authenticated recovery surface through the same Host-control contract used by the normal Desktop plugin.
 
-- [ ] **Step 2: Extract profile management from `shell-core`**
+- [x] **Step 2: Extract profile management from `shell-core`**
 
 Add `packages/profile-manager` to the target architecture. Move ownership of `ProfileRef`, `reconcileDesktopProfile()`, revision-checked restoration, Safe Mode projection, future generation ledger, and profile transaction journal into it. Keep `shell-core` as the Electron orchestration layer.
 
-- [ ] **Step 3: Define crash-recoverable market transaction phases**
+- [x] **Step 3: Define crash-recoverable market transaction phases**
 
 Record the durable phases `staging`, `verified`, `prepared`, `activating`, `health-checking`, `committed`, and `rolled-back`. State that `desired`, `active`, and `lastKnownGood` are committed references rather than the transaction journal. Define externally modified managed profiles as drift that requires explicit import or repair after market management begins.
 
-- [ ] **Step 4: Define updater and remote design gates**
+- [x] **Step 4: Define updater and remote design gates**
 
 Require the launcher to retain a validated last-effective update policy plus an immutable trust root/emergency stable source before boot-independent updates are implemented. Require an upstream authorization-extension feasibility prototype before E4; if method-level principal/scope enforcement is unavailable, remote control cannot proceed as designed.
 
-- [ ] **Step 5: Define native capability security and evolution**
+- [x] **Step 5: Define native capability security and evolution**
 
 Keep one physical `desktop-contracts` package initially but require capability-specific subpath exports, independent `{name, major, minor}` versions, additive minor changes, fatal major mismatch, and contract fixtures. State explicitly that Host-process authentication does not authenticate the calling plugin; profile changes, updates, and secret-backed operations therefore require capability-specific policy and launcher-owned user confirmation.
 
-- [ ] **Step 6: Commit the architecture decisions**
+- [x] **Step 6: Commit the architecture decisions**
 
 Run:
 
@@ -150,15 +154,15 @@ git commit -m "docs: close pre-m0 architecture gaps"
 - Consumes: ADR-0001 through ADR-0004.
 - Produces: the dependency direction and Host-control protocol that M0 packages must implement.
 
-- [ ] **Step 1: Write the architecture document**
+- [x] **Step 1: Write the architecture document**
 
 Document the launcher, Host runner, normal Desktop plugin, recovery bridge, DSH Web UI, profile manager, home lease, and future capability plugins. Include process/trust boundaries, dependency rules, normal boot, Safe Mode boot, and extension rules. Make clear that product plugins request native effects through contracts and never import Electron.
 
-- [ ] **Step 2: Write Host-control protocol version 1.0**
+- [x] **Step 2: Write Host-control protocol version 1.0**
 
 Define a transport-neutral envelope containing protocol identity, version, lease generation, capability, monotonic sequence, and a typed message. Define launcher-to-Host `accept` and `dispose` messages and Host-to-launcher `hello`, `phase`, `surface`, `ready`, `dispose-ack`, and `fatal` messages. Specify state transitions, validation, version negotiation, loopback URL rules, redaction, duplicate-message handling, and the normal/recovery surface sources.
 
-- [ ] **Step 3: Cross-check the architecture against all accepted ADRs**
+- [x] **Step 3: Cross-check the architecture against all accepted ADRs**
 
 Run:
 
@@ -168,7 +172,7 @@ rg -n "desktop-recovery-bridge|profile-manager|protocol|user confirmation|Safe M
 
 Expected: every accepted decision has a corresponding architecture or protocol statement, and no document describes Safe Mode as only two bundles.
 
-- [ ] **Step 4: Commit the architecture contracts**
+- [x] **Step 4: Commit the architecture contracts**
 
 Run:
 
@@ -190,23 +194,23 @@ git commit -m "docs: define architecture and host control protocol"
 - Consumes: the implementation plan's home/profile rules and ADR decisions.
 - Produces: user-facing operating constraints and contributor-facing development/review/release gates.
 
-- [ ] **Step 1: Define data layout and ownership**
+- [x] **Step 1: Define data layout and ownership**
 
 Document the DSH home, profile, lease, transaction, Electron userData, logs, and test-home paths. For every path, name the owner, authority, mutation policy, backup status, and migration rule. Reserve future generation storage without claiming that E3 is implemented.
 
-- [ ] **Step 2: Define the security model**
+- [x] **Step 2: Define the security model**
 
 Document trusted and untrusted boundaries, the non-sandboxed Host plugin model, IPC validation, local user confirmation for privileged effects, secret-store non-export, remote and updater prerequisites, logging redaction, and private vulnerability reporting for the current non-public project.
 
-- [ ] **Step 3: Define the development workflow**
+- [x] **Step 3: Define the development workflow**
 
 Document prerequisites and commands, short-lived branch naming, issue/spec/ADR rules, contract-first tests, integration and failure-injection gates, packaged-artifact smoke tests, security/compatibility review triggers, release-candidate observation, and the rule that DSH baseline upgrades do not share a change with architectural features.
 
-- [ ] **Step 4: Write the project entry point and ADR index**
+- [x] **Step 4: Write the project entry point and ADR index**
 
 The README must state current pre-M0 status, v1 scope, shared-home concurrency rule, supported CLI direction, verification commands, and links to every source-of-truth document. The ADR index must list ADR-0001 through ADR-0004 with status and one-line scope.
 
-- [ ] **Step 5: Commit the operating documentation**
+- [x] **Step 5: Commit the operating documentation**
 
 Run:
 
@@ -224,7 +228,7 @@ git commit -m "docs: define project operating model"
 - Consumes: every artifact from Tasks 1 through 4.
 - Produces: a clean repository whose documented M0 prerequisites are mechanically checked.
 
-- [ ] **Step 1: Run the repository documentation gate**
+- [x] **Step 1: Run the repository documentation gate**
 
 Run:
 
@@ -235,17 +239,19 @@ corepack pnpm@11.7.0 check
 
 Expected: both commands exit 0.
 
-- [ ] **Step 2: Check for stale architecture language**
+- [x] **Step 2: Check for stale architecture language**
 
 Run:
 
 ```bash
-rg -n "Safe Mode.*dsh-base.*dsh-web-app|shell-core.*reconcileDesktopProfile|desktopRuntime" README.md SECURITY.md docs
+if rg -n 'shell-core.*reconcileDesktopProfile' README.md SECURITY.md docs/native-dsh-desktop-plan.md docs/architecture.md docs/adr; then exit 1; fi
+rg -n 'desktopRuntime' docs/native-dsh-desktop-plan.md docs/architecture.md docs/adr
+rg -n 'desktop-safe-mode|desktop-recovery-bridge' docs/native-dsh-desktop-plan.md docs/architecture.md docs/adr
 ```
 
-Expected: Safe Mode references include the recovery bridge; profile reconciliation ownership points to `profile-manager`; `desktopRuntime` occurs only in statements prohibiting a universal runtime.
+Expected: no stale `shell-core` ownership remains; `desktopRuntime` occurs only in statements prohibiting a universal runtime; Safe Mode references include the recovery bridge.
 
-- [ ] **Step 3: Check repository state and history**
+- [x] **Step 3: Check repository state and history**
 
 Run:
 
@@ -256,7 +262,7 @@ git log --oneline --decorate -5
 
 Expected: only the plan checkbox update remains before the final commit, and history contains independent baseline, repository, architecture, contract, and operating-document changes.
 
-- [ ] **Step 4: Mark this plan complete and commit it**
+- [x] **Step 4: Mark this plan complete and commit it**
 
 Change every task checkbox from `[ ]` to `[x]`, rerun `corepack pnpm@11.7.0 check`, then run:
 
