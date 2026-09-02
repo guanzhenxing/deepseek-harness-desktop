@@ -1,0 +1,20 @@
+{
+  "name": "@dsh-desktop/desktop-launcher",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/main.js",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "electron .",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@dsh-desktop/host-supervisor": "workspace:*",
+    "@dsh-desktop/profile-manager": "workspace:*",
+    "@dsh-desktop/shell-core": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "44.1.0"
+  }
+}

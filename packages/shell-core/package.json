@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-desktop/profile-manager",
+  "name": "@dsh-desktop/shell-core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,5 +12,9 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@dsh-desktop/desktop-contracts": "workspace:*",
+    "@dsh-desktop/host-supervisor": "workspace:*"
   }
 }

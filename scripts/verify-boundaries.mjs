@@ -24,6 +24,7 @@ export async function findBoundaryViolations(root) {
   const violations = []
   const packageRoot = path.join(root, 'packages')
   for (const file of await sourceFiles(packageRoot)) {
+    const relativeFile = path.relative(root, file)
     const imports = importsOf(await readFile(file, 'utf8'))
     for (const specifier of imports) {
       if (specifier === 'electron' || specifier.startsWith('electron/')) {
@@ -37,6 +38,26 @@ export async function findBoundaryViolations(root) {
         violations.push({
           file: path.relative(root, file),
           rule: 'packages-no-launcher',
+          specifier,
+        })
+      }
+      if (
+        relativeFile === path.join('packages', 'host-supervisor', 'src', 'index.ts') &&
+        specifier.includes('host-runner')
+      ) {
+        violations.push({
+          file: relativeFile,
+          rule: 'supervisor-root-no-host-runner',
+          specifier,
+        })
+      }
+      if (
+        relativeFile.startsWith(path.join('packages', 'profile-manager', 'src') + path.sep) &&
+        specifier === '@deepseek-ai/dsh-app-boot'
+      ) {
+        violations.push({
+          file: relativeFile,
+          rule: 'profile-manager-no-dsh-boot',
           specifier,
         })
       }

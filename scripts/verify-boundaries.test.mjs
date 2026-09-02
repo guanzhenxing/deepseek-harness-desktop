@@ -58,3 +58,40 @@ test('allows the Electron Host entry adapter to import the Host runner', async (
     await rm(root, { recursive: true })
   }
 })
+
+test('rejects exporting the DSH Host runner from the supervisor root entry', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-boundaries-'))
+  try {
+    const sourceDir = path.join(root, 'packages', 'host-supervisor', 'src')
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(path.join(sourceDir, 'index.ts'), "export * from './host-runner.js'\n")
+
+    const violations = await findBoundaryViolations(root)
+    assert.deepEqual(
+      violations.map((item) => item.rule),
+      ['supervisor-root-no-host-runner'],
+    )
+  } finally {
+    await rm(root, { recursive: true })
+  }
+})
+
+test('rejects loading the DSH boot runtime through profile-manager', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-boundaries-'))
+  try {
+    const sourceDir = path.join(root, 'packages', 'profile-manager', 'src')
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(
+      path.join(sourceDir, 'reconcile.ts'),
+      "import { initProfile } from '@deepseek-ai/dsh-app-boot'\n",
+    )
+
+    const violations = await findBoundaryViolations(root)
+    assert.deepEqual(
+      violations.map((item) => item.rule),
+      ['profile-manager-no-dsh-boot'],
+    )
+  } finally {
+    await rm(root, { recursive: true })
+  }
+})

@@ -1,5 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -53,7 +55,12 @@ const PROFILE_ROOT_CONFIG = `# dsh desktop profile root; compose through bundle 
 []
 `
 const PROFILE_ROOT_FILENAME = 'cordis.yml'
-const INSTALL_ANCHOR = fileURLToPath(new URL('../package.json', import.meta.url))
+const DSH_INSTALL_ANCHOR = realpathSync.native(
+  createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'),
+)
+const DESKTOP_INSTALL_ANCHOR = realpathSync.native(
+  fileURLToPath(new URL('../package.json', import.meta.url)),
+)
 
 type Deferred<Value> = {
   promise: Promise<Value>
@@ -198,10 +205,19 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
     options.transport.postMessage(writer.next({ kind: 'phase', phase: 'booting' }))
     process.env.DSH_HOME = options.home
 
-    const installAnchor = options.installAnchor ?? INSTALL_ANCHOR
+    const installAnchor = options.installAnchor ?? DSH_INSTALL_ANCHOR
     const profile = loadProfile('dsh-desktop', options.profileName, installAnchor, options.home)
     await writeFile(path.join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
-    await healProfilesModuleFallback({ installAnchor, profile })
+    // The upstream CLI owns the complete official DSH closure. The Desktop app
+    // anchor adds this repository's private bundle; fallback healing is additive.
+    await healProfilesModuleFallback({ installAnchor, profile, home: options.home })
+    if (DESKTOP_INSTALL_ANCHOR !== installAnchor) {
+      await healProfilesModuleFallback({
+        installAnchor: DESKTOP_INSTALL_ANCHOR,
+        profile,
+        home: options.home,
+      })
+    }
     const homePatches =
       loadOptionalPatches('dsh-desktop', path.join(options.home, 'cordis.patch.yml')) ?? []
     const patches = structuredClone([

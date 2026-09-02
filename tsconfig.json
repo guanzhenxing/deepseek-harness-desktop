@@ -13,9 +13,11 @@
     "apps/*/test/**/*.ts"
   ],
   "references": [
+    { "path": "apps/desktop-launcher" },
     { "path": "packages/desktop-contracts" },
     { "path": "packages/desktop-plugin" },
     { "path": "packages/host-supervisor" },
-    { "path": "packages/profile-manager" }
+    { "path": "packages/profile-manager" },
+    { "path": "packages/shell-core" }
   ]
 }

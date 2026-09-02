@@ -1,7 +1,5 @@
 import path from 'node:path'
 
-import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
-
 export type ProfileRef = Readonly<{
   home: string
   name: string
@@ -14,11 +12,16 @@ export function createProfileRef(home: string, name: string): ProfileRef {
   if (resolvedHome === path.parse(resolvedHome).root) {
     throw new Error('ProfileRef home cannot be the filesystem root')
   }
-  let dir: string
-  try {
-    dir = resolveProfileDir(name, resolvedHome)
-  } catch {
+  if (
+    name === '' ||
+    name === '.' ||
+    name === '..' ||
+    name === 'node_modules' ||
+    name.includes('/') ||
+    name.includes('\\')
+  ) {
     throw new Error(`invalid profile name ${JSON.stringify(name)}`)
   }
+  const dir = path.join(resolvedHome, 'profiles', name)
   return Object.freeze({ home: resolvedHome, name, dir })
 }

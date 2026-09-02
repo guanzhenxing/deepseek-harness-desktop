@@ -1,8 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { open, readFile, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-
-import { initProfile, readProfileManifest, type ProfileManifest } from '@deepseek-ai/dsh-app-boot'
 
 import type { ProfileRef } from './profile-ref.js'
 
@@ -13,6 +11,24 @@ export const DESKTOP_BUNDLE_PREFIX = [
 ] as const
 
 const authorityBrand = Symbol('ProfileWriteAuthority')
+const PROFILE_PATCH_TEMPLATE = `# Your patch layer for this dsh profile, applied after every bundle layer:
+[]
+`
+const PROFILE_WORKSPACE = `packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false
+`
+
+type ProfileManifest = Record<string, unknown> & {
+  dsh?: Record<string, unknown> & {
+    profile?: Record<string, unknown> & {
+      bundles?: unknown
+      patchReload?: unknown
+    }
+  }
+}
 
 export type IsolatedHomeAuthority = Readonly<{
   kind: 'm0-isolated-home'
@@ -39,6 +55,49 @@ export function createIsolatedHomeAuthority(home: string): IsolatedHomeAuthority
 
 function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex')
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseProfileManifest(raw: string): ProfileManifest {
+  const manifest: unknown = JSON.parse(raw)
+  if (!isRecord(manifest)) throw new Error('desktop profile manifest must hold a JSON object')
+  if (manifest.dsh !== undefined && !isRecord(manifest.dsh)) {
+    throw new Error('desktop profile dsh field must hold a JSON object')
+  }
+  if (manifest.dsh?.profile !== undefined && !isRecord(manifest.dsh.profile)) {
+    throw new Error('desktop profile field must hold a JSON object')
+  }
+  return manifest as ProfileManifest
+}
+
+async function writeInitialFile(filename: string, content: string): Promise<void> {
+  try {
+    await writeFile(filename, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
+}
+
+async function initializeProfile(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true })
+  await writeInitialFile(
+    path.join(dir, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: `dsh-profile-${path.basename(dir)}`,
+        private: true,
+        dependencies: {},
+        dsh: { profile: { bundles: DESKTOP_BUNDLE_PREFIX, patchReload: 'live' } },
+      },
+      undefined,
+      2,
+    )}\n`,
+  )
+  await writeInitialFile(path.join(dir, 'cordis.patch.yml'), PROFILE_PATCH_TEMPLATE)
+  await writeInitialFile(path.join(dir, 'pnpm-workspace.yaml'), PROFILE_WORKSPACE)
 }
 
 async function exists(filename: string): Promise<boolean> {
@@ -71,20 +130,29 @@ async function writeFileAtomic(filename: string, content: string): Promise<void>
 }
 
 function reconciledManifest(manifest: ProfileManifest): ProfileManifest {
-  const bundles = manifest.dsh?.profile?.bundles ?? []
+  const dsh = manifest.dsh ?? {}
+  const profile = dsh.profile ?? {}
+  const bundles = profile.bundles ?? []
   if (!Array.isArray(bundles) || bundles.some((bundle) => typeof bundle !== 'string')) {
     throw new Error('desktop profile bundle list must contain only package names')
+  }
+  if (
+    profile.patchReload !== undefined &&
+    profile.patchReload !== 'live' &&
+    profile.patchReload !== 'startup'
+  ) {
+    throw new Error('desktop profile patchReload must be live or startup')
   }
   const owned = new Set<string>(DESKTOP_BUNDLE_PREFIX)
   const thirdParty = bundles.filter((bundle) => !owned.has(bundle))
   return {
     ...manifest,
     dsh: {
-      ...manifest.dsh,
+      ...dsh,
       profile: {
-        ...manifest.dsh?.profile,
+        ...profile,
         bundles: [...DESKTOP_BUNDLE_PREFIX, ...thirdParty],
-        patchReload: manifest.dsh?.profile?.patchReload ?? 'live',
+        patchReload: profile.patchReload ?? 'live',
       },
     },
   }
@@ -117,9 +185,9 @@ export async function reconcileDesktopProfile(
   const beforeRaw =
     existed.get(manifestPath) === true ? await readFile(manifestPath, 'utf8') : undefined
 
-  initProfile(ref.dir, DESKTOP_BUNDLE_PREFIX, 'live')
+  await initializeProfile(ref.dir)
   const currentRaw = await readFile(manifestPath, 'utf8')
-  const current = readProfileManifest('dsh-desktop', ref.dir)
+  const current = parseProfileManifest(currentRaw)
   const desiredRaw = `${JSON.stringify(reconciledManifest(current), undefined, 2)}\n`
   if (desiredRaw !== currentRaw) await writeFileAtomic(manifestPath, desiredRaw)
 
