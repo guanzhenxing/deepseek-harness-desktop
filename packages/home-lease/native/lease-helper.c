@@ -142,6 +142,20 @@ static bool csv_contains(const char *csv, long value) {
     return false;
 }
 
+/* Whether a pid is still a live, non-zombie process. Scans use this to skip
+ * processes that died between the snapshot and inspection instead of failing
+ * the whole scan as unknown: a dead process cannot be a live writer. */
+static bool pid_exists(pid_t pid) {
+    struct kinfo_proc info;
+    size_t length = sizeof(info);
+    static int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, 0};
+    mib[3] = pid;
+    memset(&info, 0, sizeof(info));
+    if (sysctl(mib, 4, &info, &length, NULL, 0) != 0) return false;
+    return length >= sizeof(info) && info.kp_proc.p_pid == pid &&
+           info.kp_proc.p_stat != SZOMB;
+}
+
 static int cmd_scan(const char *excludeCsv, const char *entryCsv) {
     static int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
     size_t size = 0;
@@ -168,10 +182,21 @@ static int cmd_scan(const char *excludeCsv, const char *entryCsv) {
         /* Zombies have no executable to resolve and cannot be a live writer. */
         if (processes[index].kp_proc.p_stat == SZOMB) continue;
         if (csv_contains(excludeCsv, (long)pid)) continue;
-        int length = proc_pidpath(pid, path, sizeof(path));
+        int length = 0;
+        int diagErrno = 0;
+        for (int attempt = 0; attempt < 3 && length <= 0; attempt += 1) {
+            errno = 0;
+            length = proc_pidpath(pid, path, sizeof(path));
+            diagErrno = errno;
+            if (length <= 0 && !pid_exists(pid)) break;
+            if (length <= 0 && attempt < 2) usleep(3000);
+        }
         if (length <= 0) {
-            /* Same-uid process whose executable cannot be resolved: be honest
-             * about inconclusive scans instead of guessing. */
+            if (!pid_exists(pid)) continue;
+            fprintf(stderr, "lease-helper: scan unresolvable pid=%d errno=%d(%s) ppid=%d\n",
+                    pid, diagErrno, strerror(diagErrno), processes[index].kp_eproc.e_ppid);
+            /* Same-uid live process whose executable cannot be resolved even
+             * after short retries: fail closed as unknown. */
             free(processes);
             print_result("{\"ok\":true,\"result\":\"unknown\"}");
             return 0;
@@ -230,17 +255,21 @@ static argv_match_t argv_matches_needles(pid_t pid, const char *needleCsv) {
     static int mib[3] = {CTL_KERN, KERN_PROCARGS2, 0};
     mib[2] = pid;
     size_t size = 0;
-    if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0) {
-        return errno == ESRCH ? ARGV_NO_MATCH : ARGV_UNKNOWN;
+    char *buffer = NULL;
+    for (int attempt = 0; attempt < 3; attempt += 1) {
+        size = 0;
+        if (sysctl(mib, 3, NULL, &size, NULL, 0) == 0) {
+            if (size > ARGV_BUFFER_SIZE) size = ARGV_BUFFER_SIZE;
+            buffer = malloc(size);
+            if (buffer == NULL) fail("out of memory");
+            if (sysctl(mib, 3, buffer, &size, NULL, 0) == 0) break;
+            free(buffer);
+            buffer = NULL;
+        }
+        if (errno == ESRCH) return ARGV_NO_MATCH;
+        if (attempt < 2) usleep(3000);
     }
-    if (size > ARGV_BUFFER_SIZE) size = ARGV_BUFFER_SIZE;
-    char *buffer = malloc(size);
-    if (buffer == NULL) fail("out of memory");
-    if (sysctl(mib, 3, buffer, &size, NULL, 0) != 0) {
-        int error = errno;
-        free(buffer);
-        return error == ESRCH ? ARGV_NO_MATCH : ARGV_UNKNOWN;
-    }
+    if (buffer == NULL) return ARGV_UNKNOWN;
     if (size < 5) {
         free(buffer);
         return ARGV_NO_MATCH;
@@ -307,6 +336,7 @@ static int cmd_scanargv(const char *excludeCsv, const char *needleCsv) {
         if (csv_contains(excludeCsv, (long)pid)) continue;
         argv_match_t matched = argv_matches_needles(pid, needleCsv);
         if (matched == ARGV_UNKNOWN) {
+            if (!pid_exists(pid)) continue;
             free(processes);
             print_result("{\"ok\":true,\"result\":\"unknown\"}");
             return 0;

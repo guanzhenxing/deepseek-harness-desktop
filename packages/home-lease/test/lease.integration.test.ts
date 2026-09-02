@@ -133,7 +133,15 @@ describe.skipIf(!helperAvailable)('real helper process identity', () => {
         helperPath,
         entryExecutables: ['/nonexistent/dsh-desktop-entry'],
       })
-      await expect(noneProbe.scanSupported()).resolves.toBe('none')
+      // A same-uid process in a transient exec state can legitimately make one
+      // scan fail closed as unknown; a quiet system must settle on none.
+      let settled: string | undefined
+      for (let attempt = 0; attempt < 10 && settled === undefined; attempt += 1) {
+        const result = await noneProbe.scanSupported()
+        if (result === 'none') settled = result
+        else await new Promise((resolve) => setTimeout(resolve, 150))
+      }
+      expect(settled).toBe('none')
     } finally {
       sleeper.kill('SIGKILL')
       await new Promise((resolve) => sleeper.once('exit', resolve))
