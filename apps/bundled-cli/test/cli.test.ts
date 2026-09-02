@@ -249,6 +249,41 @@ describe('runBundledCli', () => {
     })
   })
 
+  it('keeps the lease when an unauthorized child cannot be proven dead', async () => {
+    const home = await isolatedHome()
+    const stderr = new MemoryStderr()
+    const killSignals: NodeJS.Signals[] = []
+    const spawn: SpawnCliChild = () => ({
+      pid: 5556,
+      send() {
+        throw new Error('must never authorize an unreapable child')
+      },
+      exited: new Promise(() => undefined),
+      kill(signal = 'SIGTERM') {
+        killSignals.push(signal)
+      },
+    })
+    const brokenProbe: ProcessProbe = {
+      ...fakeProbe,
+      async identify() {
+        throw new Error('identity lookup failed')
+      },
+    }
+    const code = await runBundledCli(['--profile', 'headless', 'task'], {
+      env: { DSH_HOME: home },
+      probe: brokenProbe,
+      guard: createInProcessGuardLock(),
+      spawnChild: spawn,
+      stderr,
+    })
+    expect(code).toBe(4)
+    expect(killSignals).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(stderr.text()).toContain('keeping the home lease')
+    expect(stderr.text()).toContain('doctor --unlock')
+    // The lock stays on disk for doctor; nothing was confirmed or released.
+    expect((await statAsync(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+  })
+
   it('reaps the unauthorized child when host registration fails', async () => {
     const home = await isolatedHome()
     const child = makeFakeChild(0)
@@ -267,7 +302,9 @@ describe('runBundledCli', () => {
         stderr: new MemoryStderr(),
       }),
     ).rejects.toThrow('identity lookup failed')
-    expect(child.kills()).toEqual(['SIGTERM', 'SIGKILL'])
+    // The fake child reports an already-resolved exit, so one terminate
+    // signal is enough to prove the reap.
+    expect(child.kills()).toEqual(['SIGTERM'])
     expect(child.forwarded()).toEqual([])
     await expect(statAsync(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
       code: 'ENOENT',

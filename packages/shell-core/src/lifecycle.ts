@@ -84,15 +84,21 @@ export class DesktopShellController {
       await this.#options.window.loadSurface(ready.surface, ready.origin)
       this.state = 'healthy'
     } catch (error) {
-      // A failure after the attempt exists must still stop the Host and
-      // confirm its exit before the shell settles into diagnostics; the
-      // lease stays held while the recovery surface is alive and is released
-      // by the normal stop chain on quit.
+      // Protocol: a failed startup still stops the Host, confirms its exit,
+      // and then releases the lease before settling into diagnostics. Only a
+      // release that itself fails keeps the lease, via the stop chain.
       if (this.#attempt !== undefined) {
         try {
           await this.#attempt.stop('quit', this.#options.shutdownDeadlineMs ?? 5_000)
         } catch {
           /* the original startup failure is the diagnosis to report */
+        }
+      }
+      if (this.#lease !== undefined) {
+        try {
+          await this.#lease.release()
+        } catch (releaseError) {
+          this.#options.onLeaseReleaseError?.(releaseError)
         }
       }
       this.state = 'recovery'

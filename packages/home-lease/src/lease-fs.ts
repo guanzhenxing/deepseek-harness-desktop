@@ -75,9 +75,16 @@ export async function ensureHomeLayout(paths: LeasePaths): Promise<void> {
   const runMode = (await lstat(paths.run)).mode & 0o777
   if (runMode !== 0o700) await chmod(paths.run, 0o700)
   try {
-    const guardMode = (await lstat(paths.guardPath)).mode & 0o777
+    const guardIdentity = await lstat(paths.guardPath)
+    // chmod would follow a symlink and touch a file outside the home; reject
+    // before any side effect, exactly like the O_NOFOLLOW open would.
+    if (guardIdentity.isSymbolicLink()) {
+      throw new LeaseError('LEASE_UNKNOWN', 'host-lease.guard must not be a symlink')
+    }
+    const guardMode = guardIdentity.mode & 0o777
     if (guardMode !== 0o600) await chmod(paths.guardPath, 0o600)
   } catch (error) {
+    if (error instanceof LeaseError) throw error
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
 }

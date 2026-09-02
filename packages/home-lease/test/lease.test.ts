@@ -290,6 +290,26 @@ describe('home lease lifecycle', () => {
     expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
   })
 
+  it('rejects a symlinked guard before any chmod side effect', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const external = await isolatedHome()
+    const {
+      symlink,
+      mkdir: makeDirectory,
+      writeFile: write,
+      stat: statFile,
+    } = await import('node:fs/promises')
+    await makeDirectory(path.join(home, 'run'), { mode: 0o700 })
+    const target = path.join(external, 'guard-target')
+    await write(target, 'outside', { mode: 0o644 })
+    await symlink(target, path.join(home, 'run', 'host-lease.guard'))
+    await expect(acquireHomeLease(acquireInput(home, probe))).rejects.toThrow(/symlink/u)
+    // The file outside the home keeps its original permissions.
+    expect((await statFile(target)).mode & 0o777).toBe(0o644)
+    expect(await readFile(target, 'utf8')).toBe('outside')
+  })
+
   it('tightens pre-existing run and guard permissions to the protocol modes', async () => {
     const home = await isolatedHome()
     const probe = new FakeProbe()

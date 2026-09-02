@@ -118,7 +118,9 @@ class RecordingLease implements HomeLease {
   }
 }
 
-function fixture(options: { acquireError?: Error; loadSurfaceError?: Error } = {}) {
+function fixture(
+  options: { acquireError?: Error; loadSurfaceError?: Error; reconcileError?: Error } = {},
+) {
   const events: string[] = []
   const lease = new RecordingLease(events)
   const loadSurface = vi.fn(async () => {
@@ -201,6 +203,7 @@ function fixture(options: { acquireError?: Error; loadSurfaceError?: Error } = {
     },
     reconcile: async () => {
       events.push('reconcile')
+      if (options.reconcileError !== undefined) throw options.reconcileError
     },
     createAttempt,
     window: { loadSurface, showRecovery, destroySurface },
@@ -248,15 +251,24 @@ describe('DesktopShellController startup chain', () => {
     expect(setup.shell.state).toBe('recovery')
   })
 
-  it('stops the started Host and keeps the lease when surface loading fails', async () => {
+  it('stops the Host and releases the lease when surface loading fails', async () => {
     const setup = fixture({ loadSurfaceError: new Error('surface failed to mount') })
     await expect(setup.shell.start()).rejects.toThrow('surface failed to mount')
     expect(setup.stopHosts).toHaveLength(1)
     expect(setup.stopHosts[0]).toHaveBeenCalledWith('quit', 5_000)
     expect(setup.lease.calls).toContain('confirmHostExited')
-    expect(setup.lease.calls).not.toContain('release')
+    expect(setup.lease.calls).toContain('release')
     expect(setup.showRecovery).toHaveBeenCalledWith('BOOT_FAILED')
     expect(setup.shell.state).toBe('recovery')
+  })
+
+  it('releases the lease when reconcile fails before any Host exists', async () => {
+    const setup = fixture({ reconcileError: new Error('profile write refused') })
+    await expect(setup.shell.start()).rejects.toThrow('profile write refused')
+    expect(setup.spawned()).toBe(0)
+    expect(setup.lease.calls).toContain('release')
+    expect(setup.lease.calls).not.toContain('confirmHostExited')
+    expect(setup.showRecovery).toHaveBeenCalledWith('BOOT_FAILED')
   })
 
   it('destroys a stale surface and keeps the shell in recovery after Host crash', async () => {

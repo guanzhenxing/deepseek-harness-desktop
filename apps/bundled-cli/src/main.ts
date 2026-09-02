@@ -209,6 +209,7 @@ export async function runBundledCli(
     throw error
   }
 
+  let leaseKeptForDiagnosis = false
   try {
     await lease.beforeSpawn(plan.profile)
     let child: CliChildHandle | undefined
@@ -223,28 +224,55 @@ export async function runBundledCli(
       await lease.confirmHostExited()
       return exitCodeOf(exit)
     } catch (error) {
-      // A forked child that never received authorization must be reaped
-      // before the lease registration is cleared and released.
+      // A forked child that never received authorization must be provably
+      // reaped before the lease registration is cleared and released.
       if (child !== undefined && !authorized) {
-        await reapUnauthorizedChild(child)
+        const reaped = await reapUnauthorizedChild(child)
+        if (!reaped) {
+          // The child may still be alive and must never be trusted to stay
+          // idle: keep the lease for doctor diagnostics instead of releasing.
+          leaseKeptForDiagnosis = true
+          stderr.write(
+            'dsh-native: cannot prove the unauthorized CLI child exited; keeping the home lease\n' +
+              'dsh-native: run dsh-native doctor --unlock once the process is gone\n',
+          )
+          return 4
+        }
       }
       await lease.confirmHostExited().catch(() => undefined)
       throw error
     }
   } finally {
-    await lease.release().catch((error: unknown) => {
-      stderr.write(
-        `dsh-native: keeping the home lease after exit: ${
-          error instanceof Error ? error.message : String(error)
-        }\n`,
-      )
-    })
+    if (!leaseKeptForDiagnosis) {
+      await lease.release().catch((error: unknown) => {
+        stderr.write(
+          `dsh-native: keeping the home lease after exit: ${
+            error instanceof Error ? error.message : String(error)
+          }\n`,
+        )
+      })
+    }
   }
 }
 
-async function reapUnauthorizedChild(child: CliChildHandle): Promise<void> {
+/** Returns whether the child provably exited within the escalation budget. */
+async function reapUnauthorizedChild(child: CliChildHandle): Promise<boolean> {
+  let exited = false
+  void child.exited.then(
+    () => {
+      exited = true
+    },
+    () => undefined,
+  )
   child.kill('SIGTERM')
-  await Promise.race([child.exited, new Promise<void>((r) => setTimeout(r, 2_000))])
-  child.kill('SIGKILL')
-  await Promise.race([child.exited, new Promise<void>((r) => setTimeout(r, 500))])
+  await Promise.race([child.exited.catch(() => undefined), sleep(2_000)])
+  if (!exited) {
+    child.kill('SIGKILL')
+    await Promise.race([child.exited.catch(() => undefined), sleep(500)])
+  }
+  return exited
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

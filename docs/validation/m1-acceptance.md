@@ -15,27 +15,27 @@
 
 ## 2. 提交清单
 
-| 提交 | 内容 |
-| --- | --- |
-| `fce2d4e` | docs: M1–M4 计划文档入库（codex 编写，zcode 执行前基线化） |
-| `75b06f9` | Task 1：`product-config`、`resolveDesktopHome`（与固定版上游隔离进程对照）、隔离 home fixture、边界规则 |
-| `9a46c94` | Task 2：`home-lease` 协议（owner schema、guard 短临界区、原生 `lease-helper.c`、fsync 补强）、ADR-0005 与协议文档 |
+| 提交      | 内容                                                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fce2d4e` | docs: M1–M4 计划文档入库（codex 编写，zcode 执行前基线化）                                                                                                                      |
+| `75b06f9` | Task 1：`product-config`、`resolveDesktopHome`（与固定版上游隔离进程对照）、隔离 home fixture、边界规则                                                                         |
+| `9a46c94` | Task 2：`home-lease` 协议（owner schema、guard 短临界区、原生 `lease-helper.c`、fsync 补强）、ADR-0005 与协议文档                                                               |
 | `c67a6bf` | Task 3：launcher/CLI 启动链改为 `lease → reconcile → beforeSpawn → spawn(waiting) → attachHost → bootstrap → ready`，退出链 stop→confirm→release；Host cwd 迁入中性 launch root |
-| `ccc5da9` | Task 4：`dsh-native` 包装进程（argv 原样转发 + 授权式子进程）、`doctor --unlock`、退出码与协议更新 |
-| `2d3f0c6` | Task 5：mock LLM + 共享 home driver，双向真实会话接续、互斥负例、CI macOS job |
+| `ccc5da9` | Task 4：`dsh-native` 包装进程（argv 原样转发 + 授权式子进程）、`doctor --unlock`、退出码与协议更新                                                                              |
+| `2d3f0c6` | Task 5：mock LLM + 共享 home driver，双向真实会话接续、互斥负例、CI macOS job                                                                                                   |
 
 ## 3. 门禁结果（全部通过）
 
-| 命令 | 退出码 | 结果摘要 | 耗时 |
-| --- | --- | --- | --- |
-| `corepack pnpm@11.7.0 check` | 0 | 15 个测试文件 / 115 个单测通过；prettier/eslint/边界/文档检查通过 | 11s |
-| `corepack pnpm@11.7.0 build:native` | 0 | `lease-helper` 编译成功 | 1s |
-| `corepack pnpm@11.7.0 test:integration` | 0 | 5 个文件 / 22 个集成测试通过（真实 DSH Host boot、双进程抢锁、doctor 竞态、会话图、restart 间隙） | 28s |
-| `corepack pnpm@11.7.0 test:shared-home` | 0 | 双向场景各持久化 2 轮；跨 profile 互斥与 restart 间隙负例 | 26s |
-| `corepack pnpm@11.7.0 smoke:dsh-ui` | 0 | ui-ready，launcher/Host 进程分离 | 8s |
-| `corepack pnpm@11.7.0 smoke:host-crash` | 0 | ui-ready + host-crash-recovery | 3s |
-| `corepack pnpm@11.7.0 smoke:shared-home` | 0 | 双向接续 + 双向拒绝 + settings/凭据 sentinel + 退出后无残留锁 | 34s |
-| `git diff --check` | 0 | 无空白错误 | — |
+| 命令                                     | 退出码 | 结果摘要                                                                                          | 耗时 |
+| ---------------------------------------- | ------ | ------------------------------------------------------------------------------------------------- | ---- |
+| `corepack pnpm@11.7.0 check`             | 0      | 15 个测试文件 / 115 个单测通过；prettier/eslint/边界/文档检查通过                                 | 11s  |
+| `corepack pnpm@11.7.0 build:native`      | 0      | `lease-helper` 编译成功                                                                           | 1s   |
+| `corepack pnpm@11.7.0 test:integration`  | 0      | 5 个文件 / 22 个集成测试通过（真实 DSH Host boot、双进程抢锁、doctor 竞态、会话图、restart 间隙） | 28s  |
+| `corepack pnpm@11.7.0 test:shared-home`  | 0      | 双向场景各持久化 2 轮；跨 profile 互斥与 restart 间隙负例                                         | 26s  |
+| `corepack pnpm@11.7.0 smoke:dsh-ui`      | 0      | ui-ready，launcher/Host 进程分离                                                                  | 8s   |
+| `corepack pnpm@11.7.0 smoke:host-crash`  | 0      | ui-ready + host-crash-recovery                                                                    | 3s   |
+| `corepack pnpm@11.7.0 smoke:shared-home` | 0      | 双向接续 + 双向拒绝 + settings/凭据 sentinel + 退出后无残留锁                                     | 34s  |
+| `git diff --check`                       | 0      | 无空白错误                                                                                        | —    |
 
 注：`check` 不含真实 Host 集成与 Electron 冒烟；上述集成/冒烟均在本机 macOS 实际执行。CI 已增加 `macos-15` job 运行 native helper 构建、集成、共享 home 与三条 smoke；Linux job 保持纯 `check`（未在 CI 环境实际运行过，标记为未验证）。
 
@@ -48,19 +48,19 @@
 
 ## 5. 故障注入结果
 
-| 场景 | 结果 |
-| --- | --- |
-| 同 home 不同 profile 并发 acquire | 恰一个 winner，其余 `HOME_BUSY`（单测 + 8 并发真实争抢集成） |
-| owner 进程被 SIGKILL（未 release） | 后续 acquire 得 `HOME_STALE`，不自动回收；doctor 确认无活跃 owner 后 `unlocked`，重复执行 `already-unlocked` |
-| owner 身份不可判定（unknown probe / 坏 owner 文件 / 缺 owner 文件） | `LEASE_UNKNOWN` 拒绝；坏 owner + 扫描到受支持入口运行 → `ACTIVE_OWNER` 拒绝 |
-| 换 generation 后旧 handle release | `LEASE_CHANGED` 拒绝，不动新锁 |
-| Host 记录仍存活时 release | `HOST_ACTIVE` 拒绝；identity unknown 时 `LEASE_UNKNOWN` 拒绝 |
-| `pendingSpawn` 未确认时 release / doctor | `PENDING_SPAWN` / `IDENTITY_UNKNOWN` 拒绝（保守） |
-| attachHost 失败（未授权子进程） | 子进程被 terminate+kill 回收，`confirmHostExited` 清登记，`BOOT_FAILED` 上报；子进程从未收到 boot 授权 |
-| stop 与 spawn 并发（late spawn） | stop 等待 in-flight spawn 完成后回收子进程，start promise 以 `BOOT_FAILED` 收尾，无泄漏 |
-| lock 目录被塞入未知文件 | `ENOTEMPTY` → `LEASE_UNKNOWN`，保留目录 |
-| Desktop 活跃时 CLI boot / plugin 变更 | 退出码 3 `HOME_BUSY`（smoke 实测） |
-| CLI 活跃时 Desktop 启动 | 在 reconcile 前被拒（`lease-refused` 报告，退出码 1；smoke 实测） |
+| 场景                                                                | 结果                                                                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 同 home 不同 profile 并发 acquire                                   | 恰一个 winner，其余 `HOME_BUSY`（单测 + 8 并发真实争抢集成）                                                 |
+| owner 进程被 SIGKILL（未 release）                                  | 后续 acquire 得 `HOME_STALE`，不自动回收；doctor 确认无活跃 owner 后 `unlocked`，重复执行 `already-unlocked` |
+| owner 身份不可判定（unknown probe / 坏 owner 文件 / 缺 owner 文件） | `LEASE_UNKNOWN` 拒绝；坏 owner + 扫描到受支持入口运行 → `ACTIVE_OWNER` 拒绝                                  |
+| 换 generation 后旧 handle release                                   | `LEASE_CHANGED` 拒绝，不动新锁                                                                               |
+| Host 记录仍存活时 release                                           | `HOST_ACTIVE` 拒绝；identity unknown 时 `LEASE_UNKNOWN` 拒绝                                                 |
+| `pendingSpawn` 未确认时 release / doctor                            | `PENDING_SPAWN` / `IDENTITY_UNKNOWN` 拒绝（保守）                                                            |
+| attachHost 失败（未授权子进程）                                     | 子进程被 terminate+kill 回收，`confirmHostExited` 清登记，`BOOT_FAILED` 上报；子进程从未收到 boot 授权       |
+| stop 与 spawn 并发（late spawn）                                    | stop 等待 in-flight spawn 完成后回收子进程，start promise 以 `BOOT_FAILED` 收尾，无泄漏                      |
+| lock 目录被塞入未知文件                                             | `ENOTEMPTY` → `LEASE_UNKNOWN`，保留目录                                                                      |
+| Desktop 活跃时 CLI boot / plugin 变更                               | 退出码 3 `HOME_BUSY`（smoke 实测）                                                                           |
+| CLI 活跃时 Desktop 启动                                             | 在 reconcile 前被拒（`lease-refused` 报告，退出码 1；smoke 实测）                                            |
 
 ## 6. Standards / Spec / 安全结论
 
@@ -72,18 +72,27 @@
 
 初版验收后 codex 审查指出租约故障路径缺口，以下修复均已落地并有测试：
 
-| 审查项 | 修复 | 证据 |
-| --- | --- | --- |
+| 审查项                                                    | 修复                                                                                                                                                                                                                                                   | 证据                                                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | P1 doctor 只扫描 Electron、漏扫活跃 dsh-native/Node child | 原生 helper 新增 `scanargv`（KERN_PROCARGS2 内存匹配 argv 针脚，绝不输出 argv）；doctor 扫描 = 可执行文件匹配 + argv 针脚匹配（dsh-native 脚本、CLI child 模块、Host 入口、官方 dsh bin，裸 `dsh` 也保守拒绝），任一扫描不可判定即 unknown fail-closed | `doctor-race.integration.test.ts` "refuses to unlock a corrupt owner while a supported CLI process is running" |
-| P1 Desktop 取得 lease 后启动失败不 stop/确认 | `DesktopShellController.#start` 失败路径先 `attempt.stop('quit')`（含 confirmHostExited）再进恢复页；lease 由正常退出链释放 | `lifecycle.test.ts` "stops the started Host and keeps the lease when surface loading fails" |
-| P1 CLI child fork 后 identify/attachHost 失败不回收 | 未授权 child 先 SIGTERM→SIGKILL 回收并等待退出，再清登记、释放 lease | `cli.test.ts` "reaps the unauthorized child when host registration fails" |
-| P1（Spec）release 未复核 supervisor 身份 | release 在 guard 内增加 supervisor 身份复核（≠same → LEASE_CHANGED） | `lease.test.ts` "refuses to release when the recorded supervisor identity is not this process" |
-| P2 run/guard 权限未收紧 | `ensureHomeLayout` 将既有 `run/` chmod 0700、`host-lease.guard` chmod 0600 | `lease.test.ts` "tightens pre-existing run and guard permissions" |
-| P2 测试 fixture 不一致 | `reconcile.test.ts` 迁移到 `createIsolatedHomeFixture` | 全部 home 测试统一走 fixture |
-| P2 缺双 doctor 竞态与 restart 间隙测试 | 新增 `doctor-race.integration.test.ts`（3 轮并发 doctor×2+acquirer，断言胜者锁不被误删）与 shared-home 的 host-restart-gap 场景（Host SIGKILL 后 Desktop 恢复页期间第三入口仍 exit 3） | 两文件 |
-| P3 M1 分支包含 M1–M4 计划文档 | 保留：这是与用户确认过的基线化默认（计划文档作为 M1 分支第一个提交），非运行时行为 | `fce2d4e` |
+| P1 Desktop 取得 lease 后启动失败不 stop/确认              | `DesktopShellController.#start` 失败路径先 `attempt.stop('quit')`（含 confirmHostExited）再进恢复页；lease 由正常退出链释放                                                                                                                            | `lifecycle.test.ts` "stops the started Host and keeps the lease when surface loading fails"                    |
+| P1 CLI child fork 后 identify/attachHost 失败不回收       | 未授权 child 先 SIGTERM→SIGKILL 回收并等待退出，再清登记、释放 lease                                                                                                                                                                                   | `cli.test.ts` "reaps the unauthorized child when host registration fails"                                      |
+| P1（Spec）release 未复核 supervisor 身份                  | release 在 guard 内增加 supervisor 身份复核（≠same → LEASE_CHANGED）                                                                                                                                                                                   | `lease.test.ts` "refuses to release when the recorded supervisor identity is not this process"                 |
+| P2 run/guard 权限未收紧                                   | `ensureHomeLayout` 将既有 `run/` chmod 0700、`host-lease.guard` chmod 0600                                                                                                                                                                             | `lease.test.ts` "tightens pre-existing run and guard permissions"                                              |
+| P2 测试 fixture 不一致                                    | `reconcile.test.ts` 迁移到 `createIsolatedHomeFixture`                                                                                                                                                                                                 | 全部 home 测试统一走 fixture                                                                                   |
+| P2 缺双 doctor 竞态与 restart 间隙测试                    | 新增 `doctor-race.integration.test.ts`（3 轮并发 doctor×2+acquirer，断言胜者锁不被误删）与 shared-home 的 host-restart-gap 场景（Host SIGKILL 后 Desktop 恢复页期间第三入口仍 exit 3）                                                                 | 两文件                                                                                                         |
+| P3 M1 分支包含 M1–M4 计划文档                             | 保留：这是与用户确认过的基线化默认（计划文档作为 M1 分支第一个提交），非运行时行为                                                                                                                                                                     | `fce2d4e`                                                                                                      |
 
-## 8. 未验证项与遗留风险
+### 第二轮审查修复（2026-09-02，`fix: enforce conservative lease release on failure paths`）
+
+| 审查项                                | 修复                                                                                                                                      | 证据                                                                                                                |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| P1 CLI 回收超时后仍释放 lease         | `reapUnauthorizedChild` 返回是否可证明退出；无法证明时跳过 confirm/release，lease 保留给 doctor，退出码 4（写入协议）                     | `cli.test.ts` "keeps the lease when an unauthorized child cannot be proven dead"（exited 永不决议的 child，锁保留） |
+| P1 启动失败路径保留 lease 与协议相悖  | `#start` 失败链改为 attempt.stop → lease.release（失败经 onLeaseReleaseError 报告后才保留）→ 恢复页；reconcile 失败（无 attempt）同样释放 | `lifecycle.test.ts` 两个失败测试改为断言 release；新增 reconcile 失败用例                                           |
+| P1 chmod 跟随 guard symlink           | `ensureHomeLayout` 在 chmod 之前以 lstat 检查 guard，symlink 直接 LEASE_UNKNOWN 拒绝                                                      | `lease.test.ts` "rejects a symlinked guard before any chmod side effect"（目标文件权限保持 0644）                   |
+| P2 shared-home fixture 清理无身份复核 | 创建时记录 userData realpath/dev/ino + tmpdir realpath，删除前全部复核，不匹配即拒绝                                                      | `shared-home-driver.mjs` recordDirectoryIdentity/removeVerifiedTree                                                 |
+
+## 9. 未验证项与遗留风险
 
 - CI 的 `macos-15` job 尚未在 GitHub Actions 实际运行（本地同等命令已全部通过）；Linux `check` job 依赖既有配置。
 - `ParentPort` 的 `close` 事件依赖 Electron 运行时行为（类型未声明，已按 EventEmitter 订阅）；父进程死亡的兜底仍是子进程 10s bootstrap 超时。

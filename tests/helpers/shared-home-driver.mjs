@@ -20,6 +20,7 @@ export async function createSharedHomeFixture() {
   // The userData prefix must satisfy the launcher smoke override contract so
   // the Desktop entry can boot against this exact fixture.
   const userData = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-m0-smoke-'))
+  const recorded = await recordDirectoryIdentity(userData)
   const home = path.join(userData, 'home')
   const { mkdir } = await import('node:fs/promises')
   await mkdir(home, { recursive: true, mode: 0o700 })
@@ -43,7 +44,7 @@ export async function createSharedHomeFixture() {
 
   async function dispose() {
     await mockLlm.stop()
-    await removeTree(userData)
+    await removeVerifiedTree(userData, recorded)
   }
 
   return {
@@ -64,15 +65,34 @@ async function realpathish(target) {
   return realpath(target)
 }
 
-async function removeTree(target) {
+/** Snapshot the identity (realpath + dev/ino) a cleanup must re-verify. */
+async function recordDirectoryIdentity(target) {
+  const { lstat, realpath } = await import('node:fs/promises')
+  const stat = await lstat(target)
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`shared-home fixture must be a real directory: ${target}`)
+  }
+  return {
+    dev: stat.dev,
+    ino: stat.ino,
+    canonical: await realpath(target),
+    canonicalParent: await realpath(tmpdir()),
+  }
+}
+
+async function removeVerifiedTree(target, recorded) {
   const resolved = path.resolve(target)
-  const { lstat, rm } = await import('node:fs/promises')
+  const { lstat, realpath, rm } = await import('node:fs/promises')
   const stat = await lstat(resolved)
   if (
     path.dirname(resolved) !== path.resolve(tmpdir()) ||
     !path.basename(resolved).startsWith('dsh-desktop-m0-smoke-') ||
     stat.isSymbolicLink() ||
-    !stat.isDirectory()
+    !stat.isDirectory() ||
+    stat.dev !== recorded.dev ||
+    stat.ino !== recorded.ino ||
+    (await realpath(resolved)) !== recorded.canonical ||
+    (await realpath(tmpdir())) !== recorded.canonicalParent
   ) {
     throw new Error(`refusing to clean an unexpected shared-home fixture: ${resolved}`)
   }
