@@ -53,10 +53,9 @@ Safe Mode profile 由 `profile-manager` 创建和校验，不读取正常 `deskt
 
 ## 4. 被否决的备选
 
-| 备选 | 未选择原因 |
-| --- | --- |
-| Safe Mode 只加载 `dsh-base + dsh-web-app` | 没有组件发布 authenticated surface，无法完成恢复 UI handoff |
-| Safe Mode 继续加载正常 `desktop-plugin` | 正常插件及其 patch 正是恢复路径需要绕开的失败来源之一 |
-| Electron Main 直接取得 DSH connection | 会把 Host 运行时 API 和认证逻辑复制进 boot-independent launcher |
-| 解析 Host stdout 中的 URL | 文案不构成稳定协议，且容易泄露认证 URL |
-
+| 备选                                      | 未选择原因                                                      |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| Safe Mode 只加载 `dsh-base + dsh-web-app` | 没有组件发布 authenticated surface，无法完成恢复 UI handoff     |
+| Safe Mode 继续加载正常 `desktop-plugin`   | 正常插件及其 patch 正是恢复路径需要绕开的失败来源之一           |
+| Electron Main 直接取得 DSH connection     | 会把 Host 运行时 API 和认证逻辑复制进 boot-independent launcher |
+| 解析 Host stdout 中的 URL                 | 文案不构成稳定协议，且容易泄露认证 URL                          |

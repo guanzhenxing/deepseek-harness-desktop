@@ -27,7 +27,7 @@ M0 优先使用 Electron `utilityProcess` 的消息端口；若改用打包 Node
 launcher 在启动 Host 前创建：
 
 - 至少 256 bit 的随机 `capability`；
-- 当前 home lease 的随机 `leaseGeneration`；
+- 当前 home authority 的随机 `leaseGeneration`；M0 是每次私有隔离 home 启动生成的 channel generation，M1 起绑定 durable home lease generation；
 - 预期 profile、mode 和 Host 进程身份；
 - 专用消息通道。
 
@@ -77,11 +77,7 @@ type HostToLauncherMessage =
     }
   | {
       kind: 'phase'
-      phase:
-        | 'booting'
-        | 'services-ready'
-        | 'surface-waiting'
-        | 'draining'
+      phase: 'booting' | 'services-ready' | 'surface-waiting' | 'draining'
     }
   | {
       kind: 'surface'
@@ -203,18 +199,18 @@ launcher 发送一次 `dispose` 后进入 draining：
 
 launcher 至少使用以下稳定错误 code；它们是诊断分类，不是可本地化 UI 文案：
 
-| Code | 含义 |
-| --- | --- |
-| `PROTOCOL_MISMATCH` | name、major 或 minor 无法协商 |
-| `INVALID_ENVELOPE` | schema、direction 或 sequence 非法 |
-| `INVALID_CAPABILITY` | capability 不匹配 |
-| `LEASE_MISMATCH` | lease generation 不匹配 |
-| `HOST_IDENTITY_MISMATCH` | PID/start identity 不匹配 |
-| `INVALID_TRANSITION` | 消息不符合状态机 |
-| `SURFACE_REJECTED` | purpose 或 loopback URL 校验失败 |
-| `BOOT_FAILED` | Host 在 ready 前报告 fatal 或退出 |
-| `HOST_CRASHED` | ready 后 Host 异常退出 |
-| `DISPOSE_TIMEOUT` | graceful dispose 未在时限内完成 |
+| Code                     | 含义                               |
+| ------------------------ | ---------------------------------- |
+| `PROTOCOL_MISMATCH`      | name、major 或 minor 无法协商      |
+| `INVALID_ENVELOPE`       | schema、direction 或 sequence 非法 |
+| `INVALID_CAPABILITY`     | capability 不匹配                  |
+| `LEASE_MISMATCH`         | lease generation 不匹配            |
+| `HOST_IDENTITY_MISMATCH` | PID/start identity 不匹配          |
+| `INVALID_TRANSITION`     | 消息不符合状态机                   |
+| `SURFACE_REJECTED`       | purpose 或 loopback URL 校验失败   |
+| `BOOT_FAILED`            | Host 在 ready 前报告 fatal 或退出  |
+| `HOST_CRASHED`           | ready 后 Host 异常退出             |
+| `DISPOSE_TIMEOUT`        | graceful dispose 未在时限内完成    |
 
 普通日志记录 code、阶段、应用版本和匿名 Host generation。不得记录 capability、authenticated URL、完整 home 路径、凭据、会话内容或远程设备秘密。
 

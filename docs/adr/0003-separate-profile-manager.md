@@ -22,7 +22,7 @@
 - 持久化事务 journal、故障恢复、定点禁用和回滚；
 - 受管 profile 的 drift 检测与显式导入/修复。
 
-调用方必须先取得目标 DSH home 的 lease。profile-manager 自己不创建第二套锁语义，也不启动或停止 Host。
+调用方必须先取得目标 DSH home 的写入 authority。共享/用户 home 使用 home lease；M0 的 launcher 私有 `<userData>/m0-dsh-home` 使用显式隔离 authority。profile-manager 自己不创建第二套锁语义，也不启动或停止 Host。
 
 `shell-core` 只编排 `home-lease`、`profile-manager`、`host-supervisor` 与 Electron 资源。`desktop-plugin`、市场 UI 和 launcher 都不能直接把 profile 文件当作第二权威来源。
 
@@ -57,14 +57,13 @@ staging
 需要承担：
 
 - M0 多一个 workspace package 和明确接口；
-- 调用方必须证明 lease 已持有，并处理 profile-manager 的结构化错误；
+- 调用方必须证明所需 authority 已持有（M0 为专属 userData 子目录；共享 home 为 lease），并处理 profile-manager 的结构化错误；
 - 后期市场不能绕开 profile-manager 直接调用 pnpm 修改活跃 profile。
 
 ## 5. 被否决的备选
 
-| 备选 | 未选择原因 |
-| --- | --- |
-| profile 逻辑继续留在 `shell-core` | Electron 编排包会随市场、Safe Mode 和多 profile 快速膨胀 |
-| 市场插件直接拥有 profile 文件 | Host 失败时市场插件不可用，无法完成 boot-independent 恢复 |
-| launcher 和 CLI 各实现一套 profile 管理 | 会产生不同的排序、恢复和 generation 语义 |
-
+| 备选                                    | 未选择原因                                                |
+| --------------------------------------- | --------------------------------------------------------- |
+| profile 逻辑继续留在 `shell-core`       | Electron 编排包会随市场、Safe Mode 和多 profile 快速膨胀  |
+| 市场插件直接拥有 profile 文件           | Host 失败时市场插件不可用，无法完成 boot-independent 恢复 |
+| launcher 和 CLI 各实现一套 profile 管理 | 会产生不同的排序、恢复和 generation 语义                  |

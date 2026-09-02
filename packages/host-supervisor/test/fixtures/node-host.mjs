@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { runDshHost } from '../../lib/host-runner.js'
 
 const bootstrap = await new Promise((resolve) => {
@@ -17,6 +19,9 @@ const transport = {
 try {
   const host = await runDshHost({
     ...bootstrap,
+    productInstallAnchor: fileURLToPath(
+      new URL('../../../../apps/desktop-launcher/package.json', import.meta.url),
+    ),
     hostIdentity: {
       pid: process.pid,
       startIdentity: bootstrap.startIdentity,

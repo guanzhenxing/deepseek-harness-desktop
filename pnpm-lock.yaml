@@ -35,6 +35,9 @@ importers:
 
   apps/desktop-launcher:
     dependencies:
+      '@dsh-desktop/desktop-plugin':
+        specifier: workspace:*
+        version: link:../../packages/desktop-plugin
       '@dsh-desktop/host-supervisor':
         specifier: workspace:*
         version: link:../../packages/host-supervisor
@@ -96,9 +99,7 @@ importers:
       '@dsh-desktop/desktop-contracts':
         specifier: workspace:*
         version: link:../desktop-contracts
-      '@dsh-desktop/desktop-plugin':
-        specifier: workspace:*
-        version: link:../desktop-plugin
+    devDependencies:
       '@dsh-desktop/profile-manager':
         specifier: workspace:*
         version: link:../profile-manager

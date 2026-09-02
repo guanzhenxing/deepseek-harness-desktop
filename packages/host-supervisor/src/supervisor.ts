@@ -7,7 +7,7 @@ import {
   type HostToLauncherMessage,
   type LauncherToHostMessage,
   type LoopbackSurface,
-} from '@dsh-desktop/desktop-contracts'
+} from '@dsh-desktop/desktop-contracts/host-control'
 
 export type HostBootstrap = Readonly<{
   home: string
@@ -180,11 +180,12 @@ export class HostSupervisor {
         throw new HostControlError('INVALID_TRANSITION', 'Host protocol is unavailable')
       this.#handleMessage(message)
     } catch (error) {
-      this.#failStart(
+      const failure =
         error instanceof HostControlError
           ? error
-          : new HostControlError('INVALID_ENVELOPE', 'Host message was rejected'),
-      )
+          : new HostControlError('INVALID_ENVELOPE', 'Host message was rejected')
+      if (this.#healthy) this.#failHealthy(failure)
+      else this.#failStart(failure)
     }
   }
 
@@ -228,8 +229,7 @@ export class HostSupervisor {
         }, this.#options.stabilityMs)
         return
       case 'fatal':
-        this.#failStart(new HostControlError('BOOT_FAILED', message.summary))
-        return
+        throw new HostControlError('BOOT_FAILED', message.summary)
       case 'dispose-ack':
       case 'phase':
         return
@@ -246,6 +246,7 @@ export class HostSupervisor {
       this.#emit({ kind: 'stopped' })
       return
     }
+    if (this.state === 'failed') return
     if (!this.#healthy) {
       this.#failStart(new HostControlError('BOOT_FAILED', 'Host exited before becoming ready'))
       return
@@ -261,7 +262,28 @@ export class HostSupervisor {
     this.state = 'failed'
     this.#ready.reject(error)
     this.#emit({ kind: 'failed', error })
-    if (!this.#exited) this.#process?.terminate()
+    this.#terminateFailedProcess()
+  }
+
+  #failHealthy(error: HostControlError): void {
+    if (!this.#healthy || this.state === 'failed') return
+    this.#clearTimers()
+    this.state = 'failed'
+    this.#emit({ kind: 'crashed', error })
+    this.#terminateFailedProcess()
+  }
+
+  #terminateFailedProcess(): void {
+    if (this.#exited || this.#process === undefined) return
+    try {
+      this.#process.terminate()
+    } catch {
+      this.#process.kill()
+      return
+    }
+    this.#killTimer = setTimeout(() => {
+      if (!this.#exited) this.#process?.kill()
+    }, this.#options.terminateGraceMs)
   }
 
   #clearTimers(): void {

@@ -1,41 +1,46 @@
 # 数据布局与所有权
 
-- 状态：M0 实施基线
-- 日期：2026-09-01
+- 状态：M0 已实现，审查收尾中
+- 日期：2026-09-02
 - 关联架构：[架构](architecture.md)
 
 ## 1. 路径变量
 
 本文使用以下逻辑路径：
 
-| 变量 | 解析规则 |
-| --- | --- |
-| `<home>` | `resolveDshHome()`：`$DSH_HOME` 非空时使用其绝对路径，否则为 `~/.dsh` |
-| `<profile>` | v1 为 `<home>/profiles/desktop` |
-| `<safeProfile>` | E3 前置能力使用 `<home>/profiles/desktop-safe-mode` |
-| `<userData>` | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下的 DeepSeek Harness 专属目录 |
-| `<launchRoot>` | `<userData>/runtime/launch-root`，不位于应用 bundle 或用户 workspace 内 |
-| `<testHome>` | 测试通过系统临时目录 API 单独创建的 DSH home，绝不能指向真实 `<home>` |
+| 变量            | 解析规则                                                                                                                   |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `<home>`        | `resolveDshHome()`：`$DSH_HOME` 非空时使用其绝对路径，否则为 `~/.dsh`                                                      |
+| `<m0Home>`      | `<userData>/m0-dsh-home`；M0 launcher 单实例私有，不是共享 `<home>`                                                        |
+| `<profile>`     | v1 为 `<home>/profiles/desktop`                                                                                            |
+| `<safeProfile>` | E3 前置能力使用 `<home>/profiles/desktop-safe-mode`                                                                        |
+| `<userData>`    | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下的 DeepSeek Harness 专属目录 |
+| `<launchRoot>`  | M0 为 `<m0Home>/profiles/.dsh-desktop-run-*` 临时目录；M1 起可迁移到 `<userData>/runtime/launch-root`                      |
+| `<testHome>`    | 测试通过系统临时目录 API 单独创建的 DSH home，绝不能指向真实 `<home>`                                                      |
 
 所有可写路径先解析为绝对路径并验证预期父目录。写入逻辑不得跟随用户可植入的目标 symlink 覆盖其他位置。
 
 ## 2. DSH home
 
-| 路径 | 权威/所有者 | Desktop 写入规则 | 备份与迁移 |
-| --- | --- | --- | --- |
-| `<home>/.credentials.yaml` | 用户/DSH credential provider | Desktop 不复制、不回滚内容 | 由 DSH/用户负责；日志不得包含内容 |
-| `<home>/settings.yaml` | 用户与所有 profile | 只由正式 DSH 设置能力修改；启动恢复不覆盖 | 格式迁移由对应 DSH provider 定义 |
-| `<home>/cordis.patch.yml` | 用户 | Desktop 启动恢复不修改 | 用户负责；错误只诊断 |
-| `<home>/sessions/**` | DSH session provider | 仅活跃 Host 写入 | 升级测试使用副本，不能在真实数据上演练 |
-| `<home>/storages/**` | DSH storage providers | 仅活跃 Host 写入 | 迁移和降级范围进入兼容性清单 |
-| `<profile>/**` | `profile-manager` 与用户 | v1 只修改白名单文件并做修订校验 | 修改前保存存在性、内容和 SHA-256 |
-| `<safeProfile>/**` | `profile-manager` | 只创建 Safe Mode 自身投影，不自动修改正常 profile | 可重建；不得包含第三方 bundle 或正常 patch layer |
-| `<home>/run/host.lock/` | `home-lease` | launcher 或 bundled CLI 在整个 Host writer 生命周期持有 | 不是数据备份；只可按 owner 身份受控恢复 |
-| `<home>/run/profile-transactions/**` | `profile-manager` | 持有 home lease 时原子写入 | 用于崩溃恢复，终态经保留策略清理 |
+| 路径                                 | 权威/所有者                  | Desktop 写入规则                                        | 备份与迁移                                       |
+| ------------------------------------ | ---------------------------- | ------------------------------------------------------- | ------------------------------------------------ |
+| `<home>/.credentials.yaml`           | 用户/DSH credential provider | Desktop 不复制、不回滚内容                              | 由 DSH/用户负责；日志不得包含内容                |
+| `<home>/settings.yaml`               | 用户与所有 profile           | 只由正式 DSH 设置能力修改；启动恢复不覆盖               | 格式迁移由对应 DSH provider 定义                 |
+| `<home>/cordis.patch.yml`            | 用户                         | Desktop 启动恢复不修改                                  | 用户负责；错误只诊断                             |
+| `<home>/sessions/**`                 | DSH session provider         | 仅活跃 Host 写入                                        | 升级测试使用副本，不能在真实数据上演练           |
+| `<home>/storages/**`                 | DSH storage providers        | 仅活跃 Host 写入                                        | 迁移和降级范围进入兼容性清单                     |
+| `<profile>/**`                       | `profile-manager` 与用户     | v1 只修改白名单文件并做修订校验                         | 修改前保存存在性、内容和 SHA-256                 |
+| `<safeProfile>/**`                   | `profile-manager`            | 只创建 Safe Mode 自身投影，不自动修改正常 profile       | 可重建；不得包含第三方 bundle 或正常 patch layer |
+| `<home>/run/host.lock/`              | `home-lease`                 | launcher 或 bundled CLI 在整个 Host writer 生命周期持有 | 不是数据备份；只可按 owner 身份受控恢复          |
+| `<home>/run/profile-transactions/**` | future `profile-manager`     | M2 起持有 home lease 时原子写入                         | 用于崩溃恢复，终态经保留策略清理；M0 不创建      |
 
 “Desktop 与 CLI 共享 home”表示它们在不同时间读写同一批数据，不表示两个 Host 可以并发写入。
 
 ## 3. Home lease
+
+M0 的 `<m0Home>` 由 Electron 单实例独占，不与 CLI 或其他 DSH Host 共享，因此尚不创建 lease。以下布局从 M1 切换到共享 `<home>` 时生效；这不是对共享 home 规则的放宽。
+
+正常启动不接受任意 userData 覆盖。只有 `ui`/`host-crash` smoke 可使用系统临时目录下通过 symlink/实际路径检查的专用目录。profile-manager 的隔离 authority 必须绑定调用方指定 userData 的 `m0-dsh-home` 子目录；该 authority 是受信调用方的写入前提，不是对同用户任意代码的安全沙箱。
 
 lease 目录固定为：
 
@@ -58,7 +63,9 @@ lease 目录通过原子 `mkdir` 创建。任何清理都必须重新验证 gene
 
 ## 4. Profile 修改事务
 
-M0 的 reconcile/recovery 事务放在：
+M0 reconcile 只在私有 `<m0Home>` 中修改白名单文件，拒绝 home、profiles、profile 目录及三个受管文件的 symlink，原子替换 manifest，并返回修改前后 SHA-256 与 changed-files；它不承诺崩溃回滚，也不创建持久 transaction journal。
+
+M2 引入恢复时，reconcile/recovery 事务放在：
 
 ```text
 <home>/run/profile-transactions/<transaction-id>/
@@ -79,18 +86,20 @@ M0 的 reconcile/recovery 事务放在：
 6. 失败时仅在当前摘要仍等于本次候选摘要时恢复 before；
 7. committed/rolled-back 记录按有界保留策略清理。
 
-E3 的 generation ledger 会继续由 `profile-manager` 拥有，但本项目在 E3 ADR 确定 schema、迁移和清理策略前不创建 generation 存储目录。该延后不改变 profile-manager 的唯一权威。
+E3 的 generation ledger 会继续由 `profile-manager` 拥有，但本项目在 E3 ADR 确定 schema、迁移和清理策略前不创建 generation 存储目录。transaction journal 与 generation ledger 的延后不改变 profile-manager 的唯一权威。
 
 ## 5. Electron userData
 
-| 路径 | 所有者 | 用途 | 恢复规则 |
-| --- | --- | --- | --- |
-| `<userData>/window-state.json` | `shell-core` | 窗口位置、大小和最大化状态 | 可重建；离屏时回退默认值 |
-| `<userData>/logs/**` | launcher/Host 结构化日志 | 本地诊断 | 有界轮换；必须脱敏 |
-| `<userData>/runtime/launch-root/**` | launcher | 中性 Host cwd 与非秘密 bootstrap 文件 | Host 停止后可重建 |
-| `<userData>/recovery/**` | launcher | crash-loop marker、最近失败阶段 | 只恢复 launcher-owned 状态 |
-| `<userData>/updates/effective-policy.json` | future `desktopUpdater` adapter | 校验后的 last-effective policy | E2 前不创建；损坏时退回 embedded emergency source |
-| `<userData>/updates/cache/**` | future updater | 已校验的下载制品 | E2 前不创建；可删除并重新下载 |
+| 路径                                       | 所有者                             | 用途                                                          | 恢复规则                                          |
+| ------------------------------------------ | ---------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- |
+| `<userData>/window-state.json`             | `shell-core`                       | 窗口位置、大小和最大化状态                                    | 可重建；离屏时回退默认值                          |
+| `<userData>/logs/**`                       | launcher/Host 结构化日志           | 本地诊断                                                      | 有界轮换；必须脱敏                                |
+| `<m0Home>/profiles/.dsh-desktop-run-*`     | Host runner                        | M0 中性启动根；包含 `cordis.yml` 与选中 bundle 的局部模块投影 | 关停前复核实际路径与目录身份；身份变化拒绝删除    |
+| `<m0Home>/profiles/node_modules/**`        | Host runner / 上游 fallback helper | 安装依赖闭包的可重建投影，不是 named profile                  | 上游锁下维护，不修改 profile manifest 或 patch    |
+| `<userData>/runtime/launch-root/**`        | future launcher                    | M1+ 中性 Host cwd 与非秘密 bootstrap 文件                     | Host 停止后可重建                                 |
+| `<userData>/recovery/**`                   | launcher                           | crash-loop marker、最近失败阶段                               | 只恢复 launcher-owned 状态                        |
+| `<userData>/updates/effective-policy.json` | future `desktopUpdater` adapter    | 校验后的 last-effective policy                                | E2 前不创建；损坏时退回 embedded emergency source |
+| `<userData>/updates/cache/**`              | future updater                     | 已校验的下载制品                                              | E2 前不创建；可删除并重新下载                     |
 
 Chromium 的 `persist:dsh-desktop-renderer` partition 也位于 Electron 管理的数据范围。清理 renderer cache 不得被描述为清理 DSH session 或 storage。
 

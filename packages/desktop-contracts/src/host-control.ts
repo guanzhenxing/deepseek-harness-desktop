@@ -2,6 +2,11 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 
 import { z } from 'zod'
 
+/** Host-local handoff into the authenticated Host-control surface publisher. */
+export interface DesktopSurfaceService {
+  schedule(surface: LoopbackSurface): void
+}
+
 export const HOST_CONTROL_PROTOCOL = {
   name: 'dsh-desktop/host-control',
   major: 1,
@@ -37,37 +42,37 @@ const protocolSchema = z
     major: z.literal(HOST_CONTROL_PROTOCOL.major),
     minor: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   })
-  .strict()
+  .strip()
 
 const hostIdentitySchema = z
   .object({ pid: z.number().int().positive().safe(), startIdentity: boundedString })
-  .strict()
+  .strip()
 
 const minorRangeSchema = z
   .object({ min: z.number().int().min(0).safe(), max: z.number().int().min(0).safe() })
-  .strict()
+  .strip()
   .refine((range) => range.min <= range.max)
 
 const loopbackSurfaceSchema = z
   .object({ kind: z.literal('loopback'), url: z.string().min(1).max(4096) })
-  .strict()
+  .strip()
 
 const hostMessageSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('hello'),
       host: hostIdentitySchema,
-      profile: z.object({ name: boundedString }).strict(),
+      profile: z.object({ name: boundedString }).strip(),
       mode: z.enum(['normal', 'safe']),
       supportedMinor: minorRangeSchema,
     })
-    .strict(),
+    .strip(),
   z
     .object({
       kind: z.literal('phase'),
       phase: z.enum(['booting', 'services-ready', 'surface-waiting', 'draining']),
     })
-    .strict(),
+    .strip(),
   z
     .object({
       kind: z.literal('surface'),
@@ -75,11 +80,11 @@ const hostMessageSchema = z.discriminatedUnion('kind', [
       purpose: z.enum(['normal', 'recovery']),
       surface: loopbackSurfaceSchema,
     })
-    .strict(),
-  z.object({ kind: z.literal('ready'), surfaceId: boundedString }).strict(),
+    .strip(),
+  z.object({ kind: z.literal('ready'), surfaceId: boundedString }).strip(),
   z
     .object({ kind: z.literal('dispose-ack'), outcome: z.enum(['disposed', 'already-disposed']) })
-    .strict(),
+    .strip(),
   z
     .object({
       kind: z.literal('fatal'),
@@ -88,18 +93,18 @@ const hostMessageSchema = z.discriminatedUnion('kind', [
       summary: z.string().min(1).max(1024),
       retryable: z.boolean(),
     })
-    .strict(),
+    .strip(),
 ])
 
 const launcherMessageSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('accept'), selectedMinor: z.literal(0) }).strict(),
+  z.object({ kind: z.literal('accept'), selectedMinor: z.literal(0) }).strip(),
   z
     .object({
       kind: z.literal('dispose'),
       reason: z.enum(['quit', 'restart', 'profile-switch', 'update']),
       deadlineMs: z.number().int().min(1000).max(30_000),
     })
-    .strict(),
+    .strip(),
 ])
 
 function envelopeSchema<Schema extends z.ZodType>(
@@ -115,7 +120,7 @@ function envelopeSchema<Schema extends z.ZodType>(
       sequence: z.number().int().positive().safe(),
       message,
     })
-    .strict()
+    .strip()
 }
 
 const hostEnvelopeSchema = envelopeSchema('host-to-launcher', hostMessageSchema)

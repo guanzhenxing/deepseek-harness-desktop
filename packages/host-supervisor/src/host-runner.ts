@@ -1,9 +1,8 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { realpathSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -25,8 +24,10 @@ import {
   type HostIdentity,
   type LauncherToHostMessage,
   type LoopbackSurface,
-} from '@dsh-desktop/desktop-contracts'
-import type { DesktopSurfaceService } from '@dsh-desktop/desktop-plugin'
+  type DesktopSurfaceService,
+} from '@dsh-desktop/desktop-contracts/host-control'
+
+import { createRuntimeRoot, type RuntimeRoot } from './runtime-root.js'
 
 export interface HostControlTransport {
   postMessage(message: unknown): void
@@ -42,6 +43,7 @@ export type RunDshHostOptions = Readonly<{
   leaseGeneration: string
   hostIdentity: HostIdentity
   transport: HostControlTransport
+  productInstallAnchor: string
   installAnchor?: string
   acceptTimeoutMs?: number
 }>
@@ -57,9 +59,6 @@ const PROFILE_ROOT_CONFIG = `# dsh desktop profile root; compose through bundle 
 const PROFILE_ROOT_FILENAME = 'cordis.yml'
 const DSH_INSTALL_ANCHOR = realpathSync.native(
   createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'),
-)
-const DESKTOP_INSTALL_ANCHOR = realpathSync.native(
-  fileURLToPath(new URL('../package.json', import.meta.url)),
 )
 
 type Deferred<Value> = {
@@ -106,6 +105,7 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
   let context: Context | undefined
   let disposePromise: Promise<void> | undefined
   let surfaceId: string | undefined
+  let runtimeRoot: RuntimeRoot | undefined
   let originalDshHome = process.env.DSH_HOME
 
   const restoreEnvironment = (): void => {
@@ -117,14 +117,24 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
   const isDisposing = (): boolean =>
     (['draining', 'disposed'] as const).some((state) => state === protocolState)
 
+  const cleanupRuntimeRoot = async (): Promise<void> => {
+    if (runtimeRoot === undefined) return
+    await runtimeRoot.remove()
+    runtimeRoot = undefined
+  }
+
   const disposeHost = (acknowledge: boolean): Promise<void> => {
     if (disposePromise !== undefined) return disposePromise
     protocolState = 'draining'
     disposePromise = (async () => {
       const activeContext = context ?? (await contextReady.promise)
-      await activeContext?.fiber.dispose()
-      protocolState = 'disposed'
-      restoreEnvironment()
+      try {
+        await activeContext?.fiber.dispose()
+        await cleanupRuntimeRoot()
+      } finally {
+        protocolState = 'disposed'
+        restoreEnvironment()
+      }
       if (acknowledge) {
         options.transport.postMessage(writer.next({ kind: 'dispose-ack', outcome: 'disposed' }))
       }
@@ -206,17 +216,34 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
     process.env.DSH_HOME = options.home
 
     const installAnchor = options.installAnchor ?? DSH_INSTALL_ANCHOR
+    runtimeRoot = await createRuntimeRoot(options.home)
+    // Product composition belongs to the caller. These shared fallbacks only
+    // mirror the two installed closures; neither writes the named profile.
+    for (const anchor of new Set([installAnchor, options.productInstallAnchor])) {
+      await healProfilesModuleFallback({ installAnchor: anchor, home: options.home })
+    }
     const profile = loadProfile('dsh-desktop', options.profileName, installAnchor, options.home)
-    await writeFile(path.join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
-    // The upstream CLI owns the complete official DSH closure. The Desktop app
-    // anchor adds this repository's private bundle; fallback healing is additive.
-    await healProfilesModuleFallback({ installAnchor, profile, home: options.home })
-    if (DESKTOP_INSTALL_ANCHOR !== installAnchor) {
-      await healProfilesModuleFallback({
-        installAnchor: DESKTOP_INSTALL_ANCHOR,
-        profile,
-        home: options.home,
-      })
+    // Keep the transient Cordis root outside the named profile while retaining
+    // Node's parent-directory lookup for the shared profiles/node_modules fallback.
+    const rootConfigPath = path.join(runtimeRoot.dir, PROFILE_ROOT_FILENAME)
+    await writeFile(rootConfigPath, PROFILE_ROOT_CONFIG, { mode: 0o600 })
+    await healProfilesModuleFallback({
+      installAnchor,
+      profile: { ...profile, dir: runtimeRoot.dir },
+      home: options.home,
+    })
+    // Upstream projects bundle dependencies but excludes the bundles themselves:
+    // they normally already live in profile/node_modules. Our neutral root must
+    // also project those selected packages, without touching the source profile.
+    for (const [packageName, packageDir] of new Map(
+      profile.layers.map((layer) => [layer.packageName, layer.packageDir]),
+    )) {
+      if (!/^(?:@[a-z\d][a-z\d._-]*\/)?[a-z\d][a-z\d._-]*$/iu.test(packageName)) {
+        throw new Error('Selected bundle must use a valid package name')
+      }
+      const link = path.join(runtimeRoot.dir, 'node_modules', packageName)
+      await mkdir(path.dirname(link), { recursive: true })
+      await symlink(realpathSync.native(packageDir), link, 'dir')
     }
     const homePatches =
       loadOptionalPatches('dsh-desktop', path.join(options.home, 'cordis.patch.yml')) ?? []
@@ -240,21 +267,16 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
       },
     }
 
-    context = await boot(
-      'dsh-desktop',
-      path.join(profile.dir, PROFILE_ROOT_FILENAME),
-      patches,
-      (hostContext) => {
-        context = hostContext
-        contextReady.resolve(hostContext)
-        hostContext.provide('desktopSurface', desktopSurface)
-        hostContext.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
-        provideCmdline(hostContext, {
-          args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
-          exit: () => void disposeHost(false),
-        })
-      },
-    )
+    context = await boot('dsh-desktop', rootConfigPath, patches, (hostContext) => {
+      context = hostContext
+      contextReady.resolve(hostContext)
+      hostContext.provide('desktopSurface', desktopSurface)
+      hostContext.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
+      provideCmdline(hostContext, {
+        args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
+        exit: () => void disposeHost(false),
+      })
+    })
     if (surfaceId === undefined) throw new Error('desktop-plugin did not publish a surface')
     options.transport.postMessage(writer.next({ kind: 'ready', surfaceId }))
     return Object.freeze({
@@ -265,6 +287,7 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
     clearTimeout(acceptTimer)
     contextReady.resolve(undefined)
     await context?.fiber.dispose()
+    await cleanupRuntimeRoot()
     restoreEnvironment()
     const detail = error instanceof Error ? error.message : String(error)
     const summary = redactDiagnostic(detail, {

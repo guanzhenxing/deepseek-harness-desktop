@@ -4,12 +4,12 @@ ADR 记录本项目难以无成本撤销、会约束后续实现的架构决策�
 
 ## 索引
 
-| ADR | 状态 | 范围 |
-| --- | --- | --- |
-| [ADR-0001：自建独立的 DSH Desktop 插件与 Electron launcher](0001-build-own-native-dsh-shell.md) | 已接受 | 产品形态、进程边界、共享 home 与长期扩展方向 |
-| [ADR-0002：使用最小第一方 recovery bridge 发布 Safe Mode surface](0002-use-a-minimal-recovery-bridge.md) | 已接受 | 解决 Safe Mode 不加载正常 Desktop 插件时的 surface handoff |
-| [ADR-0003：以独立 profile-manager 统一拥有 profile 状态](0003-separate-profile-manager.md) | 已接受 | profile reconcile、恢复、Safe Mode 与 generation 的唯一权威 |
-| [ADR-0004：按原生能力独立定义和版本化跨进程契约](0004-version-native-capabilities-independently.md) | 已接受 | capability subpath、协议演进和敏感操作确认 |
+| ADR                                                                                                      | 状态   | 范围                                                        |
+| -------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------- |
+| [ADR-0001：自建独立的 DSH Desktop 插件与 Electron launcher](0001-build-own-native-dsh-shell.md)          | 已接受 | 产品形态、进程边界、共享 home 与长期扩展方向                |
+| [ADR-0002：使用最小第一方 recovery bridge 发布 Safe Mode surface](0002-use-a-minimal-recovery-bridge.md) | 已接受 | 解决 Safe Mode 不加载正常 Desktop 插件时的 surface handoff  |
+| [ADR-0003：以独立 profile-manager 统一拥有 profile 状态](0003-separate-profile-manager.md)               | 已接受 | profile reconcile、恢复、Safe Mode 与 generation 的唯一权威 |
+| [ADR-0004：按原生能力独立定义和版本化跨进程契约](0004-version-native-capabilities-independently.md)      | 已接受 | capability subpath、协议演进和敏感操作确认                  |
 
 ## 状态
 

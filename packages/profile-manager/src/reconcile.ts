@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { ProfileRef } from './profile-ref.js'
@@ -44,8 +44,11 @@ export type ReconcileResult = Readonly<{
   afterRevision: string
 }>
 
-export function createIsolatedHomeAuthority(home: string): IsolatedHomeAuthority {
+export function createIsolatedHomeAuthority(home: string, userData: string): IsolatedHomeAuthority {
   if (home.trim() === '') throw new Error('Profile write authority requires an explicit home')
+  if (!path.isAbsolute(userData) || path.resolve(home) !== path.join(userData, 'm0-dsh-home')) {
+    throw new Error('M0 profile authority requires the designated userData/m0-dsh-home')
+  }
   return Object.freeze({
     kind: 'm0-isolated-home' as const,
     home: path.resolve(home),
@@ -74,15 +77,32 @@ function parseProfileManifest(raw: string): ProfileManifest {
 }
 
 async function writeInitialFile(filename: string, content: string): Promise<void> {
+  let handle
+  let created = false
   try {
-    await writeFile(filename, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+    handle = await open(filename, 'wx', 0o600)
+    await handle.writeFile(content, 'utf8')
+    await handle.sync()
+    created = true
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await exists(filename)
+  } finally {
+    await handle?.close()
+  }
+  if (created) await syncDirectory(path.dirname(filename))
+}
+
+async function syncDirectory(dirname: string): Promise<void> {
+  const directory = await open(dirname, 'r')
+  try {
+    await directory.sync()
+  } finally {
+    await directory.close()
   }
 }
 
 async function initializeProfile(dir: string): Promise<void> {
-  await mkdir(dir, { recursive: true })
   await writeInitialFile(
     path.join(dir, 'package.json'),
     `${JSON.stringify(
@@ -100,9 +120,45 @@ async function initializeProfile(dir: string): Promise<void> {
   await writeInitialFile(path.join(dir, 'pnpm-workspace.yaml'), PROFILE_WORKSPACE)
 }
 
+async function requireOwnedDirectory(dirname: string, label: string): Promise<void> {
+  let current
+  try {
+    current = await lstat(dirname)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    await mkdir(dirname, { mode: 0o700 })
+    current = await lstat(dirname)
+  }
+  if (current.isSymbolicLink()) throw new Error(`${label} must not be a symlink`)
+  if (!current.isDirectory()) throw new Error(`${label} must be a directory`)
+}
+
+async function ensureContainedProfileDirectory(ref: ProfileRef): Promise<void> {
+  const expectedDir = path.join(ref.home, 'profiles', ref.name)
+  if (ref.dir !== expectedDir) throw new Error('ProfileRef directory does not match its home')
+  await requireOwnedDirectory(ref.home, 'isolated home')
+  await requireOwnedDirectory(path.join(ref.home, 'profiles'), 'profiles directory')
+  await requireOwnedDirectory(ref.dir, 'profile directory')
+  const [canonicalHome, canonicalProfile] = await Promise.all([
+    realpath(ref.home),
+    realpath(ref.dir),
+  ])
+  const relativeProfile = path.relative(canonicalHome, canonicalProfile)
+  if (
+    relativeProfile === '' ||
+    relativeProfile === '..' ||
+    relativeProfile.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeProfile)
+  ) {
+    throw new Error('profile directory escapes the isolated home')
+  }
+}
+
 async function exists(filename: string): Promise<boolean> {
   try {
-    await stat(filename)
+    const entry = await lstat(filename)
+    if (entry.isSymbolicLink()) throw new Error('managed profile file must not be a symlink')
+    if (!entry.isFile()) throw new Error('managed profile file must be a regular file')
     return true
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
@@ -123,6 +179,7 @@ async function writeFileAtomic(filename: string, content: string): Promise<void>
     await handle.close()
     handle = undefined
     await rename(temporary, filename)
+    await syncDirectory(path.dirname(filename))
   } finally {
     await handle?.close().catch(() => undefined)
     await rm(temporary, { force: true }).catch(() => undefined)
@@ -171,6 +228,8 @@ export async function reconcileDesktopProfile(
   }
   if (ref.name !== 'desktop')
     throw new Error('reconcileDesktopProfile only owns the desktop profile')
+
+  await ensureContainedProfileDirectory(ref)
 
   const manifestPath = path.join(ref.dir, 'package.json')
   const patchPath = path.join(ref.dir, 'cordis.patch.yml')

@@ -6,9 +6,5 @@
     "tsBuildInfoFile": "lib/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../desktop-contracts" },
-    { "path": "../desktop-plugin" },
-    { "path": "../profile-manager" }
-  ]
+  "references": [{ "path": "../desktop-contracts" }, { "path": "../profile-manager" }]
 }

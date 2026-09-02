@@ -1,10 +1,43 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { findBoundaryViolations } from './verify-boundaries.mjs'
+
+async function removeFixture(root) {
+  const target = path.resolve(root)
+  const identity = await lstat(target)
+  if (
+    path.dirname(target) !== path.resolve(tmpdir()) ||
+    !path.basename(target).startsWith('dsh-boundaries-') ||
+    !identity.isDirectory() ||
+    identity.isSymbolicLink() ||
+    path.dirname(await realpath(target)) !== (await realpath(tmpdir()))
+  ) {
+    throw new Error('refusing to remove an unsafe boundary fixture')
+  }
+  await rm(target, { recursive: true })
+}
+
+test('rejects product plugin imports from the Host mechanism', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-boundaries-'))
+  try {
+    const sourceDir = path.join(root, 'packages', 'host-supervisor', 'src')
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(
+      path.join(sourceDir, 'host-runner.ts'),
+      "import type { DesktopSurfaceService } from '@dsh-desktop/desktop-plugin'\n",
+    )
+    assert.deepEqual(
+      (await findBoundaryViolations(root)).map((item) => item.rule),
+      ['mechanism-no-product-plugin'],
+    )
+  } finally {
+    await removeFixture(root)
+  }
+})
 
 test('rejects Electron imports from mechanism packages', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'dsh-boundaries-'))
@@ -19,7 +52,7 @@ test('rejects Electron imports from mechanism packages', async () => {
       ['mechanism-no-electron'],
     )
   } finally {
-    await rm(root, { recursive: true })
+    await removeFixture(root)
   }
 })
 
@@ -39,7 +72,7 @@ test('rejects DSH runtime imports from Electron Main', async () => {
       ['main-no-dsh-runtime'],
     )
   } finally {
-    await rm(root, { recursive: true })
+    await removeFixture(root)
   }
 })
 
@@ -55,7 +88,7 @@ test('allows the Electron Host entry adapter to import the Host runner', async (
 
     assert.deepEqual(await findBoundaryViolations(root), [])
   } finally {
-    await rm(root, { recursive: true })
+    await removeFixture(root)
   }
 })
 
@@ -72,7 +105,7 @@ test('rejects exporting the DSH Host runner from the supervisor root entry', asy
       ['supervisor-root-no-host-runner'],
     )
   } finally {
-    await rm(root, { recursive: true })
+    await removeFixture(root)
   }
 })
 
@@ -92,6 +125,26 @@ test('rejects loading the DSH boot runtime through profile-manager', async () =>
       ['profile-manager-no-dsh-boot'],
     )
   } finally {
-    await rm(root, { recursive: true })
+    await removeFixture(root)
+  }
+})
+
+test('requires capability-specific desktop-contracts imports', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-boundaries-'))
+  try {
+    const sourceDir = path.join(root, 'packages', 'feature', 'src')
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(
+      path.join(sourceDir, 'index.ts'),
+      "import { HOST_CONTROL_PROTOCOL } from '@dsh-desktop/desktop-contracts'\n",
+    )
+
+    const violations = await findBoundaryViolations(root)
+    assert.deepEqual(
+      violations.map((item) => item.rule),
+      ['contracts-capability-subpath'],
+    )
+  } finally {
+    await removeFixture(root)
   }
 })

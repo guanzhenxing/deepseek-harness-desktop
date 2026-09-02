@@ -1,8 +1,9 @@
-import { validateLoopbackSurface, type LoopbackSurface } from '@dsh-desktop/desktop-contracts'
+import {
+  validateLoopbackSurface,
+  type DesktopSurfaceService,
+} from '@dsh-desktop/desktop-contracts/host-control'
 
-export interface DesktopSurfaceService {
-  schedule(surface: LoopbackSurface): void
-}
+export type { DesktopSurfaceService } from '@dsh-desktop/desktop-contracts/host-control'
 
 export interface DesktopSurfacePublisherServices {
   connection: { authenticatedUrl(baseUrl: string): string }

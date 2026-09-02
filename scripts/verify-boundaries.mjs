@@ -4,11 +4,13 @@ import { fileURLToPath } from 'node:url'
 
 const sourceExtension = /\.(?:[cm]?[jt]sx?)$/u
 const importPattern = /(?:from\s*|import\s*\(|require\s*\()\s*['"]([^'"]+)['"]/gu
+const ignoredDirectories = new Set(['lib', 'node_modules'])
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
   const files = []
   for (const entry of entries) {
+    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue
     const target = path.join(directory, entry.name)
     if (entry.isDirectory()) files.push(...(await sourceFiles(target)))
     else if (entry.isFile() && sourceExtension.test(entry.name)) files.push(target)
@@ -40,6 +42,19 @@ export async function findBoundaryViolations(root) {
           rule: 'packages-no-launcher',
           specifier,
         })
+      }
+      if (specifier === '@dsh-desktop/desktop-contracts') {
+        violations.push({
+          file: relativeFile,
+          rule: 'contracts-capability-subpath',
+          specifier,
+        })
+      }
+      if (
+        relativeFile.startsWith(path.join('packages', 'host-supervisor', 'src') + path.sep) &&
+        specifier.startsWith('@dsh-desktop/desktop-plugin')
+      ) {
+        violations.push({ file: relativeFile, rule: 'mechanism-no-product-plugin', specifier })
       }
       if (
         relativeFile === path.join('packages', 'host-supervisor', 'src', 'index.ts') &&

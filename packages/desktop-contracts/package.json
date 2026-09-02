@@ -4,10 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./lib/index.d.ts",
-      "default": "./lib/index.js"
-    },
     "./host-control": {
       "types": "./lib/host-control.d.ts",
       "default": "./lib/host-control.js"

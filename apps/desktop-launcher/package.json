@@ -10,6 +10,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@dsh-desktop/desktop-plugin": "workspace:*",
     "@dsh-desktop/host-supervisor": "workspace:*",
     "@dsh-desktop/profile-manager": "workspace:*",
     "@dsh-desktop/shell-core": "workspace:*"

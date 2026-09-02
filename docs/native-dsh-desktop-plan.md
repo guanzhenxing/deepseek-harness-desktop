@@ -46,18 +46,18 @@ anywhere-labs 与 dataelement 的桌面项目只作为固定 commit 的外部参
 
 以下功能只是不进入 v1。后续是否实现由实际使用需求、上游能力和维护成本另行决定：
 
-| 功能 | 它解决什么问题 | v1 处理 | 何时重新评估 |
-| --- | --- | --- | --- |
-| Windows/Linux 支持 | 处理不同窗口、托盘、安装器、终端和系统安全模型 | 仅验证 macOS | 出现明确的跨平台使用需求时 |
-| 插件市场 | 浏览、安装、升级、禁用第三方 DSH 插件，并支持可替换的 catalog provider | 用户仍通过标准 `dsh plugin` 命令管理插件 | 完成插件元数据、兼容性、信任策略和事务式安装设计后 |
-| Setup wizard | 首次启动时集中选择呈现模式、窗口材质、market、通知、浏览器访问和 LAN 暴露等选项 | 只在缺少凭据时给出本地提示，其余使用官方设置页 | v1 设置项增长到需要引导时 |
-| 更新服务 | 检查并安装 Desktop 发行版，同时管理内置 DSH、插件和数据格式的兼容关系 | 手动执行版本升级和 DMG 替换 | 完成签名、兼容性清单、迁移预检和安全降级规则后 |
-| 远程访问与控制 | 让已配对设备通过独立身份查看会话、提交任务或执行授权范围内的控制 | 固定 `127.0.0.1`，仅本机访问 | 完成 Host 端授权、配对撤销、TLS/可信中继和审计设计后 |
-| 更新请求身份 | anywhere-labs 的版本检查会发送当前桌面版本和持久化的随机 installation UUID；这是更新服务的请求标识，不等同于通用行为分析 | 不发版本检查请求，也不创建 installation id | 设计更新服务时一并评估最小数据原则 |
-| 桌面终端集成 | 从托盘打开系统终端，并注入当前 profile 对应的私有 `dsh`/`pnpm`/`node` shim | 使用普通终端和本项目配套 CLI | profile 环境切换造成明显使用摩擦时 |
-| 多 profile 桌面管理 | 在托盘中创建、选择和切换 profile，并通过 profile manager 向插件暴露当前选择 | v1 固定使用 `desktop` profile | 确实需要在一个桌面应用内切换多个 DSH 组合时 |
-| launcher-owned home 管理 | 让桌面发行版选择或隔离自己的 DSH home，避免碰触默认 CLI 数据 | v1 明确使用默认 `~/.dsh` | 需要多身份、测试隔离或公开发行时 |
-| 多 Host 并发 | 让多个 Host 同时安全写同一个 home | v1 使用 home lease 串行化 | 只有上游提供完整跨进程 ownership/locking 时才重新评估；本项目优先走一个 Host 多客户端 |
+| 功能                     | 它解决什么问题                                                                                                           | v1 处理                                        | 何时重新评估                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Windows/Linux 支持       | 处理不同窗口、托盘、安装器、终端和系统安全模型                                                                           | 仅验证 macOS                                   | 出现明确的跨平台使用需求时                                                            |
+| 插件市场                 | 浏览、安装、升级、禁用第三方 DSH 插件，并支持可替换的 catalog provider                                                   | 用户仍通过标准 `dsh plugin` 命令管理插件       | 完成插件元数据、兼容性、信任策略和事务式安装设计后                                    |
+| Setup wizard             | 首次启动时集中选择呈现模式、窗口材质、market、通知、浏览器访问和 LAN 暴露等选项                                          | 只在缺少凭据时给出本地提示，其余使用官方设置页 | v1 设置项增长到需要引导时                                                             |
+| 更新服务                 | 检查并安装 Desktop 发行版，同时管理内置 DSH、插件和数据格式的兼容关系                                                    | 手动执行版本升级和 DMG 替换                    | 完成签名、兼容性清单、迁移预检和安全降级规则后                                        |
+| 远程访问与控制           | 让已配对设备通过独立身份查看会话、提交任务或执行授权范围内的控制                                                         | 固定 `127.0.0.1`，仅本机访问                   | 完成 Host 端授权、配对撤销、TLS/可信中继和审计设计后                                  |
+| 更新请求身份             | anywhere-labs 的版本检查会发送当前桌面版本和持久化的随机 installation UUID；这是更新服务的请求标识，不等同于通用行为分析 | 不发版本检查请求，也不创建 installation id     | 设计更新服务时一并评估最小数据原则                                                    |
+| 桌面终端集成             | 从托盘打开系统终端，并注入当前 profile 对应的私有 `dsh`/`pnpm`/`node` shim                                               | 使用普通终端和本项目配套 CLI                   | profile 环境切换造成明显使用摩擦时                                                    |
+| 多 profile 桌面管理      | 在托盘中创建、选择和切换 profile，并通过 profile manager 向插件暴露当前选择                                              | v1 固定使用 `desktop` profile                  | 确实需要在一个桌面应用内切换多个 DSH 组合时                                           |
+| launcher-owned home 管理 | 让桌面发行版选择或隔离自己的 DSH home，避免碰触默认 CLI 数据                                                             | v1 明确使用默认 `~/.dsh`                       | 需要多身份、测试隔离或公开发行时                                                      |
+| 多 Host 并发             | 让多个 Host 同时安全写同一个 home                                                                                        | v1 使用 home lease 串行化                      | 只有上游提供完整跨进程 ownership/locking 时才重新评估；本项目优先走一个 Host 多客户端 |
 
 ## 3. 核心原则
 
@@ -67,17 +67,17 @@ anywhere-labs 与 dataelement 的桌面项目只作为固定 commit 的外部参
 
 隔离项如下：
 
-| 对象 | 位置/名称 | 所有者 | 桌面端是否可自动回滚 |
-| --- | --- | --- | --- |
-| DSH 凭据 | `~/.dsh/.credentials.yaml` | 用户/DSH | 否 |
-| DSH 设置 | `~/.dsh/settings.yaml` | 用户/所有 profile | 否 |
-| home patch | `~/.dsh/cordis.patch.yml` | 用户 | 否 |
-| 会话日志 | `~/.dsh/sessions/**` | DSH | 否 |
-| domain storage | `~/.dsh/storages` | DSH/用户 | 否 |
-| 桌面 profile | `~/.dsh/profiles/desktop` | `profile-manager` 与用户共同使用 | 仅满足修订校验时 |
-| Safe Mode profile（市场前置能力） | `~/.dsh/profiles/desktop-safe-mode` | launcher/`profile-manager` | 只管理自身文件，不自动修改正常 profile |
-| Electron userData | macOS Application Support 下的专属目录 | 桌面壳 | 是 |
-| 渲染会话 | `persist:dsh-desktop-renderer` | 桌面壳 | 是 |
+| 对象                              | 位置/名称                              | 所有者                           | 桌面端是否可自动回滚                   |
+| --------------------------------- | -------------------------------------- | -------------------------------- | -------------------------------------- |
+| DSH 凭据                          | `~/.dsh/.credentials.yaml`             | 用户/DSH                         | 否                                     |
+| DSH 设置                          | `~/.dsh/settings.yaml`                 | 用户/所有 profile                | 否                                     |
+| home patch                        | `~/.dsh/cordis.patch.yml`              | 用户                             | 否                                     |
+| 会话日志                          | `~/.dsh/sessions/**`                   | DSH                              | 否                                     |
+| domain storage                    | `~/.dsh/storages`                      | DSH/用户                         | 否                                     |
+| 桌面 profile                      | `~/.dsh/profiles/desktop`              | `profile-manager` 与用户共同使用 | 仅满足修订校验时                       |
+| Safe Mode profile（市场前置能力） | `~/.dsh/profiles/desktop-safe-mode`    | launcher/`profile-manager`       | 只管理自身文件，不自动修改正常 profile |
+| Electron userData                 | macOS Application Support 下的专属目录 | 桌面壳                           | 是                                     |
+| 渲染会话                          | `persist:dsh-desktop-renderer`         | 桌面壳                           | 是                                     |
 
 profile 名采用 `desktop`。它不是上游官方模板名；上游 `PROFILE_TEMPLATES` 只有 `web`、`acp`、`headless`、`sdk`、`sdk-minimal`。
 
@@ -303,16 +303,17 @@ Host 控制通道的 capability 只认证 launcher 所启动的 Host 进程，�
 
 - 定义和校验 `ProfileRef`，不硬编码 `desktop`。
 - 通过 `reconcileDesktopProfile(ProfileRef)` 初始化或修复本项目拥有的 profile 投影。
-- 在修改前记录存在性和 SHA-256，并执行白名单、修订校验和原子恢复。
+- M0 在修改前记录存在性和 manifest SHA-256，执行白名单与原子替换；M2 再加入持久事务、修订校验和原子恢复。
 - 创建和校验 Safe Mode profile 投影，但不在 Safe Mode 启动时自动修改正常 profile。
 - 在 E3 引入后拥有不可变 generation ledger、事务 journal、drift 检测、定点禁用与回滚；Electron 和产品 UI 不成为第二权威。
-- 不依赖 Electron；所有写入必须发生在调用方已经持有对应 home lease 时。
+- 不依赖 Electron；共享 home 写入要求调用方已持有对应 home lease；M0 专属 `userData/m0-dsh-home` 只接受显式隔离 authority。
 
 ### 4.3 `shell-core` 的职责
 
 - 解析但不篡改 DSH home。
 - 通过 `home-lease` 获取和释放 lease，通过 `profile-manager` 准备或恢复 profile。
 - 为 launcher 编排 `profile-manager`、`host-supervisor`、窗口和恢复状态；官方 `boot()`、`provideCmdline()` 与 `desktopSurface` proxy 的注入只发生在 Host runner 子进程。
+- Host runner 在中性临时 launch root 写启动用 `cordis.yml` 和选中 bundle 的局部 fallback；shared fallback 只投影安装依赖闭包，启动不修改 named profile。
 - 管理 BrowserWindow、Tray、全局快捷键、窗口状态和外链策略。
 - 有界关停 Host 子进程和 Electron 资源。
 - 输出结构化本地日志。
@@ -340,13 +341,13 @@ Host 控制通道的 capability 只认证 launcher 所启动的 Host 进程，�
 
 后续功能独立组合，不继续扩张 `desktop-plugin`：
 
-| 能力 | DSH 产品插件 | launcher/原生能力 | 关键边界 |
-| --- | --- | --- | --- |
-| 插件市场 | `plugin-market` | `desktopProfileManager` | catalog 与安装分离；不得直接把 UI 参数转发给 pnpm |
-| 远程访问 | `remote-access` | `desktopSecureStore` 与独立 bridge/relay adapter | 复用 typed Remote；bridge 只承载受限 surface，身份和授权由 Host 强制执行 |
-| 桌面升级 | `desktop-updater` | boot-independent `desktopUpdater` | 插件承载正常 UI/策略；launcher 负责 Host 不可用时的检查入口、签名验证、替换、恢复与 relaunch |
-| 桌面终端 | `desktop-terminal` | `desktopTerminal` | 只打开显式 profile 环境，不暴露任意 shell IPC |
-| 多 profile 管理 | `desktop-profiles` | `desktopProfileManager` | 所有操作接收 `ProfileRef`，默认值才是 `desktop` |
+| 能力            | DSH 产品插件       | launcher/原生能力                                | 关键边界                                                                                     |
+| --------------- | ------------------ | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| 插件市场        | `plugin-market`    | `desktopProfileManager`                          | catalog 与安装分离；不得直接把 UI 参数转发给 pnpm                                            |
+| 远程访问        | `remote-access`    | `desktopSecureStore` 与独立 bridge/relay adapter | 复用 typed Remote；bridge 只承载受限 surface，身份和授权由 Host 强制执行                     |
+| 桌面升级        | `desktop-updater`  | boot-independent `desktopUpdater`                | 插件承载正常 UI/策略；launcher 负责 Host 不可用时的检查入口、签名验证、替换、恢复与 relaunch |
+| 桌面终端        | `desktop-terminal` | `desktopTerminal`                                | 只打开显式 profile 环境，不暴露任意 shell IPC                                                |
+| 多 profile 管理 | `desktop-profiles` | `desktopProfileManager`                          | 所有操作接收 `ProfileRef`，默认值才是 `desktop`                                              |
 
 市场安装是 profile 变更事务。活跃 Host 运行期间只允许在隔离 staging 目录中解析依赖、校验制品和静态验证配置。
 
@@ -470,12 +471,12 @@ catalog、overrides 和 lock 文件由脚本生成与校验，禁止手工维护
 
 外部桌面项目只作为实现参考。初始化时固定记录所阅读的版本，避免以后把变化后的代码误当成当初依据：
 
-| 项目 | 初始化参考点 | 参考范围 |
-| --- | --- | --- |
-| anywhere-labs/dsh-desktop | commit [`e71a9ef0b168763d422042835a8c3b7d6d809800`](https://github.com/anywhere-labs/dsh-desktop/commit/e71a9ef0b168763d422042835a8c3b7d6d809800)（2026-08-30 master HEAD，晚于 v2.0.4 tag `d29bf7a`） | Desktop 插件/launcher 边界、profile 修复、Electron 生命周期、打包与平台适配 |
-| anywhere-labs vendored DSH runtime | [`0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.1)，upstream commit [`cd5ef8148158c3a752a658978873241fdf8e2bbc`](https://github.com/deepseek-ai/deepseek-harness/commit/cd5ef8148158c3a752a658978873241fdf8e2bbc) | 只用于理解其当时兼容性处理，不作为本项目 DSH 基线 |
-| dataelement/dsh-desktop | commit [`07fd40a2a9301fd34672931faeb37d1ddbe67538`](https://github.com/dataelement/dsh-desktop/commit/07fd40a2a9301fd34672931faeb37d1ddbe67538)（2026-08-31 main HEAD） | 独立 Host 进程监督、Safe Mode、插件 generation、配对 bridge、更新状态机与目标平台打包 |
-| dataelement vendored DSH runtime | [`0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.1) | 只用于理解其协议适配与 generation 实现，不作为本项目 DSH 基线 |
+| 项目                               | 初始化参考点                                                                                                                                                                                                                                              | 参考范围                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| anywhere-labs/dsh-desktop          | commit [`e71a9ef0b168763d422042835a8c3b7d6d809800`](https://github.com/anywhere-labs/dsh-desktop/commit/e71a9ef0b168763d422042835a8c3b7d6d809800)（2026-08-30 master HEAD，晚于 v2.0.4 tag `d29bf7a`）                                                    | Desktop 插件/launcher 边界、profile 修复、Electron 生命周期、打包与平台适配           |
+| anywhere-labs vendored DSH runtime | [`0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.1)，upstream commit [`cd5ef8148158c3a752a658978873241fdf8e2bbc`](https://github.com/deepseek-ai/deepseek-harness/commit/cd5ef8148158c3a752a658978873241fdf8e2bbc) | 只用于理解其当时兼容性处理，不作为本项目 DSH 基线                                     |
+| dataelement/dsh-desktop            | commit [`07fd40a2a9301fd34672931faeb37d1ddbe67538`](https://github.com/dataelement/dsh-desktop/commit/07fd40a2a9301fd34672931faeb37d1ddbe67538)（2026-08-31 main HEAD）                                                                                   | 独立 Host 进程监督、Safe Mode、插件 generation、配对 bridge、更新状态机与目标平台打包 |
+| dataelement vendored DSH runtime   | [`0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.1)                                                                                                                                                                | 只用于理解其协议适配与 generation 实现，不作为本项目 DSH 基线                         |
 
 后续只有在实际查阅新的外部代码并采用了其中思路时，才更新这张记录。外部项目的 PR、release 节奏和测试结果都不是本项目的升级信号或放行条件。
 
@@ -497,12 +498,12 @@ M0 已建立 [`compatibility.json`](compatibility.json) 作为首份机器可读
 
 Desktop 发行版同时涉及四条独立版本轴：
 
-| 版本轴 | 所有者 | 升级风险 |
-| --- | --- | --- |
-| Desktop/Electron 应用 | 本项目发行版 | 原生代码、签名、安装和 relaunch |
-| 内置 DSH runtime | 本项目依赖闭包 | Host/API 行为和 profile bundle 兼容性 |
-| `desktop` profile 插件 | 用户与 profile manager | 第三方代码、依赖解析和组合启动失败 |
-| session/storage/settings 格式 | 对应 DSH provider | 新版本写入后，旧版本可能无法读取 |
+| 版本轴                        | 所有者                 | 升级风险                              |
+| ----------------------------- | ---------------------- | ------------------------------------- |
+| Desktop/Electron 应用         | 本项目发行版           | 原生代码、签名、安装和 relaunch       |
+| 内置 DSH runtime              | 本项目依赖闭包         | Host/API 行为和 profile bundle 兼容性 |
+| `desktop` profile 插件        | 用户与 profile manager | 第三方代码、依赖解析和组合启动失败    |
+| session/storage/settings 格式 | 对应 DSH provider      | 新版本写入后，旧版本可能无法读取      |
 
 每个发行制品必须携带机器可读兼容性清单，至少记录：Desktop 版本、DSH tag/commit、支持的 plugin API/DSH 范围、profile schema、已知持久化格式版本、平台/架构和制品 SHA-256。
 
@@ -587,7 +588,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ## 10. 实施里程碑
 
-### M0：独立最小闭环（已于 2026-09-02 完成源码级验收）
+### M0：独立最小闭环（2026-09-02 实现，审查收尾中）
 
 - 建立 workspace、`apps/desktop-launcher`、`packages/desktop-plugin`、`packages/desktop-contracts`、`packages/host-supervisor`、`packages/profile-manager` 与 `packages/shell-core`。`desktop-recovery-bridge` 是 E3 前置交付，不在 M0 实现。
 - 实现独立 Host runner、私有控制通道、结构化握手、稳定性窗口与有界关停；Electron Main 不直接调用 DSH `boot()`。
@@ -597,7 +598,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 验收：新建与已有 `desktop` profile 都通过 Electron-independent `profile-manager` 的 reconcile 测试；独立 Host 子进程加载 `desktop-plugin`，插件经窄化且 publisher-neutral 的 `desktopSurface` 控制契约调度官方 DSH UI；终止 Host 不会同时终止 Electron 壳。
 
-完成证据：Host-control 1.0、profile reconcile、bundle、监督器和 shell-core 单元测试；真实 DSH 独立 PID 集成测试；官方 UI 与 Host crash 两条 Electron smoke。M0 未包含 home lease、Safe Mode、安装包或发布能力。
+验收证据项：Host-control 1.0、profile reconcile、bundle、监督器和 shell-core 单元测试；真实 DSH 独立 PID 集成测试；官方 UI 与 Host crash 两条 Electron smoke。审查问题关闭、完整验证通过并提交后才标记完成。M0 未包含 home lease、Safe Mode、安装包或发布能力。
 
 ### M1：共享 home 与单 Host（1–1.5 天）
 

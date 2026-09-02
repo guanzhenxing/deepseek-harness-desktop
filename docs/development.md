@@ -1,11 +1,11 @@
 # 开发指南
 
-- 状态：M0 已实现，进入 M1 前审查
+- 状态：M0 已实现，审查收尾中
 - 日期：2026-09-02
 
 ## 1. 当前阶段
 
-仓库已完成 M0 独立最小闭环。当前开发入口使用隔离 home，尚未实现共享 `~/.dsh`、home lease、配套 CLI、Safe Mode、安装包或发布流程。
+仓库已实现 M0 独立最小闭环，正在关闭审查问题与复核验收证据。当前开发入口使用隔离 home，尚未实现共享 `~/.dsh`、home lease、配套 CLI、Safe Mode、安装包或发布流程。
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 
@@ -30,20 +30,18 @@ corepack pnpm@11.7.0 check
 
 当前可用命令：
 
-| 命令 | 用途 |
-| --- | --- |
-| 命令 | 要求 |
-| --- | --- |
-| `pnpm build` | 构建全部 TypeScript project references |
-| `pnpm format:check` | 检查格式但不修改文件 |
-| `pnpm lint` | 静态规则与依赖边界 |
-| `pnpm typecheck` | Host、client 与脚本 TypeScript 类型检查 |
-| `pnpm test:unit` | 纯函数、schema、state machine 和组件单元测试 |
+| 命令                    | 用途                                                   |
+| ----------------------- | ------------------------------------------------------ |
+| `pnpm build`            | 构建全部 TypeScript project references                 |
+| `pnpm format:check`     | 检查格式但不修改文件                                   |
+| `pnpm lint`             | 静态规则与依赖边界                                     |
+| `pnpm typecheck`        | Host、client 与脚本 TypeScript 类型检查                |
+| `pnpm test:unit`        | 纯函数、schema、state machine 和组件单元测试           |
 | `pnpm test:integration` | 构建后用隔离 home 启动真实 DSH Host 和官方 Web surface |
-| `pnpm smoke:dsh-ui` | 独立 Electron/Host PID 的最小官方 DSH UI 闭环 |
-| `pnpm smoke:host-crash` | 只终止 Host，验证 launcher 恢复页与最终无残留进程 |
-| `pnpm check:docs` | 检查必需文档、兼容性事实、本地链接与文本格式 |
-| `pnpm check` | 合并当前阶段要求的全部快速阻塞门禁 |
+| `pnpm smoke:dsh-ui`     | 独立 Electron/Host PID 的最小官方 DSH UI 闭环          |
+| `pnpm smoke:host-crash` | 只终止 Host，验证 launcher 恢复页与最终无残留进程      |
+| `pnpm check:docs`       | 检查必需文档、兼容性事实、本地链接与文本格式           |
+| `pnpm check`            | 合并当前阶段要求的全部快速阻塞门禁                     |
 
 `pnpm smoke:package` 在 M3 建立；在此之前不能把源码 smoke 描述成安装包验收。
 
@@ -134,16 +132,16 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 ## 6. 审查门禁
 
-| 变更范围 | 必须通过 |
-| --- | --- |
-| 所有变更 | `pnpm check`、spec 验收、相关文档同步 |
-| schema/state machine | unit tests、双向 contract fixtures、错误/重放用例 |
-| profile/home/lease | unit、隔离 home integration、crash recovery、真实 home 不变证明 |
-| Host 进程 | lifecycle integration、残留进程检查、crash-loop 上限 |
-| Electron/IPC/navigation | security review、错误 sender/origin/schema 测试 |
-| runtime/build/package | `.app`/DMG 冒烟，不只运行开发入口 |
-| DSH baseline | 兼容性清单、补丁对账、完整测试与独立升级分支 |
-| market/remote/updater | 新 ADR、threat-model review、供应链/授权/迁移专项测试 |
+| 变更范围                | 必须通过                                                        |
+| ----------------------- | --------------------------------------------------------------- |
+| 所有变更                | `pnpm check`、spec 验收、相关文档同步                           |
+| schema/state machine    | unit tests、双向 contract fixtures、错误/重放用例               |
+| profile/home/lease      | unit、隔离 home integration、crash recovery、真实 home 不变证明 |
+| Host 进程               | lifecycle integration、残留进程检查、crash-loop 上限            |
+| Electron/IPC/navigation | security review、错误 sender/origin/schema 测试                 |
+| runtime/build/package   | `.app`/DMG 冒烟，不只运行开发入口                               |
+| DSH baseline            | 兼容性清单、补丁对账、完整测试与独立升级分支                    |
+| market/remote/updater   | 新 ADR、threat-model review、供应链/授权/迁移专项测试           |
 
 审查沿两个轴分别给结论：
 
@@ -152,15 +150,15 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 ## 7. 文档规则
 
-| 文档 | 内容权威 | 何时更新 |
-| --- | --- | --- |
-| `README.md` | 用户入口、当前状态和最小命令 | 用户可见范围或启动方式变化 |
-| `docs/architecture.md` | 当前组件、进程、信任和依赖边界 | 架构现状变化 |
-| `docs/native-dsh-desktop-plan.md` | v1 里程碑与未来路线 | 交付范围、顺序或估时变化 |
-| `docs/adr/**` | 不可逆决策及依据 | 新决策、替代或废弃旧决策 |
-| `docs/protocols/**` | normative 跨边界协议 | schema、状态机或版本支持变化 |
-| `docs/data-layout.md` | 路径、所有权、备份和迁移 | 新持久化状态或迁移出现 |
-| `SECURITY.md` | 威胁模型和安全进入条件 | 信任边界、公开发行或报告流程变化 |
+| 文档                              | 内容权威                       | 何时更新                         |
+| --------------------------------- | ------------------------------ | -------------------------------- |
+| `README.md`                       | 用户入口、当前状态和最小命令   | 用户可见范围或启动方式变化       |
+| `docs/architecture.md`            | 当前组件、进程、信任和依赖边界 | 架构现状变化                     |
+| `docs/native-dsh-desktop-plan.md` | v1 里程碑与未来路线            | 交付范围、顺序或估时变化         |
+| `docs/adr/**`                     | 不可逆决策及依据               | 新决策、替代或废弃旧决策         |
+| `docs/protocols/**`               | normative 跨边界协议           | schema、状态机或版本支持变化     |
+| `docs/data-layout.md`             | 路径、所有权、备份和迁移       | 新持久化状态或迁移出现           |
+| `SECURITY.md`                     | 威胁模型和安全进入条件         | 信任边界、公开发行或报告流程变化 |
 
 版本事实只从依赖锁或 [`compatibility.json`](compatibility.json) 生成。不要在多个 Markdown 文件中手工维护不同的“当前版本”。
 

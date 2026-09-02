@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -14,20 +14,60 @@ import {
 const homes: string[] = []
 
 async function testHome() {
-  const home = await mkdtemp(path.join(tmpdir(), 'dsh-profile-manager-'))
-  homes.push(home)
+  const userData = await mkdtemp(path.join(tmpdir(), 'dsh-profile-manager-'))
+  homes.push(userData)
+  const home = path.join(userData, 'm0-dsh-home')
+  await mkdir(home)
   return home
 }
 
 afterEach(async () => {
-  for (const home of homes.splice(0)) await rm(home, { recursive: true })
+  for (const home of homes.splice(0)) {
+    const resolved = path.resolve(home)
+    const stat = await lstat(resolved)
+    if (
+      path.dirname(resolved) !== path.resolve(tmpdir()) ||
+      !path.basename(resolved).startsWith('dsh-profile-manager-') ||
+      !stat.isDirectory() ||
+      stat.isSymbolicLink()
+    ) {
+      throw new Error(`refusing to clean an unsafe profile fixture: ${resolved}`)
+    }
+    await rm(resolved, { recursive: true })
+  }
 })
 
 describe('reconcileDesktopProfile', () => {
+  it('does not issue isolated authority for a home outside the designated userData child', () => {
+    expect(() => createIsolatedHomeAuthority('/tmp/arbitrary-home', '/tmp/desktop-data')).toThrow(
+      /userData/u,
+    )
+  })
+  it.each(['package.json', 'cordis.patch.yml', 'pnpm-workspace.yaml'])(
+    'rejects a managed %s symlink before reading or changing the profile',
+    async (filename) => {
+      const home = await testHome()
+      const external = await testHome()
+      const ref = createProfileRef(home, 'desktop')
+      await mkdir(ref.dir, { recursive: true })
+      const target = path.join(external, filename)
+      await writeFile(target, '{"private":true}\n')
+      await symlink(target, path.join(ref.dir, filename))
+
+      await expect(
+        reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, path.dirname(home))),
+      ).rejects.toThrow(/symlink/u)
+      expect(await readFile(target, 'utf8')).toBe('{"private":true}\n')
+    },
+  )
+
   it('initializes a missing desktop profile in an isolated home', async () => {
     const home = await testHome()
     const ref = createProfileRef(home, 'desktop')
-    const result = await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home))
+    const result = await reconcileDesktopProfile(
+      ref,
+      createIsolatedHomeAuthority(home, path.dirname(home)),
+    )
 
     const manifest = JSON.parse(await readFile(path.join(ref.dir, 'package.json'), 'utf8'))
     expect(manifest.dsh.profile).toEqual({ bundles: DESKTOP_BUNDLE_PREFIX, patchReload: 'live' })
@@ -43,7 +83,7 @@ describe('reconcileDesktopProfile', () => {
   it('repairs only the owned prefix and preserves third-party order and metadata', async () => {
     const home = await testHome()
     const ref = createProfileRef(home, 'desktop')
-    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home))
+    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, path.dirname(home)))
     const manifestPath = path.join(ref.dir, 'package.json')
     await writeFile(
       manifestPath,
@@ -73,7 +113,10 @@ describe('reconcileDesktopProfile', () => {
       )}\n`,
     )
 
-    const result = await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home))
+    const result = await reconcileDesktopProfile(
+      ref,
+      createIsolatedHomeAuthority(home, path.dirname(home)),
+    )
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
     expect(manifest.dsh.profile.bundles).toEqual([...DESKTOP_BUNDLE_PREFIX, 'third-a', 'third-b'])
     expect(manifest.dsh.profile.patchReload).toBe('startup')
@@ -93,8 +136,11 @@ describe('reconcileDesktopProfile', () => {
     await writeFile(unrelatedPath, '{"name":"unrelated"}\n')
     const unrelatedBefore = await readFile(unrelatedPath, 'utf8')
 
-    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home))
-    const second = await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home))
+    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, path.dirname(home)))
+    const second = await reconcileDesktopProfile(
+      ref,
+      createIsolatedHomeAuthority(home, path.dirname(home)),
+    )
 
     expect(second.changed).toBe(false)
     expect(second.beforeRevision).toBe(second.afterRevision)
@@ -106,10 +152,43 @@ describe('reconcileDesktopProfile', () => {
     const otherHome = await testHome()
     const ref = createProfileRef(home, 'desktop')
     await expect(
-      reconcileDesktopProfile(ref, createIsolatedHomeAuthority(otherHome)),
+      reconcileDesktopProfile(ref, createIsolatedHomeAuthority(otherHome, path.dirname(otherHome))),
     ).rejects.toThrow(/authority/u)
     await expect(readFile(path.join(ref.dir, 'package.json'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+
+  it('rejects a desktop profile symlink before writing outside the isolated home', async () => {
+    const home = await testHome()
+    const external = await testHome()
+    const ref = createProfileRef(home, 'desktop')
+    await mkdir(path.dirname(ref.dir), { recursive: true })
+    await symlink(external, ref.dir, 'dir')
+
+    await expect(
+      reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, path.dirname(home))),
+    ).rejects.toThrow(/symlink/u)
+    await expect(readFile(path.join(external, 'package.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('rejects an isolated home symlink before profile initialization', async () => {
+    const parent = await testHome()
+    const external = await testHome()
+    const linkedHome = path.join(parent, 'm0-dsh-home')
+    await symlink(external, linkedHome, 'dir')
+    const ref = createProfileRef(linkedHome, 'desktop')
+
+    await expect(
+      reconcileDesktopProfile(
+        ref,
+        createIsolatedHomeAuthority(linkedHome, path.dirname(linkedHome)),
+      ),
+    ).rejects.toThrow(/isolated home.*symlink/u)
+    await expect(
+      readFile(path.join(external, 'profiles', 'desktop', 'package.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createEnvelopeWriter, type HostEnvelope } from '@dsh-desktop/desktop-contracts'
+import {
+  createEnvelopeWriter,
+  type HostEnvelope,
+} from '@dsh-desktop/desktop-contracts/host-control'
 
 import { HostSupervisor, type HostBootstrap, type ManagedHostProcess } from '../src/supervisor.js'
 
@@ -92,6 +95,28 @@ async function startAndHello(setup: ReturnType<typeof fixture>) {
 }
 
 describe('HostSupervisor', () => {
+  it('bounds startup when the Host never sends hello', async () => {
+    vi.useFakeTimers()
+    try {
+      const setup = fixture({ startupTimeoutMs: 250 })
+      const started = setup.supervisor.start({
+        home: '/tmp/isolated-home',
+        profileName: 'desktop',
+        mode: 'normal',
+        leaseGeneration: 'lease-generation-1',
+      })
+      const outcome = started.catch((error: unknown) => error)
+      await vi.waitFor(() => expect(setup.process.bootstrap).toBeDefined())
+      await vi.advanceTimersByTimeAsync(250)
+      await expect(outcome).resolves.toMatchObject({ code: 'BOOT_FAILED' })
+      expect(setup.process.terminateCount).toBe(1)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(setup.process.killCount).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('resolves only after surface, ready and the stability window', async () => {
     vi.useFakeTimers()
     try {
@@ -151,6 +176,29 @@ describe('HostSupervisor', () => {
     setup.process.emitExit(1, 'SIGKILL')
     expect(setup.events).toContain('crashed')
     expect(setup.supervisor.state).toBe('failed')
+  })
+
+  it('terminates a healthy Host after a protocol violation', async () => {
+    const setup = fixture()
+    const { hostWriter, started } = await startAndHello(setup)
+    setup.process.emitMessage(hostWriter.next({ kind: 'phase', phase: 'booting' }))
+    setup.process.emitMessage(
+      hostWriter.next({
+        kind: 'surface',
+        surfaceId: 'surface-1',
+        purpose: 'normal',
+        surface: { kind: 'loopback', url: 'http://127.0.0.1:43123/' },
+      }),
+    )
+    setup.process.emitMessage(hostWriter.next({ kind: 'ready', surfaceId: 'surface-1' }))
+    await started
+
+    setup.process.emitMessage(hostWriter.next({ kind: 'ready', surfaceId: 'surface-1' }))
+    expect(setup.supervisor.state).toBe('failed')
+    expect(setup.process.terminateCount).toBe(1)
+    expect(setup.events).toContain('crashed')
+    setup.process.emitExit(1, 'SIGTERM')
+    expect(setup.events.filter((event) => event === 'crashed')).toHaveLength(1)
   })
 
   it('merges stop requests and accepts dispose ack plus process exit', async () => {

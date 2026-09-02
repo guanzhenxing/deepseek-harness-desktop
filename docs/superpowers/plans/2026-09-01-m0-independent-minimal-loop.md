@@ -71,7 +71,7 @@
 
 1. Write failing tests for normalized `ProfileRef`, invalid names and explicit test-home containment.
 2. Write failing integration tests for missing profile initialization, desired prefix repair, duplicate owned bundle removal, third-party order preservation, unrelated profile preservation and idempotence.
-3. Implement `reconcileDesktopProfile(ref)` using public `@deepseek-ai/dsh-app-boot` profile helpers and atomic manifest replacement. The owned prefix is exactly `@deepseek-ai/dsh-base`, `@deepseek-ai/dsh-web-app`, `@dsh-desktop/desktop-plugin`.
+3. Implement `reconcileDesktopProfile(ref)` with the public DSH profile format and atomic manifest replacement. Do not import the monolithic `@deepseek-ai/dsh-app-boot` root into profile-manager because that would evaluate the Host boot graph in Electron Main; keep parity tests for the small profile-format semantics used here. The owned prefix is exactly `@deepseek-ai/dsh-base`, `@deepseek-ai/dsh-web-app`, `@dsh-desktop/desktop-plugin`.
 4. Return before/after SHA-256 revisions and changed files so later recovery can reuse the same authority; do not add generation journals in M0.
 5. Prove tests never touch the real DSH home.
 6. Commit as `feat: reconcile desktop profile`.

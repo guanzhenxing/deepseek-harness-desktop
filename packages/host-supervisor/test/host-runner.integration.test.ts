@@ -1,17 +1,29 @@
 import { randomUUID } from 'node:crypto'
 import { fork, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { initProfile, loadOptionalPatches } from '@deepseek-ai/dsh-app-boot'
+
 import {
   createEnvelopeWriter,
   parseHostEnvelope,
   type LauncherEnvelope,
-} from '@dsh-desktop/desktop-contracts'
+} from '@dsh-desktop/desktop-contracts/host-control'
 import {
   createIsolatedHomeAuthority,
   createProfileRef,
@@ -23,8 +35,30 @@ import { HostSupervisor, type HostBootstrap, type ManagedHostProcess } from '../
 
 const homes: string[] = []
 
+async function testHome(prefix = 'dsh-host-runner-'): Promise<string> {
+  const userData = await mkdtemp(path.join(tmpdir(), prefix))
+  homes.push(userData)
+  const home = path.join(userData, 'm0-dsh-home')
+  await mkdir(home)
+  return home
+}
+
 afterEach(async () => {
-  for (const home of homes.splice(0)) await rm(home, { recursive: true })
+  for (const home of homes.splice(0)) {
+    const resolved = path.resolve(home)
+    const stat = await lstat(resolved)
+    if (
+      path.dirname(resolved) !== path.resolve(tmpdir()) ||
+      !['dsh-host-runner-', 'dsh-node-host-runner-'].some((prefix) =>
+        path.basename(resolved).startsWith(prefix),
+      ) ||
+      !stat.isDirectory() ||
+      stat.isSymbolicLink()
+    ) {
+      throw new Error(`refusing to clean an unsafe Host fixture: ${resolved}`)
+    }
+    await rm(resolved, { recursive: true })
+  }
 })
 
 class LoopbackTransport implements HostControlTransport {
@@ -138,11 +172,134 @@ function expectCompleteOfficialBootGraph(
 }
 
 describe('real DSH Host runner', () => {
-  it('boots the desktop profile and publishes an authenticated official Web surface', async () => {
-    const home = await mkdtemp(path.join(tmpdir(), 'dsh-host-runner-'))
-    homes.push(home)
+  it('loads a profile-local bundle by its bare package name without mutating the profile', async () => {
+    const home = await testHome()
     const ref = createProfileRef(home, 'desktop')
-    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home))
+    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, path.dirname(home)))
+    const bundle = path.join(ref.dir, 'node_modules', '@fixture', 'local-bundle')
+    await mkdir(bundle, { recursive: true })
+    await writeFile(
+      path.join(bundle, 'package.json'),
+      JSON.stringify({
+        name: '@fixture/local-bundle',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        dsh: { bundle: { patch: 'bundle.patch.yml' } },
+      }),
+    )
+    await writeFile(
+      path.join(bundle, 'bundle.patch.yml'),
+      '- insert:\n    - id: local-bundle\n      name: "@fixture/local-bundle"\n',
+    )
+    const marker = path.join(home, 'local-bundle-loaded')
+    await writeFile(
+      path.join(bundle, 'index.js'),
+      `import { writeFileSync } from 'node:fs';\nexport const name = 'local-bundle';\nexport function apply() { writeFileSync(${JSON.stringify(marker)}, 'loaded'); }\n`,
+    )
+    const manifestPath = path.join(ref.dir, 'package.json')
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    manifest.dsh.profile.bundles.push('@fixture/local-bundle')
+    const manifestBefore = JSON.stringify(manifest)
+    await writeFile(manifestPath, manifestBefore)
+    const entriesBefore = (await readdir(ref.dir)).sort()
+    const host = await runDshHost({
+      home,
+      profileName: 'desktop',
+      mode: 'normal',
+      capability: 'c'.repeat(43),
+      leaseGeneration: 'lease-generation-1',
+      hostIdentity: { pid: process.pid, startIdentity: 'integration-host' },
+      transport: new LoopbackTransport('c'.repeat(43), 'lease-generation-1'),
+      productInstallAnchor: fileURLToPath(
+        new URL('../../../apps/desktop-launcher/package.json', import.meta.url),
+      ),
+    })
+    try {
+      expect(await readFile(marker, 'utf8')).toBe('loaded')
+      expect(await readFile(manifestPath, 'utf8')).toBe(manifestBefore)
+      expect((await readdir(ref.dir)).sort()).toEqual(entriesBefore)
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  it('keeps initialized profile files compatible with the pinned public DSH format', async () => {
+    const home = await testHome()
+    const upstreamHome = await testHome()
+    const ref = createProfileRef(home, 'desktop')
+    const upstreamDir = path.join(upstreamHome, 'profiles', 'desktop')
+    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, path.dirname(home)))
+    initProfile(upstreamDir, [
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-web-app',
+      '@dsh-desktop/desktop-plugin',
+    ])
+    // Upstream's extra comments are not part of the patch format contract.
+    expect(loadOptionalPatches('parity', path.join(ref.dir, 'cordis.patch.yml'))).toEqual(
+      loadOptionalPatches('parity', path.join(upstreamDir, 'cordis.patch.yml')),
+    )
+    for (const filename of ['package.json', 'pnpm-workspace.yaml']) {
+      expect(await readFile(path.join(ref.dir, filename), 'utf8')).toBe(
+        await readFile(path.join(upstreamDir, filename), 'utf8'),
+      )
+    }
+  })
+
+  it('rejects a profiles symlink before materializing any fallback', async () => {
+    const home = await testHome()
+    const external = await testHome()
+    await symlink(external, path.join(home, 'profiles'), 'dir')
+    await expect(
+      runDshHost({
+        home,
+        profileName: 'desktop',
+        mode: 'normal',
+        capability: 'c'.repeat(43),
+        leaseGeneration: 'lease-generation-1',
+        hostIdentity: { pid: process.pid, startIdentity: 'integration-host' },
+        transport: new LoopbackTransport('c'.repeat(43), 'lease-generation-1'),
+        productInstallAnchor: fileURLToPath(
+          new URL('../../../apps/desktop-launcher/package.json', import.meta.url),
+        ),
+      }),
+    ).rejects.toThrow(/symlink/u)
+    expect(await readdir(external)).toEqual([])
+  })
+
+  it('refuses to delete a replacement launch root during disposal', async () => {
+    const home = await testHome()
+    await reconcileDesktopProfile(
+      createProfileRef(home, 'desktop'),
+      createIsolatedHomeAuthority(home, path.dirname(home)),
+    )
+    const host = await runDshHost({
+      home,
+      profileName: 'desktop',
+      mode: 'normal',
+      capability: 'c'.repeat(43),
+      leaseGeneration: 'lease-generation-1',
+      hostIdentity: { pid: process.pid, startIdentity: 'integration-host' },
+      transport: new LoopbackTransport('c'.repeat(43), 'lease-generation-1'),
+      productInstallAnchor: fileURLToPath(
+        new URL('../../../apps/desktop-launcher/package.json', import.meta.url),
+      ),
+    })
+    const profiles = path.join(home, 'profiles')
+    const name = (await readdir(profiles)).find((entry) => entry.startsWith('.dsh-desktop-run-'))!
+    const root = path.join(profiles, name)
+    await rename(root, path.join(profiles, 'saved-root'))
+    await mkdir(root)
+    await writeFile(path.join(root, 'sentinel'), 'keep')
+    await expect(host.dispose()).rejects.toThrow(/identity/u)
+    expect(await readFile(path.join(root, 'sentinel'), 'utf8')).toBe('keep')
+  })
+
+  it('boots the desktop profile and publishes an authenticated official Web surface', async () => {
+    const home = await testHome()
+    const ref = createProfileRef(home, 'desktop')
+    await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, path.dirname(home)))
+    const profileEntries = (await readdir(ref.dir)).sort()
     const capability = 'c'.repeat(43)
     const leaseGeneration = 'lease-generation-1'
     const transport = new LoopbackTransport(capability, leaseGeneration)
@@ -151,6 +308,9 @@ describe('real DSH Host runner', () => {
       home,
       profileName: 'desktop',
       mode: 'normal',
+      productInstallAnchor: fileURLToPath(
+        new URL('../../../apps/desktop-launcher/package.json', import.meta.url),
+      ),
       capability,
       leaseGeneration,
       hostIdentity: { pid: process.pid, startIdentity: 'integration-host' },
@@ -175,6 +335,15 @@ describe('real DSH Host runner', () => {
     })
     if (surfaceMessage?.kind !== 'surface') throw new Error('surface was not published')
     expectCompleteOfficialBootGraph(await readOfficialBootGraph(surfaceMessage.surface.url))
+    expect((await readdir(ref.dir)).sort()).toEqual(profileEntries)
+    await expect(readFile(path.join(ref.dir, 'cordis.yml'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect(
+      (await readdir(path.join(home, 'profiles'))).filter((name) =>
+        name.startsWith('.dsh-desktop-run-'),
+      ),
+    ).toHaveLength(1)
 
     transport.dispose()
     await vi.waitFor(() => {
@@ -183,14 +352,18 @@ describe('real DSH Host runner', () => {
       ).toContain('dispose-ack')
     })
     await host.disposed
+    expect(
+      (await readdir(path.join(home, 'profiles'))).filter((name) =>
+        name.startsWith('.dsh-desktop-run-'),
+      ),
+    ).toEqual([])
   }, 60_000)
 
   it('boots the complete official Web graph from an independent Node Host process', async () => {
-    const home = await mkdtemp(path.join(tmpdir(), 'dsh-node-host-runner-'))
-    homes.push(home)
+    const home = await testHome('dsh-node-host-runner-')
     await reconcileDesktopProfile(
       createProfileRef(home, 'desktop'),
-      createIsolatedHomeAuthority(home),
+      createIsolatedHomeAuthority(home, path.dirname(home)),
     )
     let child: ChildProcess | undefined
     const supervisor = new HostSupervisor({

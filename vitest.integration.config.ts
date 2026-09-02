@@ -8,7 +8,10 @@ const root = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   resolve: {
     alias: {
-      '@dsh-desktop/desktop-contracts': path.join(root, 'packages/desktop-contracts/src/index.ts'),
+      '@dsh-desktop/desktop-contracts/host-control': path.join(
+        root,
+        'packages/desktop-contracts/src/host-control.ts',
+      ),
       '@dsh-desktop/profile-manager': path.join(root, 'packages/profile-manager/src/index.ts'),
       '@dsh-desktop/desktop-plugin': path.join(root, 'packages/desktop-plugin/src/index.ts'),
       '@dsh-desktop/host-supervisor': path.join(root, 'packages/host-supervisor/src/index.ts'),

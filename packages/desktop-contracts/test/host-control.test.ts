@@ -33,13 +33,25 @@ function hello(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Host-control envelope', () => {
-  it('accepts a closed, correctly directed Host envelope', () => {
+  it('accepts a correctly directed Host envelope', () => {
     expect(parseHostEnvelope(hello()).message.kind).toBe('hello')
+  })
+
+  it('ignores unknown optional fields without accepting an unknown message kind', () => {
+    const parsed = parseHostEnvelope({
+      ...hello(),
+      futureEnvelopeField: true,
+      message: { ...hello().message, futureMessageField: 'minor-addition' },
+    })
+    expect(parsed).not.toHaveProperty('futureEnvelopeField')
+    expect(parsed.message).not.toHaveProperty('futureMessageField')
+    expect(() =>
+      parseHostEnvelope({ ...hello(), message: { kind: 'future-message' } }),
+    ).toThrowError(expect.objectContaining<Partial<HostControlError>>({ code: 'INVALID_ENVELOPE' }))
   })
 
   it.each([
     [{ ...hello(), direction: 'launcher-to-host' }, 'INVALID_ENVELOPE'],
-    [{ ...hello(), extra: true }, 'INVALID_ENVELOPE'],
     [{ ...hello(), sequence: Number.MAX_SAFE_INTEGER + 1 }, 'INVALID_ENVELOPE'],
     [{ ...hello(), protocol: { ...HOST_CONTROL_PROTOCOL, major: 2 } }, 'PROTOCOL_MISMATCH'],
   ] as const)('rejects malformed envelopes', (input, code) => {
@@ -48,11 +60,10 @@ describe('Host-control envelope', () => {
     )
   })
 
-  it('rejects prototype-pollution keys', () => {
+  it('strips prototype-pollution keys', () => {
     const input = JSON.parse(JSON.stringify(hello()).replace(/}$/, ',"__proto__":{"x":1}}'))
-    expect(() => parseHostEnvelope(input)).toThrowError(
-      expect.objectContaining<Partial<HostControlError>>({ code: 'INVALID_ENVELOPE' }),
-    )
+    expect(parseHostEnvelope(input)).not.toHaveProperty('__proto__.x')
+    expect(({} as { x?: unknown }).x).toBeUndefined()
   })
 })
 

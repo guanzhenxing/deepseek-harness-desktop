@@ -19,12 +19,14 @@ import {
 } from '@dsh-desktop/shell-core'
 
 import { createElectronHostProcessFactory } from './electron-host-process.js'
+import { resolveSmokeUserData } from './m0-paths.js'
+import { DESKTOP_WEB_PREFERENCES, denyWindowOpen } from './window-policy.js'
 
 const PRODUCT_NAME = 'DeepSeek Harness Desktop'
 const recoveryPath = fileURLToPath(new URL('../src/recovery.html', import.meta.url))
 const hostEntryPath = fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
-const userDataOverride = process.env.DSH_DESKTOP_M0_USER_DATA
+const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
 
 if (userDataOverride !== undefined) app.setPath('userData', path.resolve(userDataOverride))
 
@@ -40,12 +42,7 @@ class ElectronWindowPort implements ShellWindowPort {
       minHeight: 600,
       show: false,
       title: PRODUCT_NAME,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        webSecurity: true,
-      },
+      webPreferences: DESKTOP_WEB_PREFERENCES,
     })
     this.window.webContents.session.setPermissionCheckHandler(() => false)
     this.window.webContents.session.setPermissionRequestHandler(
@@ -53,7 +50,7 @@ class ElectronWindowPort implements ShellWindowPort {
         callback(false)
       },
     )
-    this.window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    this.window.webContents.setWindowOpenHandler(denyWindowOpen)
     this.window.webContents.on('will-attach-webview', (event) => event.preventDefault())
     const guardNavigation = (event: Electron.Event, target: string): void => {
       if (
@@ -163,7 +160,7 @@ async function startApplication(): Promise<void> {
   })
   shell = new DesktopShellController({
     prepareProfile: async () => {
-      await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home))
+      await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, app.getPath('userData')))
     },
     host: {
       async start() {

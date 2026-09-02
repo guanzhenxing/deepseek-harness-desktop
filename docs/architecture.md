@@ -1,6 +1,6 @@
 # 架构
 
-- 状态：M0 已实现
+- 状态：M0 已实现，审查收尾中
 - 日期：2026-09-02
 - 决策来源：[ADR 索引](adr/README.md)
 - 详细里程碑：[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)
@@ -52,13 +52,13 @@ Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host run
 
 ## 3. 进程与信任边界
 
-| 边界 | 内部内容 | 信任与失败语义 |
-| --- | --- | --- |
-| Electron Main | launcher、窗口、托盘、控制通道、最低恢复/更新面 | 发行版信任基；必须在 Host 故障时继续运行 |
-| Electron renderer | 官方 DSH Web UI | sandboxed renderer；不具备 Node 或任意 Electron IPC |
-| DSH Host 子进程 | DSH runtime、第一方和第三方插件 | 故障隔离于 Electron，但仍拥有当前用户的系统权限 |
-| DSH home | 凭据、设置、会话、storages、profiles | 用户与 DSH 数据；同一时刻只允许一个受支持 Host writer |
-| 远程 bridge（未来） | 受限 carrier 和设备连接 | 不具备业务授权权威；Host 必须逐方法检查 principal/scope |
+| 边界                | 内部内容                                        | 信任与失败语义                                          |
+| ------------------- | ----------------------------------------------- | ------------------------------------------------------- |
+| Electron Main       | launcher、窗口、托盘、控制通道、最低恢复/更新面 | 发行版信任基；必须在 Host 故障时继续运行                |
+| Electron renderer   | 官方 DSH Web UI                                 | sandboxed renderer；不具备 Node 或任意 Electron IPC     |
+| DSH Host 子进程     | DSH runtime、第一方和第三方插件                 | 故障隔离于 Electron，但仍拥有当前用户的系统权限         |
+| DSH home            | 凭据、设置、会话、storages、profiles            | 用户与 DSH 数据；同一时刻只允许一个受支持 Host writer   |
+| 远程 bridge（未来） | 受限 carrier 和设备连接                         | 不具备业务授权权威；Host 必须逐方法检查 principal/scope |
 
 子进程隔离用于故障收敛和生命周期监督，不是插件权限沙箱。安装第三方插件等价于允许代码以当前用户权限在 Host 中执行；完整安全约束见 [`SECURITY.md`](../SECURITY.md)。
 
@@ -106,13 +106,15 @@ Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host run
 - 验证握手、Host 身份、稳定性窗口和有界关停；
 - 把 Host 异常转化为结构化状态，不直接拥有窗口或 profile。
 - 根 export 只暴露监督器；DSH Host runner 只能从 `./host-runner` subpath 导入，防止 Electron Main 间接求值 DSH。
+- Host runner 的 shared module fallback 只物化当前安装依赖闭包；选中 bundle 的局部 fallback 与中性 `cordis.yml` 位于临时 launch root，不写入 named profile。产品安装入口由 launcher 注入，共享 `desktopSurface` 服务定义归 `desktop-contracts/host-control`。
 
 `packages/profile-manager`：
 
 - 唯一拥有 `ProfileRef`、reconcile、修订恢复和 Safe Mode 投影规则；
 - 以后唯一拥有 generation ledger、事务 journal 和 drift 处理；
 - 不依赖 Electron，也不启动 Host；
-- 只有调用方持有对应 home lease 时才允许写入。
+- 共享 home 写入要求调用方持有对应 home lease；M0 私有 home 使用绑定 `userData/m0-dsh-home` 的隔离 authority。
+- M0 隔离 authority 下唯一写入的 profile 文件是 manifest、用户 patch 模板与 profile workspace 配置；Host runner 不成为这些文件的第二权威。
 
 `packages/home-lease`：
 
@@ -186,14 +188,14 @@ Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依�
 
 ## 7. 状态权威
 
-| 状态 | 唯一权威 | 物化或读取者 |
-| --- | --- | --- |
-| 活跃 Host 进程 | `host-supervisor` + home lease owner | launcher、bundled CLI |
-| profile 规则与事务 | `profile-manager` | launcher、市场 UI、Safe Mode |
-| DSH 会话和 storages | DSH providers | 本地及未来远程客户端 |
-| Electron 窗口状态 | launcher userData | `shell-core` |
-| 原生能力协议 | `desktop-contracts/<capability>` | Host proxy 与 launcher adapter |
-| 发行版兼容范围 | machine-readable compatibility manifest | launcher、updater、诊断与文档生成 |
+| 状态                | 唯一权威                                | 物化或读取者                      |
+| ------------------- | --------------------------------------- | --------------------------------- |
+| 活跃 Host 进程      | `host-supervisor` + home lease owner    | launcher、bundled CLI             |
+| profile 规则与事务  | `profile-manager`                       | launcher、市场 UI、Safe Mode      |
+| DSH 会话和 storages | DSH providers                           | 本地及未来远程客户端              |
+| Electron 窗口状态   | launcher userData                       | `shell-core`                      |
+| 原生能力协议        | `desktop-contracts/<capability>`        | Host proxy 与 launcher adapter    |
+| 发行版兼容范围      | machine-readable compatibility manifest | launcher、updater、诊断与文档生成 |
 
 M0 的机器可读事实见 [`compatibility.json`](compatibility.json)。该文件描述源码 smoke，不代表 `.app`/DMG 已打包或签名。
 
@@ -219,12 +221,12 @@ M0 的机器可读事实见 [`compatibility.json`](compatibility.json)。该文�
 
 ## 9. 扩展进入条件
 
-| 路线 | 进入实现前的门槛 |
-| --- | --- |
-| E1 单 Host 多客户端 | 本地 discovery/attach、Host 所有权、客户端 principal 和协议 ADR |
-| E2 更新 | Developer ID、notarization、签名信任根、last-effective policy、emergency stable source、迁移/降级规则 |
-| E3 市场 | recovery bridge Safe Mode、profile generation journal、plugin package contract、受信 catalog、故障归因与 drift 流程 |
-| E4 远程 | 固定 DSH 基线上的 principal 传播和逐方法授权 prototype、设备撤销、TLS/可信 relay 与审计设计 |
+| 路线                | 进入实现前的门槛                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| E1 单 Host 多客户端 | 本地 discovery/attach、Host 所有权、客户端 principal 和协议 ADR                                                     |
+| E2 更新             | Developer ID、notarization、签名信任根、last-effective policy、emergency stable source、迁移/降级规则               |
+| E3 市场             | recovery bridge Safe Mode、profile generation journal、plugin package contract、受信 catalog、故障归因与 drift 流程 |
+| E4 远程             | 固定 DSH 基线上的 principal 传播和逐方法授权 prototype、设备撤销、TLS/可信 relay 与审计设计                         |
 
 这些门槛是 just-in-time 设计关卡，不要求 M0 提前实现未来产品能力。
 

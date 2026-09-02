@@ -30,6 +30,7 @@
 ### Task 1: Initialize the repository and reproducible documentation gate
 
 **Files:**
+
 - Create: `.editorconfig`
 - Create: `.gitignore`
 - Create: `.node-version`
@@ -40,6 +41,7 @@
 - Create: `.github/workflows/ci.yml`
 
 **Interfaces:**
+
 - Consumes: Node.js 24.11.1 and pnpm 11.7.0.
 - Produces: `pnpm check` and `pnpm check:docs`, which later tasks and CI use as the repository-wide pre-M0 gate.
 
@@ -105,6 +107,7 @@ git commit -m "chore: bootstrap repository checks"
 ### Task 2: Resolve the architectural gaps before M0
 
 **Files:**
+
 - Modify: `docs/native-dsh-desktop-plan.md`
 - Modify: `docs/adr/0001-build-own-native-dsh-shell.md`
 - Create: `docs/adr/0002-use-a-minimal-recovery-bridge.md`
@@ -112,6 +115,7 @@ git commit -m "chore: bootstrap repository checks"
 - Create: `docs/adr/0004-version-native-capabilities-independently.md`
 
 **Interfaces:**
+
 - Consumes: the accepted launcher/plugin boundary in ADR-0001.
 - Produces: accepted decisions for recovery surface publication, profile state ownership, and independently versioned native capabilities.
 
@@ -147,10 +151,12 @@ git commit -m "docs: close pre-m0 architecture gaps"
 ### Task 3: Publish the stable architecture and exact Host-control contract
 
 **Files:**
+
 - Create: `docs/architecture.md`
 - Create: `docs/protocols/host-control.md`
 
 **Interfaces:**
+
 - Consumes: ADR-0001 through ADR-0004.
 - Produces: the dependency direction and Host-control protocol that M0 packages must implement.
 
@@ -184,6 +190,7 @@ git commit -m "docs: define architecture and host control protocol"
 ### Task 4: Publish data, security, and development ownership
 
 **Files:**
+
 - Create: `docs/data-layout.md`
 - Create: `SECURITY.md`
 - Create: `docs/development.md`
@@ -191,6 +198,7 @@ git commit -m "docs: define architecture and host control protocol"
 - Create: `docs/adr/README.md`
 
 **Interfaces:**
+
 - Consumes: the implementation plan's home/profile rules and ADR decisions.
 - Produces: user-facing operating constraints and contributor-facing development/review/release gates.
 
@@ -222,9 +230,11 @@ git commit -m "docs: define project operating model"
 ### Task 5: Verify and mark the M0 entry gate ready
 
 **Files:**
+
 - Modify: `docs/superpowers/plans/2026-09-01-pre-m0-foundation.md`
 
 **Interfaces:**
+
 - Consumes: every artifact from Tasks 1 through 4.
 - Produces: a clean repository whose documented M0 prerequisites are mechanically checked.
 

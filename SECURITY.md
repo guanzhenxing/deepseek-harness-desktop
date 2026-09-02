@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-本项目当前处于 M0 开始前，目标是个人本机使用的 macOS Desktop。v1 不公开分发、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
+本项目已实现 M0 源码级闭环，正在完成审查验收，目标是个人本机使用的 macOS Desktop。v1 不公开分发、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
 
 安全模型由[架构](docs/architecture.md)、[Host-control 协议](docs/protocols/host-control.md)和[数据布局](docs/data-layout.md)共同约束。
 
@@ -45,20 +45,21 @@ Host-process capability 只能证明消息来自 launcher 创建的 Host，不�
 
 以下动作必须经过能力级策略和 launcher-owned 本地确认：
 
-| 动作 | 最低确认规则 |
-| --- | --- |
+| 动作                       | 最低确认规则                                                 |
+| -------------------------- | ------------------------------------------------------------ |
 | 安装、禁用、回退或导入插件 | 展示准确 profile、package、版本、publisher、摘要和影响后确认 |
-| 安装 Desktop 更新 | 下载前提示；安装前再次确认版本、channel、签名和迁移结果 |
-| 创建或删除远程设备凭据 | 展示设备和 scope，并由本机确认 |
-| 导出秘密 | 默认不提供；需要新 ADR 才能增加 |
-| 终端或系统级操作 | 展示准确操作目标，不接受 UI 传入任意 shell 字符串 |
+| 安装 Desktop 更新          | 下载前提示；安装前再次确认版本、channel、签名和迁移结果      |
+| 创建或删除远程设备凭据     | 展示设备和 scope，并由本机确认                               |
+| 导出秘密                   | 默认不提供；需要新 ADR 才能增加                              |
+| 终端或系统级操作           | 展示准确操作目标，不接受 UI 传入任意 shell 字符串            |
 
 常规已授权设备握手可以调用 secure-store 的用途受限签名操作而不逐次弹窗，但 Host 永远不能取得原始私钥。
 
 ## DSH home 与 profile
 
 - 同一 home 同时只允许一个受支持 Host writer；
-- home lease 在任何 boot、profile mutation 或 cache 隔离前获取；
+- 共享或用户选择的 DSH home 在任何 boot、profile mutation 或 cache 隔离前获取 home lease；
+- M0 只使用 launcher 单实例私有的 `<userData>/m0-dsh-home`，不访问 `~/.dsh`；该阶段的私有 home authority 是明确的临时例外，M1 在切换共享 home 前引入 lease；
 - lease 不按年龄自动抢占；
 - profile 恢复只处理白名单并要求候选 SHA 仍匹配；
 - Desktop 不自动回滚 credentials、settings、home patch、sessions 或 storages；
