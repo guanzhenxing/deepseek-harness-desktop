@@ -1,11 +1,11 @@
 # 开发指南
 
-- 状态：M0 已实现，审查收尾中
+- 状态：M0 已完成源码级验收
 - 日期：2026-09-02
 
 ## 1. 当前阶段
 
-仓库已实现 M0 独立最小闭环，正在关闭审查问题与复核验收证据。当前开发入口使用隔离 home，尚未实现共享 `~/.dsh`、home lease、配套 CLI、Safe Mode、安装包或发布流程。
+仓库已完成 M0 独立最小闭环及审查验收。当前开发入口使用隔离 home，尚未实现共享 `~/.dsh`、home lease、配套 CLI、Safe Mode、安装包或发布流程。
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 

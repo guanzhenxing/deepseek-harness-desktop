@@ -179,3 +179,13 @@
 - E2/E3/E4: updater, plugin market and remote access product capabilities.
 
 The M0 contracts and dependency direction must leave these additions possible, but M0 does not simulate them with placeholder runtime APIs.
+
+## 验收记录（2026-09-02）
+
+- 实现分支：`feat/m0-desktop-shell`；最后一批代码修订提交：`3c3220f`。提交后工作区干净，`git diff --check main...HEAD` 通过。
+- Standards：原有 5 项问题关闭；Spec：原有 6 项问题及后续发现的 profile-local bundle 加载回归关闭。复核未发现剩余阻塞项。
+- `pnpm install --frozen-lockfile` 与 `pnpm check` 通过：格式、lint、类型、7 项边界测试、63 项单元测试、14 份文档检查。
+- `pnpm test:integration` 的 6 项测试通过：固定上游 profile 格式对照、真实 surface 与独立 Node Host、profile-local scoped bundle 加载、路径逃逸拒绝及临时目录身份变更保护。
+- `pnpm smoke:dsh-ui` 与 `pnpm smoke:host-crash` 通过：launcher/Host 为独立 PID，Host 故障后恢复页可用，退出后无残留进程。
+- 验证使用临时 userData 与 `m0-dsh-home`，未清理或迁移真实 DSH home。源码 smoke 不代表 `.app`/DMG、签名、公网远程、市场或升级能力已经交付。
+- 合并与推送仍需用户选择；此记录不表示分支已经合入 `main`。

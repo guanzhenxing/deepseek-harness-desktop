@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-本项目已实现 M0 源码级闭环，正在完成审查验收，目标是个人本机使用的 macOS Desktop。v1 不公开分发、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
+本项目已完成 M0 源码级闭环及审查验收，目标是个人本机使用的 macOS Desktop。v1 不公开分发、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
 
 安全模型由[架构](docs/architecture.md)、[Host-control 协议](docs/protocols/host-control.md)和[数据布局](docs/data-layout.md)共同约束。
 

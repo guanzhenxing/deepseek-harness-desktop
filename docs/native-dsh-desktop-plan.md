@@ -588,7 +588,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ## 10. 实施里程碑
 
-### M0：独立最小闭环（2026-09-02 实现，审查收尾中）
+### M0：独立最小闭环（2026-09-02 完成源码级验收）
 
 - 建立 workspace、`apps/desktop-launcher`、`packages/desktop-plugin`、`packages/desktop-contracts`、`packages/host-supervisor`、`packages/profile-manager` 与 `packages/shell-core`。`desktop-recovery-bridge` 是 E3 前置交付，不在 M0 实现。
 - 实现独立 Host runner、私有控制通道、结构化握手、稳定性窗口与有界关停；Electron Main 不直接调用 DSH `boot()`。
@@ -598,7 +598,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 验收：新建与已有 `desktop` profile 都通过 Electron-independent `profile-manager` 的 reconcile 测试；独立 Host 子进程加载 `desktop-plugin`，插件经窄化且 publisher-neutral 的 `desktopSurface` 控制契约调度官方 DSH UI；终止 Host 不会同时终止 Electron 壳。
 
-验收证据项：Host-control 1.0、profile reconcile、bundle、监督器和 shell-core 单元测试；真实 DSH 独立 PID 集成测试；官方 UI 与 Host crash 两条 Electron smoke。审查问题关闭、完整验证通过并提交后才标记完成。M0 未包含 home lease、Safe Mode、安装包或发布能力。
+完成证据：63 项单元测试、7 项依赖边界测试、6 项真实 DSH 集成测试，以及官方 UI 与 Host crash 两条 Electron smoke 全部通过；Standards 与 Spec 审查阻塞已关闭。详细记录见 [M0 实施计划](superpowers/plans/2026-09-01-m0-independent-minimal-loop.md#验收记录2026-09-02)。M0 未包含 home lease、Safe Mode、安装包或发布能力。
 
 ### M1：共享 home 与单 Host（1–1.5 天）
 
