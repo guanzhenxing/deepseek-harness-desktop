@@ -118,16 +118,38 @@ export class RecoverySessionController implements RecoveryController {
     if (this.#failure === undefined) {
       throw new Error('recovery view requested without a failure')
     }
+    // Startup actions exist only while the session still holds the lease:
+    // a lease-less recovery view may offer diagnosis and quit, nothing else.
+    const leaseHeld = this.#lease !== undefined
     return Object.freeze({
       failure: this.#failure,
-      retryAllowed: this.#state === 'recovery' && this.#retryBudgetRemaining() > 0,
-      safeModeAllowed: this.#state === 'recovery' && !this.#safeModeBlocked,
-      doctorCommand: null,
+      retryAllowed:
+        leaseHeld &&
+        this.#state === 'recovery' &&
+        this.#failure.retryable &&
+        this.#retryBudgetRemaining() > 0,
+      safeModeAllowed: leaseHeld && this.#state === 'recovery' && !this.#safeModeBlocked,
+      doctorCommand:
+        this.#failure.stage === 'recover-transactions'
+          ? ('dsh-native doctor --unlock' as const)
+          : null,
     })
   }
 
   async start(): Promise<void> {
     this.#state = 'starting'
+    // Startup joins the in-flight chain so a quit arriving mid-acquisition
+    // merges with it instead of exiting before the lease exists to release.
+    const run = this.#startSession()
+    this.#inFlight = run
+    try {
+      await run
+    } finally {
+      if (this.#inFlight === run) this.#inFlight = undefined
+    }
+  }
+
+  async #startSession(): Promise<void> {
     try {
       const lease = await this.#options.acquireLease()
       this.#lease = lease
@@ -153,9 +175,13 @@ export class RecoverySessionController implements RecoveryController {
    * the outer lease: the attempt is already gone, and manual retry may build a
    * fresh attempt on the same lease. The crashed boot's profile transaction
    * was already committed — a post-ready crash never justifies reopening it.
+   * The surface-mounted window also counts: a crash between mount and the
+   * healthy transition must not leave a dead Host behind a healthy state.
    */
   async hostCrashed(failure?: StartupFailure): Promise<void> {
-    if (this.#state !== 'healthy') return
+    if (this.#state !== 'healthy' && !this.#surfaceMounted) return
+    if (this.#state === 'stopped') return
+    this.#surfaceMounted = false
     this.#state = 'recovery'
     this.#failure = failure ?? {
       stage: 'host',
@@ -186,25 +212,29 @@ export class RecoverySessionController implements RecoveryController {
     }
     if (action === 'retry' && this.#state === 'recovery') {
       if (this.#retryBudgetRemaining() <= 0) return
-      const retry = this.#retry()
-      this.#inFlight = retry
+      const retry = this.#runAct(this.#retry())
       await retry
-      this.#inFlight = undefined
       if (this.#quitRequest) {
         await this.#stopAndRelease().catch(() => undefined)
       }
       return
     }
     if (action === 'safe-mode' && this.#state === 'recovery' && !this.#safeModeBlocked) {
-      const enter = this.#enterSafeMode()
-      this.#inFlight = enter
+      const enter = this.#runAct(this.#enterSafeMode())
       await enter
-      this.#inFlight = undefined
       if (this.#quitRequest) {
         await this.#stopAndRelease().catch(() => undefined)
       }
       return
     }
+  }
+
+  /** Track an action as in-flight with guaranteed cleanup on rejection. */
+  #runAct(action: Promise<void>): Promise<void> {
+    this.#inFlight = action
+    return action.finally(() => {
+      if (this.#inFlight === action) this.#inFlight = undefined
+    })
   }
 
   async #retry(): Promise<void> {
@@ -258,6 +288,7 @@ export class RecoverySessionController implements RecoveryController {
   async #runAttempt(lease: HomeLease, mode: AttemptMode): Promise<void> {
     const attempt = this.#options.createAttempt(lease, mode)
     this.#attempt = attempt
+    this.#state = 'starting'
     this.#surfaceMounted = false
     const ready = await attempt.start()
     await this.#options.loadSurface(ready)
@@ -268,6 +299,9 @@ export class RecoverySessionController implements RecoveryController {
       await this.#options.profile.settleCommitted(this.#pendingTransaction, lease)
       this.#pendingTransaction = undefined
     }
+    // A crash handled by hostCrashed() during the commit awaits already moved
+    // the session to recovery; never overwrite that verdict with healthy.
+    if (this.#state === 'recovery') return
     this.#state = 'healthy'
   }
 
@@ -319,7 +353,10 @@ export class RecoverySessionController implements RecoveryController {
             }
             break
           }
-          break // conflict: the journal records it; never guess further
+          // Conflict: the journal records the divergence and stays untouched;
+          // nothing about this transaction may be settled or rewritten later.
+          this.#pendingTransaction = undefined
+          break
         }
         await this.#options.profile
           .retain(transactionId, this.#lease, {

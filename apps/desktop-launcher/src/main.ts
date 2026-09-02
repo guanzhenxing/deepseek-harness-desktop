@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 
 import { app, BrowserWindow, dialog } from 'electron'
 
@@ -162,6 +162,14 @@ function createRecoveryMarkerStore(userData: string, home: string) {
   const digest = createHash('sha256').update(home).digest('hex').slice(0, 16)
   const directory = path.join(userData, 'recovery')
   const file = path.join(directory, `${digest}.json`)
+  const syncDirectory = async (dirname: string): Promise<void> => {
+    const handle = await open(dirname, 'r')
+    try {
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+  }
   return {
     async read(): Promise<unknown> {
       try {
@@ -173,11 +181,15 @@ function createRecoveryMarkerStore(userData: string, home: string) {
     async write(marker: Readonly<{ transactionId: string; attempt: number }>): Promise<void> {
       await mkdir(directory, { recursive: true, mode: 0o700 })
       const temporary = `${file}.${randomUUID()}.tmp`
-      await writeFile(temporary, `${JSON.stringify(marker, null, 2)}\n`, {
-        mode: 0o600,
-        encoding: 'utf8',
-      })
+      const handle = await open(temporary, 'wx', 0o600)
+      try {
+        await handle.writeFile(`${JSON.stringify(marker, null, 2)}\n`, 'utf8')
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
       await rename(temporary, file)
+      await syncDirectory(directory)
     },
     async clear(): Promise<void> {
       await rm(file, { force: true }).catch(() => undefined)
@@ -207,9 +219,17 @@ async function startApplication(): Promise<void> {
     (recoveryWindow ??= createRecoveryWindow({
       onAction: (action) => {
         if (shell === undefined) return
-        void shell.act(action).then(() => {
-          if (action === 'quit' || shell?.state === 'stopped') app.exit(0)
-        })
+        shell
+          .act(action)
+          .catch((error: unknown) => {
+            console.error(
+              `recovery action ${action} failed:`,
+              error instanceof Error ? error.message : error,
+            )
+          })
+          .then(() => {
+            if (action === 'quit' || shell?.state === 'stopped') app.exit(0)
+          })
       },
       isInRecovery: () => shell?.state === 'recovery',
     }))

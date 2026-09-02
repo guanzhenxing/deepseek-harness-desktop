@@ -1,7 +1,7 @@
 import {
   commitProfileTransaction,
   createProfileRef,
-  findAppliedTransaction,
+  findAppliedTransactions,
   prepareSafeProfile,
   ProfileReconcileError,
   reconcileDesktopProfile,
@@ -61,7 +61,7 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
             code: 'RECOVERY_CONFLICT',
             summary:
               'a previous profile recovery found diverged files; the profile was left untouched — run dsh-native doctor',
-            retryable: true,
+            retryable: false,
             home,
           }),
         }
@@ -71,25 +71,28 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
         console.error('projection cache layout unrecognized; leaving it untouched')
       }
       // A journal that reached `applied` without attribution is only adopted
-      // when every managed file still matches the recorded candidate — the
-      // boot that follows settles it on evidence, never on a guess.
+      // when it is the single open one and every managed file still matches
+      // the recorded candidate — the boot that follows settles it on
+      // evidence, never on a guess. Anything ambiguous goes to review.
+      const needsReviewBlock = (summary: string): ProfilePrepareResult => ({
+        kind: 'blocked',
+        failure: toStartupFailure({
+          stage: 'recover-transactions',
+          code: 'TRANSACTION_NEEDS_REVIEW',
+          summary,
+          retryable: false,
+          home,
+        }),
+      })
       let adopted: string | undefined
       if (recovery === 'needs-review') {
-        const applied = await findAppliedTransaction(normalRef)
-        if (applied === undefined || !applied.atCandidate) {
-          return {
-            kind: 'blocked',
-            failure: toStartupFailure({
-              stage: 'recover-transactions',
-              code: 'TRANSACTION_NEEDS_REVIEW',
-              summary:
-                'a previous startup left the profile mid-transaction without failure attribution; the profile was left untouched — run dsh-native doctor',
-              retryable: true,
-              home,
-            }),
-          }
+        const applied = await findAppliedTransactions(normalRef)
+        if (applied.length !== 1 || !applied[0]!.atCandidate) {
+          return needsReviewBlock(
+            'a previous startup left the profile mid-transaction without failure attribution; the profile was left untouched — run dsh-native doctor',
+          )
         }
-        adopted = applied.id
+        adopted = applied[0]!.id
       }
       let result: Awaited<ReturnType<typeof reconcileDesktopProfile>>
       try {
@@ -104,6 +107,13 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
             retryable: false,
             home,
           }),
+        )
+      }
+      if (adopted !== undefined && result.transactionId !== undefined) {
+        // The desired profile changed since the interrupted transaction: two
+        // open applied journals can never both settle. Never stack them.
+        return needsReviewBlock(
+          'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — run dsh-native doctor',
         )
       }
       const transactionId = result.transactionId ?? adopted

@@ -63,15 +63,17 @@ export async function recoverInterruptedTransactions(
 }
 
 /**
- * Inspect the `applied` journal that made `recoverInterruptedTransactions`
+ * Inspect the `applied` journals that made `recoverInterruptedTransactions`
  * return needs-review. `atCandidate` is true only when every managed file is
  * still exactly at the recorded candidate digest — the precondition for the
  * launcher to adopt the transaction and settle it as committed on evidence of
- * a healthy boot, without ever guessing that the profile was at fault.
+ * a healthy boot, without ever guessing that the profile was at fault. More
+ * than one open `applied` journal is ambiguous and must go to review.
  */
-export async function findAppliedTransaction(
+export async function findAppliedTransactions(
   ref: ProfileRef,
-): Promise<Readonly<{ id: string; atCandidate: boolean }> | undefined> {
+): Promise<readonly Readonly<{ id: string; atCandidate: boolean }>[]> {
+  const applied: { id: string; atCandidate: boolean }[] = []
   for (const id of await readdirTransactionIds(ref.home)) {
     const journal = await readJournal(ref.home, id)
     if (journal === 'missing' || journal === 'corrupt' || journal.state !== 'applied') continue
@@ -83,7 +85,7 @@ export async function findAppliedTransaction(
         break
       }
     }
-    return { id, atCandidate }
+    applied.push({ id, atCandidate })
   }
-  return undefined
+  return applied
 }

@@ -213,6 +213,36 @@ try {
     }
     await assertSentinels(home)
     await session.controller.act('quit')
+
+    // A conflict must not poison the session: after relaunching into the
+    // blocked recovery view, Safe Mode still boots without ever touching the
+    // conflicting journal.
+    const statesBeforeSafe = await journalStates(home)
+    const replay = await leasedSession(home, {
+      boot: (index, mode) =>
+        mode === 'safe'
+          ? Promise.resolve({
+              pid: process.pid,
+              startIdentity: 'safe-ready',
+              surface: { kind: 'loopback', url: 'http://127.0.0.1:43125/?token=x' },
+              origin: 'http://127.0.0.1:43125',
+            })
+          : Promise.reject(attributedFailure),
+    })
+    await replay.controller.start().catch(() => undefined)
+    if (replay.controller.state !== 'recovery') throw new Error('replay did not reach recovery')
+    const view = replay.controller.getView()
+    if (view.retryAllowed) throw new Error('conflict-blocked view still offers retry')
+    if (view.doctorCommand === null) throw new Error('conflict-blocked view hides the doctor hint')
+    await replay.controller.act('safe-mode')
+    if (replay.controller.state !== 'healthy') {
+      throw new Error('safe mode after conflict did not become healthy')
+    }
+    const statesAfterSafe = await journalStates(home)
+    if (JSON.stringify(statesAfterSafe) !== JSON.stringify(statesBeforeSafe)) {
+      throw new Error('safe mode after conflict rewrote the conflicting journal')
+    }
+    await replay.controller.act('quit')
   }
 
   // ── Healthy chain: surface mounts, transaction commits, no view ──

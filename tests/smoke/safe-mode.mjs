@@ -136,14 +136,17 @@ try {
     const env = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1' }
 
     const safeBoot = await run(['--profile', 'desktop-safe-mode', 'ping'], env, userData)
-    // The bundle resolver will refuse the workspace bridge in a bare smoke home
-    // (it is not installed there); that refusal proves normal-profile and
-    // third-party code never ran and the failure is attributable, not a hang.
+    // The bundle resolver must refuse the workspace bridge in a bare smoke
+    // home (it is not installed there); that attributable refusal — not any
+    // other nonzero exit — proves normal-profile and third-party code never
+    // ran.
     const refused = /cannot resolve profile bundle|does not exist/iu.test(safeBoot.output)
     const hostileLoaded = safeBoot.output.includes('@fixture/hostile')
     if (hostileLoaded) throw new Error('Safe Mode attempted to load a normal-profile bundle')
-    if (safeBoot.code === 0 && !refused) {
-      throw new Error('Safe Mode booted without the recovery bridge installed; unexpected')
+    if (safeBoot.code === 0 || !refused) {
+      throw new Error(
+        `safe boot was not the expected attributable bridge refusal (code ${safeBoot.code})`,
+      )
     }
     const normalManifest = await readFile(path.join(normalDir, 'package.json'), 'utf8')
     if (!normalManifest.includes('@fixture/hostile')) {

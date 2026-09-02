@@ -271,6 +271,11 @@ export async function retainProfileTransaction(
     throw new Error(`cannot retain transaction ${id}: journal ${journal}`)
   }
   await lease.assertHeld()
+  if (journal.state !== 'applied') {
+    // A conflict or already-settled journal must never be rewritten by a
+    // later retain decision — its recorded outcome is the diagnosis.
+    throw new Error(`cannot retain transaction ${id} from state ${journal.state}`)
+  }
   await writeJournalDurable(lease.home, {
     ...journal,
     state: 'retained',

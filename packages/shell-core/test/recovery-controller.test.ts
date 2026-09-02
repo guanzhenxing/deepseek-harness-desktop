@@ -233,11 +233,13 @@ describe('RecoverySessionController', () => {
     expect(setup.views).toHaveLength(1)
   })
 
-  it('a rollback conflict keeps the journal and shows the recovery view', async () => {
+  it('a rollback conflict keeps the journal, blocks retry, and never poisons safe mode', async () => {
     const lease = new RecordingLease()
     const views: unknown[] = []
     let nextTransaction = 0
     const rolledBack: string[] = []
+    const retained: { id: string }[] = []
+    const committed: string[] = []
     const controller = new RecoverySessionController({
       acquireLease: async () => lease,
       profile: {
@@ -245,18 +247,25 @@ describe('RecoverySessionController', () => {
           nextTransaction += 1
           return { kind: 'ready', transactionId: `tx-${nextTransaction}`, changed: true }
         },
-        settleCommitted: async () => undefined,
+        settleCommitted: async (transactionId) => {
+          committed.push(transactionId)
+        },
         rollback: async (transactionId) => {
           rolledBack.push(transactionId)
           return 'conflict'
         },
-        retain: async () => undefined,
+        retain: async (transactionId) => {
+          retained.push({ id: transactionId })
+        },
         enterSafeMode: async () => 'prepared',
         exitSafeMode: async () => undefined,
       },
-      createAttempt: () =>
+      createAttempt: (_lease, mode) =>
         ({
-          start: () => Promise.reject(new StartupFailureError(profileWriteFailure)),
+          start:
+            mode === 'safe'
+              ? async () => ready
+              : () => Promise.reject(new StartupFailureError(profileWriteFailure)),
           stop: async () => undefined,
         }) as unknown as HostAttempt,
       loadSurface: async () => undefined,
@@ -271,6 +280,75 @@ describe('RecoverySessionController', () => {
     expect(rolledBack).toEqual(['tx-1'])
     expect(controller.state).toBe('recovery')
     expect(views).toHaveLength(1)
+    // The conflict journal is never settled or rewritten: no retain, and a
+    // later safe-mode boot must not try to commit the conflicted transaction.
+    expect(retained).toHaveLength(0)
+    await controller.act('safe-mode')
+    expect(controller.state).toBe('healthy')
+    expect(committed).toHaveLength(0)
+  })
+
+  it('hides retry for non-retryable failures but still rolls back once', async () => {
+    const setup = fixture({
+      attemptStart: () =>
+        Promise.reject(
+          new StartupFailureError({
+            stage: 'resolve-profile',
+            code: 'PROFILE_INVALID',
+            category: 'profile-composition',
+            summary: 'bad profile',
+            retryable: false,
+          }),
+        ),
+    })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    const view = setup.controller.getView()
+    expect(view.retryAllowed).toBe(false)
+    expect(view.safeModeAllowed).toBe(true)
+    // Non-retryable profile-composition still rolls back and relaunches once;
+    // the still-failing relaunch rolls its own fresh transaction back too.
+    expect(setup.portCalls.rolledBack).toEqual(['tx-1', 'tx-2'])
+  })
+
+  it('clears the in-flight action even when the recovery view port throws', async () => {
+    const setup = fixture({
+      attemptStart: () => Promise.reject(new StartupFailureError(failure)),
+    })
+    void setup
+    const views: unknown[] = []
+    let portThrows = true
+    const controller = new RecoverySessionController({
+      acquireLease: async () => new RecordingLease(),
+      profile: {
+        prepare: async () => ({ kind: 'ready', changed: false }),
+        settleCommitted: async () => undefined,
+        rollback: async () => 'restored',
+        retain: async () => undefined,
+        enterSafeMode: async () => 'prepared',
+        exitSafeMode: async () => undefined,
+      },
+      createAttempt: () =>
+        ({
+          start: () => Promise.reject(new StartupFailureError(failure)),
+          stop: async () => undefined,
+        }) as unknown as HostAttempt,
+      loadSurface: async () => undefined,
+      window: {
+        showRecoveryView: async (view) => {
+          views.push(view)
+          if (portThrows) {
+            portThrows = false
+            throw new Error('view port exploded')
+          }
+        },
+        destroySurface: () => undefined,
+      },
+    })
+    await expect(controller.start()).rejects.toThrow('view port exploded')
+    // The leaked-rejection guard: a later act() must still run a real retry
+    // instead of merging into a stale in-flight promise forever.
+    await controller.act('retry')
+    expect(views).toHaveLength(2)
   })
 
   it('merges concurrent retries into exactly one attempt', async () => {
