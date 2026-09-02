@@ -1,6 +1,6 @@
 # 数据布局与所有权
 
-- 状态：M1 已完成源码级验收（共享 home、home lease 与 dsh-native）
+- 状态：M2 已完成源码级验收（非破坏性恢复、Safe Mode；M1 共享 home/lease/dsh-native 已合并）
 - 日期：2026-09-02
 - 关联架构：[架构](architecture.md)
 

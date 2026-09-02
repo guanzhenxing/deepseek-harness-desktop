@@ -6,7 +6,7 @@ DeepSeek Harness Desktop 是面向 macOS 个人本机使用的原生 DSH 桌面�
 
 M1 共享 home 已完成源码级验收：Desktop 与配套 CLI `dsh-native` 顺序共享同一 DSH home，任何 Host boot、profile 写入前都必须先取得整 home lease（原子 `mkdir` 锁 + OS 进程启动身份 + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）。CLI 子进程在 lease 上登记 OS 身份并等待授权后才 import 官方 `@deepseek-ai/dsh` 入口；`dsh-native doctor --unlock` 在确认没有活跃 owner 后清理残留锁，不提供 force 绕过。双向会话接续（CLI 创建→Desktop 继续、Desktop 创建→CLI 继续）有真实官方 DSH 图 + mock LLM 的集成与冒烟证据。
 
-Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。当前仍是源码阶段：Safe Mode 与修订恢复属于 M2，`.app`/DMG 打包属于 M3，版本闭包与升级演练属于 M4；当前结果不应作为日用版安装。验收细节见 [M1 验收记录](docs/validation/m1-acceptance.md)。
+Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M2 非破坏性恢复已完成源码级验收：启动失败按 10 类分类（ADR-0006/[协议](docs/protocols/startup-recovery.md)），profile 修改走逐文件修订事务（before 快照 + SHA 校验 + journal，只有可归因失败才自动回滚），恢复窗口为懒创建的独立沙箱窗口（ADR-0007，窄 IPC），重试有 60 秒 3 次预算，超大 projection cache 持 lease 隔离，Safe Mode 以 `desktop-safe-mode` 三 bundle 独立启动（ADR-0002）。验收细节见 [M2 验收记录](docs/validation/m2-acceptance.md)。当前仍是源码阶段：`.app`/DMG 打包属于 M3，版本闭包与升级演练属于 M4。
 
 v1 目标：
 
@@ -63,6 +63,8 @@ corepack pnpm@11.7.0 test:shared-home # 双向共享 home 会话接续
 corepack pnpm@11.7.0 smoke:dsh-ui
 corepack pnpm@11.7.0 smoke:host-crash
 corepack pnpm@11.7.0 smoke:shared-home
+corepack pnpm@11.7.0 smoke:profile-recovery   # M2：修订恢复不变量
+corepack pnpm@11.7.0 smoke:safe-mode          # M2：Safe Mode 隔离
 corepack pnpm@11.7.0 dsh-native -- --profile headless "..."   # 开发入口（持 lease）
 ```
 

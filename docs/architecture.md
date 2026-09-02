@@ -1,6 +1,6 @@
 # 架构
 
-- 状态：M1 已完成源码级验收（共享 home、home lease 与 dsh-native）
+- 状态：M2 已完成源码级验收（非破坏性恢复、Safe Mode；M1 共享 home/lease/dsh-native 已合并）
 - 日期：2026-09-02
 - 决策来源：[ADR 索引](adr/README.md)
 - 详细里程碑：[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)

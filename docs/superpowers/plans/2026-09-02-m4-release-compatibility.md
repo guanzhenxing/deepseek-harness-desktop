@@ -24,16 +24,16 @@
 
 ## 文件与权威分工
 
-| 文件/目录 | 权威 |
-| --- | --- |
-| `docs/compatibility.json` | 源码基线事实，保留现有 Desktop/DSH/Electron/Node/pnpm/Host-control 字段 |
-| `build/compatibility-policy.json` | 经测试支持的 profile、plugin API、provider 格式与 dataEpoch 策略 |
-| `build/upstream-artifacts.json` | npm integrity 或自建 runtime 制品出处/commit/SHA |
-| `patches/manifest.json` | 本地补丁、上游是否包含、回归证据；无补丁用显式空数组 |
-| `release/*/compatibility.json` | 从上述输入及实际 staged runtime 生成的内嵌发行清单 |
-| `release/artifacts.json`、`SHA256SUMS` | M3 建立的外置 DMG 摘要/平台/架构/releaseId 关联 |
-| `<home>/run/compatibility.json` | M3 schema 1 marker，记录兼容性 epoch/格式与最后可能写入的 release |
-| `docs/validation/m4-acceptance.md` | 可追溯验收摘要；不是运行时版本权威 |
+| 文件/目录                              | 权威                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `docs/compatibility.json`              | 源码基线事实，保留现有 Desktop/DSH/Electron/Node/pnpm/Host-control 字段 |
+| `build/compatibility-policy.json`      | 经测试支持的 profile、plugin API、provider 格式与 dataEpoch 策略        |
+| `build/upstream-artifacts.json`        | npm integrity 或自建 runtime 制品出处/commit/SHA                        |
+| `patches/manifest.json`                | 本地补丁、上游是否包含、回归证据；无补丁用显式空数组                    |
+| `release/*/compatibility.json`         | 从上述输入及实际 staged runtime 生成的内嵌发行清单                      |
+| `release/artifacts.json`、`SHA256SUMS` | M3 建立的外置 DMG 摘要/平台/架构/releaseId 关联                         |
+| `<home>/run/compatibility.json`        | M3 schema 1 marker，记录兼容性 epoch/格式与最后可能写入的 release       |
+| `docs/validation/m4-acceptance.md`     | 可追溯验收摘要；不是运行时版本权威                                      |
 
 ## Task 1：生成并校验完整发行清单
 
@@ -66,7 +66,11 @@ export type ReleaseManifest = Readonly<{
   arch: 'arm64' | 'x64'
   hostControl: { major: number; minor: number }
   profileSchemaVersion: number
-  pluginApi: { strategy: 'verified-exact-baseline'; dshVersion: string; singletonPackages: readonly string[] }
+  pluginApi: {
+    strategy: 'verified-exact-baseline'
+    dshVersion: string
+    singletonPackages: readonly string[]
+  }
   formats: readonly FormatRule[]
   dataEpoch: number
   supportedDataEpochs: readonly number[]
@@ -79,11 +83,9 @@ export function parseReleaseManifest(input: unknown): ReleaseManifest
 - [ ] 先写 schema 和生成器失败测试：缺 commit、混合 DSH 基线、未知 schema、空 supportedDataEpochs、声明可写却不可读、平台不匹配、闭包 hash 不匹配都拒绝。
 
 ```ts
-expect(() => parseReleaseManifest({ schemaVersion: 999 }))
-  .toThrow()
+expect(() => parseReleaseManifest({ schemaVersion: 999 })).toThrow()
 expect(manifest.supportedDataEpochs).toContain(manifest.dataEpoch)
-expect(manifest.formats.every((format) => format.readable.includes(format.writable)))
-  .toBe(true)
+expect(manifest.formats.every((format) => format.readable.includes(format.writable))).toBe(true)
 ```
 
 - [ ] 不杜撰上游 plugin API semver。当前没有已核实的独立 API 版本时，策略固定为 `verified-exact-baseline`，声明 DSH 精确版本和实际 singleton 包；通过真实 bundle 加载测试提供支持证据。
@@ -136,7 +138,10 @@ export type HomeFormatState = Readonly<{
 }>
 export type PreflightResult =
   | { kind: 'allow'; dataEpoch: number; formats: Readonly<Record<string, string>> }
-  | { kind: 'refuse'; code: 'UNKNOWN_FORMAT' | 'UNREADABLE_FORMAT' | 'UNSUPPORTED_EPOCH' | 'MIGRATION_REQUIRED' }
+  | {
+      kind: 'refuse'
+      code: 'UNKNOWN_FORMAT' | 'UNREADABLE_FORMAT' | 'UNSUPPORTED_EPOCH' | 'MIGRATION_REQUIRED'
+    }
 export function inspectHomeFormats(home: string): Promise<HomeFormatState>
 export function preflightHome(input: {
   release: ReleaseManifest
@@ -154,9 +159,9 @@ export function reserveHomeWrite(input: {
 - [ ] 先写测试：缺 marker 的全新 home 可进入；已有 home 的 provider 格式必须可识别；marker/磁盘不一致、未知格式、当前 release 不支持 epoch/readable 均拒绝。拒绝路径除获取/释放 lease 产生的协调元数据外，不触碰 profile/cache/user data。
 
 ```ts
-expect(preflightHome({ release: previousRelease,
-  marker: newerMarker, observed: newerFixtureFormats }))
-  .toEqual({ kind: 'refuse', code: 'UNSUPPORTED_EPOCH' })
+expect(
+  preflightHome({ release: previousRelease, marker: newerMarker, observed: newerFixtureFormats }),
+).toEqual({ kind: 'refuse', code: 'UNSUPPORTED_EPOCH' })
 expect(events).not.toContain('reconcile')
 expect(events).not.toContain('spawn-host')
 ```

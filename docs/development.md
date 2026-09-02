@@ -1,11 +1,11 @@
 # 开发指南
 
-- 状态：M1 已完成源码级验收（共享 home、home lease 与 dsh-native）
+- 状态：M2 已完成源码级验收（非破坏性恢复、Safe Mode；M1 共享 home/lease/dsh-native 已合并）
 - 日期：2026-09-02
 
 ## 1. 当前阶段
 
-仓库已完成 M0 独立最小闭环与 M1 共享 home 验收：Desktop 与 `dsh-native` 顺序共享同一 DSH home（整 home lease 保护），`dsh-native doctor --unlock` 提供安全清锁。Safe Mode/修订恢复、安装包与发布流程分别属于 M2–M4。
+仓库已完成 M0、M1（共享 home + lease + dsh-native）与 M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）验收。安装包与发布流程属于 M3–M4。
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 

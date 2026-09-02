@@ -55,3 +55,7 @@ jobs:
         run: pnpm smoke:host-crash
       - name: Run shared-home smoke
         run: pnpm smoke:shared-home
+      - name: Run profile-recovery smoke
+        run: pnpm smoke:profile-recovery
+      - name: Run safe-mode smoke
+        run: pnpm smoke:safe-mode

@@ -26,15 +26,15 @@
 
 先跑总览中的五条 M0 命令。M1 新增包各包含 `package.json`、`tsconfig.json`、`src/index.ts`，随首个使用任务接入根 TS/Vitest 配置和 lockfile。
 
-| 位置 | 责任 |
-| --- | --- |
-| `packages/product-config/` | 只读产品名、profile、namespace、app id、默认端口，不能 import Electron/DSH |
-| `packages/home-lease/` | home 路径、owner schema、获取/释放、进程探测、受控 doctor |
-| `packages/home-lease/native/lease-helper.c` | macOS 精确进程启动身份、短时间 advisory lock；不 boot DSH、不写 profile |
-| `packages/profile-manager/src/reconcile.ts` | 保持现有保序 reconcile，改为同时支持活动 lease authority |
-| `apps/bundled-cli/`、`scripts/dsh-native.mjs` | 持 lease 的 CLI 包装进程、等待 bootstrap 的官方 CLI 子进程 |
-| `apps/desktop-launcher/`、`packages/shell-core/` | 获取 lease、监督 Host attempt、退出和诊断编排 |
-| `tests/helpers/`、`tests/smoke/shared-home.mjs` | 临时数据与真实 Desktop/CLI 双向测试 |
+| 位置                                             | 责任                                                                       |
+| ------------------------------------------------ | -------------------------------------------------------------------------- |
+| `packages/product-config/`                       | 只读产品名、profile、namespace、app id、默认端口，不能 import Electron/DSH |
+| `packages/home-lease/`                           | home 路径、owner schema、获取/释放、进程探测、受控 doctor                  |
+| `packages/home-lease/native/lease-helper.c`      | macOS 精确进程启动身份、短时间 advisory lock；不 boot DSH、不写 profile    |
+| `packages/profile-manager/src/reconcile.ts`      | 保持现有保序 reconcile，改为同时支持活动 lease authority                   |
+| `apps/bundled-cli/`、`scripts/dsh-native.mjs`    | 持 lease 的 CLI 包装进程、等待 bootstrap 的官方 CLI 子进程                 |
+| `apps/desktop-launcher/`、`packages/shell-core/` | 获取 lease、监督 Host attempt、退出和诊断编排                              |
+| `tests/helpers/`、`tests/smoke/shared-home.mjs`  | 临时数据与真实 Desktop/CLI 双向测试                                        |
 
 ## Task 1：产品配置、home 解析与测试数据边界
 
@@ -76,12 +76,15 @@ export function createIsolatedHomeFixture(): Promise<IsolatedHomeFixture>
 - [ ] 写 home 单测，覆盖 unset/空白 env、相对路径、`~/` 展开、根目录拒绝。语义与本地固定版 `@deepseek-ai/dsh-home-paths` 的 `resolveDshHome` 做隔离进程对照；Main 不直接 import 此 DSH 包。
 
 ```ts
-expect(resolveDesktopHome({ env: {}, osHome: '/Users/test', cwd: '/tmp/work' }))
-  .toBe('/Users/test/.dsh')
-expect(resolveDesktopHome({ env: { DSH_HOME: '  ' }, osHome: '/Users/test', cwd: '/tmp/work' }))
-  .toBe('/Users/test/.dsh')
-expect(resolveDesktopHome({ env: { DSH_HOME: 'data' }, osHome: '/Users/test', cwd: '/tmp/work' }))
-  .toBe('/tmp/work/data')
+expect(resolveDesktopHome({ env: {}, osHome: '/Users/test', cwd: '/tmp/work' })).toBe(
+  '/Users/test/.dsh',
+)
+expect(
+  resolveDesktopHome({ env: { DSH_HOME: '  ' }, osHome: '/Users/test', cwd: '/tmp/work' }),
+).toBe('/Users/test/.dsh')
+expect(
+  resolveDesktopHome({ env: { DSH_HOME: 'data' }, osHome: '/Users/test', cwd: '/tmp/work' }),
+).toBe('/tmp/work/data')
 ```
 
 - [ ] 用 `pnpm exec vitest run packages/home-lease/test/home-paths.test.ts` 观察缺失函数导致失败，再实现解析。将产品值从 `main.ts`/window policy 收敛到配置包；不移动 DSH 业务到配置包。
@@ -145,11 +148,17 @@ export function acquireHomeLease(input: {
 - [ ] 先写失败测试：同 home 不同 profile 竞争只有一个 winner；活 owner/未知 owner 拒绝；记录换 generation 后旧 handle 不能释放；Host 活跃时 release 拒绝；多次 release 幂等；`pendingSpawn` 中断进入保守诊断。
 
 ```ts
-const input = { home: fixture.home, entrypoint: 'desktop' as const,
-  profile: 'desktop', appVersion: '0.0.0', probe }
+const input = {
+  home: fixture.home,
+  entrypoint: 'desktop' as const,
+  profile: 'desktop',
+  appVersion: '0.0.0',
+  probe,
+}
 const first = await acquireHomeLease(input)
-await expect(acquireHomeLease({ ...input, profile: 'headless' }))
-  .rejects.toMatchObject({ code: 'HOME_BUSY' })
+await expect(acquireHomeLease({ ...input, profile: 'headless' })).rejects.toMatchObject({
+  code: 'HOME_BUSY',
+})
 await first.release()
 await first.release()
 ```
@@ -183,8 +192,13 @@ export type CreateHostAttempt = (lease: HomeLease) => HostAttempt
 
 ```ts
 expect(events).toEqual([
-  'lease', 'reconcile', 'before-spawn', 'spawn-waiting',
-  'attach-host', 'bootstrap', 'ready',
+  'lease',
+  'reconcile',
+  'before-spawn',
+  'spawn-waiting',
+  'attach-host',
+  'bootstrap',
+  'ready',
 ])
 ```
 
@@ -211,19 +225,14 @@ expect(events).toEqual([
 export type UnlockResult =
   | { status: 'unlocked' | 'already-unlocked' }
   | { status: 'refused'; code: 'ACTIVE_OWNER' | 'IDENTITY_UNKNOWN' | 'LEASE_CHANGED' }
-export function unlockHome(input: {
-  home: string
-  probe: ProcessProbe
-}): Promise<UnlockResult>
+export function unlockHome(input: { home: string; probe: ProcessProbe }): Promise<UnlockResult>
 export function runBundledCli(argv: readonly string[]): Promise<number>
 ```
 
 - [ ] 写 argv/exit/signal 测试：`--profile headless`、`plugin --profile desktop`、含空格参数、`--`、`--patch` 原样转发；`doctor --unlock` 不能 boot DSH；CLI busy 在 child import 官方入口前退出。
 
 ```ts
-expect(forwardedArgv).toEqual([
-  'plugin', '--profile', 'desktop', 'add', '@example/a',
-])
+expect(forwardedArgv).toEqual(['plugin', '--profile', 'desktop', 'add', '@example/a'])
 expect(events.indexOf('attach-host')).toBeLessThan(events.indexOf('import-dsh-bin'))
 ```
 

@@ -24,14 +24,14 @@
 
 ## 文件责任与运行链
 
-| 文件组 | 责任 |
-| --- | --- |
-| `profile-manager/src/reconcile-plan.ts`、`revision-transaction.ts`、`revision-recovery.ts` | 先计算写入计划，持久化前后修订，幂等恢复 |
-| `profile-manager/src/safe-profile.ts` | 只创建/验证 Safe Mode 自身 profile |
-| `shell-core/src/failure-policy.ts`、`recovery-controller.ts` | 失败类别、恢复资格、串行 attempt 与重试预算 |
-| `apps/desktop-launcher/src/recovery-*` | 独立可信本地窗口、窄 IPC、诊断视图 |
-| `shell-core/src/projection-cache.ts` | 已知派生缓存隔离；不拥有 DSH 数据格式 |
-| `packages/desktop-recovery-bridge/` | 只发布官方 recovery surface |
+| 文件组                                                                                     | 责任                                        |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| `profile-manager/src/reconcile-plan.ts`、`revision-transaction.ts`、`revision-recovery.ts` | 先计算写入计划，持久化前后修订，幂等恢复    |
+| `profile-manager/src/safe-profile.ts`                                                      | 只创建/验证 Safe Mode 自身 profile          |
+| `shell-core/src/failure-policy.ts`、`recovery-controller.ts`                               | 失败类别、恢复资格、串行 attempt 与重试预算 |
+| `apps/desktop-launcher/src/recovery-*`                                                     | 独立可信本地窗口、窄 IPC、诊断视图          |
+| `shell-core/src/projection-cache.ts`                                                       | 已知派生缓存隔离；不拥有 DSH 数据格式       |
+| `packages/desktop-recovery-bridge/`                                                        | 只发布官方 recovery surface                 |
 
 正常链：`lease → 恢复未完成 journal → cache 检查 → 生成 reconcile plan → 持久 journal → 应用变更 → Host ready → renderer 挂载与稳定 → committed`。
 
@@ -50,8 +50,16 @@
 
 ```ts
 export type FailureCategory =
-  | 'lease' | 'profile-write' | 'profile-composition' | 'home-config'
-  | 'credentials' | 'network' | 'runtime' | 'renderer' | 'native-ui' | 'unknown'
+  | 'lease'
+  | 'profile-write'
+  | 'profile-composition'
+  | 'home-config'
+  | 'credentials'
+  | 'network'
+  | 'runtime'
+  | 'renderer'
+  | 'native-ui'
+  | 'unknown'
 export type StartupFailure = Readonly<{
   stage: string
   code: string
@@ -69,10 +77,19 @@ export function shouldRollbackProfile(input: {
 - [ ] 写表驱动失败测试：只有未 healthy、确实改过 profile、失败定位为 profile-write/profile-composition 才有自动回滚资格。lease、端口/权限、home YAML、凭据、打包运行时、原生菜单和未知错误都不回滚。
 
 ```ts
-expect(shouldRollbackProfile({ changed: true, healthy: false,
-  failure: { stage: 'load-home-patch', code: 'HOME_PATCH_INVALID',
-    category: 'home-config', summary: 'Home patch cannot be parsed', retryable: false },
-})).toBe(false)
+expect(
+  shouldRollbackProfile({
+    changed: true,
+    healthy: false,
+    failure: {
+      stage: 'load-home-patch',
+      code: 'HOME_PATCH_INVALID',
+      category: 'home-config',
+      summary: 'Home patch cannot be parsed',
+      retryable: false,
+    },
+  }),
+).toBe(false)
 ```
 
 - [ ] 把 Host boot 拆成有命名阶段的 profile 解析、home patch 解析、runtime 解析、boot、surface 发布；错误在捕获位置设置类别/code。不通过错误消息包含某个单词推断责任插件；归因不足用 unknown。
@@ -106,13 +123,33 @@ export type ProfileReconcilePlan = Readonly<{
 export type RevisionTransaction = Readonly<{
   id: string
   ref: ProfileRef
-  state: 'prepared' | 'applying' | 'applied' | 'committed' | 'retained' | 'rolling-back' | 'rolled-back' | 'conflict'
+  state:
+    | 'prepared'
+    | 'applying'
+    | 'applied'
+    | 'committed'
+    | 'retained'
+    | 'rolling-back'
+    | 'rolled-back'
+    | 'conflict'
 }>
-export function planDesktopReconcile(ref: ProfileRef, lease: HomeLease): Promise<ProfileReconcilePlan>
-export function applyProfileTransaction(plan: ProfileReconcilePlan, lease: HomeLease): Promise<RevisionTransaction>
+export function planDesktopReconcile(
+  ref: ProfileRef,
+  lease: HomeLease,
+): Promise<ProfileReconcilePlan>
+export function applyProfileTransaction(
+  plan: ProfileReconcilePlan,
+  lease: HomeLease,
+): Promise<RevisionTransaction>
 export function commitProfileTransaction(id: string, lease: HomeLease): Promise<void>
-export function rollbackProfileTransaction(id: string, lease: HomeLease): Promise<'restored' | 'conflict'>
-export function recoverInterruptedTransactions(ref: ProfileRef, lease: HomeLease): Promise<'clean' | 'restored' | 'conflict' | 'needs-review'>
+export function rollbackProfileTransaction(
+  id: string,
+  lease: HomeLease,
+): Promise<'restored' | 'conflict'>
+export function recoverInterruptedTransactions(
+  ref: ProfileRef,
+  lease: HomeLease,
+): Promise<'clean' | 'restored' | 'conflict' | 'needs-review'>
 ```
 
 - [ ] 先写恢复失败测试：三个文件均能记录“原来不存在”；恢复创建操作只删除本次新建且仍匹配的文件；已有用户 patch/workspace 字节不变；修改候选任一文件后拒绝自动恢复；其他 profile/home 文件永不进入 snapshot。
@@ -122,8 +159,7 @@ const plan = await planDesktopReconcile(ref, lease)
 const tx = await applyProfileTransaction(plan, lease)
 await writeFile(path.join(ref.dir, 'package.json'), '{"userChanged":true}\n')
 await expect(rollbackProfileTransaction(tx.id, lease)).resolves.toBe('conflict')
-expect(await readFile(path.join(ref.dir, 'package.json'), 'utf8'))
-  .toBe('{"userChanged":true}\n')
+expect(await readFile(path.join(ref.dir, 'package.json'), 'utf8')).toBe('{"userChanged":true}\n')
 ```
 
 - [ ] 将现有 reconcile 拆成纯计算与受控 apply：对所有将变更文件先读存在性/bytes/SHA，再写 `<home>/run/profile-transactions/<id>/before` 和 closed-schema `transaction.json`。journal 存白名单相对路径，不接受任意目标路径；snapshot 0600，目录 0700。
@@ -200,7 +236,9 @@ export function quarantineProjectionCache(input: {
 
 ```ts
 const result = await quarantineProjectionCache({
-  home: fixture.home, lease, thresholdBytes: 1024,
+  home: fixture.home,
+  lease,
+  thresholdBytes: 1024,
 })
 expect(result.kind).toBe('quarantined')
 expect(await readFile(sessionLog, 'utf8')).toBe(originalSessionLog)

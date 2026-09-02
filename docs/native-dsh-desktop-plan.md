@@ -615,7 +615,7 @@ M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接
 
 验收：数据可顺序互通，受支持入口不能并发 boot。
 
-### M2：非破坏性恢复
+### M2：非破坏性恢复（已完成源码级验收，见 [M2 验收记录](validation/m2-acceptance.md)）
 
 执行文档：[M2 Implementation Plan](superpowers/plans/2026-09-02-m2-nondestructive-recovery.md)。
 

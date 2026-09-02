@@ -24,14 +24,14 @@
 
 ## 文件与制品责任
 
-| 位置 | 责任 |
-| --- | --- |
-| `shell-core/src/window-state.ts`、`native-lifecycle.ts` | 窗口状态修复、关窗/退出策略 |
-| `apps/desktop-launcher/src/native-ui.ts`、`external-links.ts`、`resource-paths.ts` | Tray/Menu/Dock、系统外链、安装资源路径 |
-| `packages/release-compatibility/` | M3 最小只读 home admission guard，M4 扩展为完整清单与预检 |
-| `build/electron-builder.config.cjs`、`build/assets/` | app id/图标/打包配置 |
-| `scripts/stage-runtime.mjs`、`package-app.mjs`、`write-artifact-manifest.mjs` | 依赖闭包与可追溯本机制品 |
-| `tests/smoke/package.mjs` 和各场景脚本 | 针对安装应用的验收 |
+| 位置                                                                               | 责任                                                      |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `shell-core/src/window-state.ts`、`native-lifecycle.ts`                            | 窗口状态修复、关窗/退出策略                               |
+| `apps/desktop-launcher/src/native-ui.ts`、`external-links.ts`、`resource-paths.ts` | Tray/Menu/Dock、系统外链、安装资源路径                    |
+| `packages/release-compatibility/`                                                  | M3 最小只读 home admission guard，M4 扩展为完整清单与预检 |
+| `build/electron-builder.config.cjs`、`build/assets/`                               | app id/图标/打包配置                                      |
+| `scripts/stage-runtime.mjs`、`package-app.mjs`、`write-artifact-manifest.mjs`      | 依赖闭包与可追溯本机制品                                  |
+| `tests/smoke/package.mjs` 和各场景脚本                                             | 针对安装应用的验收                                        |
 
 构建输出统一放 `release/`（已忽略）；源码只提交配置、素材源、脚本及脱敏验收摘要。
 
@@ -61,9 +61,10 @@ export function closeWindowAction(quitting: boolean): 'hide' | 'close'
 ```ts
 expect(closeWindowAction(false)).toBe('hide')
 expect(closeWindowAction(true)).toBe('close')
-const restored = restoreWindowState({ bounds: { x: 9000, y: 9000,
-  width: 1280, height: 820 }, maximized: false },
-  [{ x: 0, y: 0, width: 1440, height: 900 }])
+const restored = restoreWindowState(
+  { bounds: { x: 9000, y: 9000, width: 1280, height: 820 }, maximized: false },
+  [{ x: 0, y: 0, width: 1440, height: 900 }],
+)
 expect(restored.bounds.x).toBeGreaterThanOrEqual(0)
 expect(restored.bounds.x + restored.bounds.width).toBeLessThanOrEqual(1440)
 ```
@@ -95,10 +96,12 @@ export function externalUrlPolicy(input: {
 - [ ] 写失败测试：允许协议但 URL 格式坏/userinfo/控制字符时拒绝；带本地认证凭据的 surface URL 不能送系统浏览器；新窗口始终 deny。主 frame 跨源导航/重定向始终拦截。
 
 ```ts
-expect(externalUrlPolicy({ target: 'file:///etc/passwd',
-  currentOrigin: 'http://127.0.0.1:4000' })).toBe('deny')
-expect(externalUrlPolicy({ target: 'https://example.com/help',
-  currentOrigin: 'http://127.0.0.1:4000' })).toBe('external')
+expect(
+  externalUrlPolicy({ target: 'file:///etc/passwd', currentOrigin: 'http://127.0.0.1:4000' }),
+).toBe('deny')
+expect(
+  externalUrlPolicy({ target: 'https://example.com/help', currentOrigin: 'http://127.0.0.1:4000' }),
+).toBe('external')
 ```
 
 - [ ] 在 launcher 内调用 `shell.openExternal`，只处理经政策检查的用户链接；不允许 renderer 给任意 native 参数。恢复窗口禁用外部导航，官方 Web 仍使用固定认证 origin。
@@ -133,9 +136,17 @@ export function checkHomeAdmission(input: {
 - [ ] 测试 marker schema 未知、格式坏、epoch 不支持时拒绝；M3 内嵌 `[1]`，只允许有效 schema 1/epoch 1；缺 marker 在此阶段允许现有 home，M4 将补 read-only 格式预检。
 
 ```ts
-expect(checkHomeAdmission({ marker: { schemaVersion: 1, dataEpoch: 2,
-  lastWriterReleaseId: 'future-test-fixture', formats: {} },
-  supportedDataEpochs: [1] })).toBe('unsupported-data')
+expect(
+  checkHomeAdmission({
+    marker: {
+      schemaVersion: 1,
+      dataEpoch: 2,
+      lastWriterReleaseId: 'future-test-fixture',
+      formats: {},
+    },
+    supportedDataEpochs: [1],
+  }),
+).toBe('unsupported-data')
 ```
 
 - [ ] 路径固定 `<home>/run/compatibility.json`，拒绝 symlink，读取失败也 fail closed。取得 lease 后、profile/cache/Host 任何写入前调用；失败显示本地诊断并安全释放 lease。Safe Mode 与 CLI 不得绕过 admission。

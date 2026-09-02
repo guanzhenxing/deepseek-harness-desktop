@@ -19,6 +19,8 @@
     "lint": "eslint . && pnpm run check:boundaries",
     "smoke:dsh-ui": "node tests/smoke/dsh-ui.mjs",
     "smoke:host-crash": "node tests/smoke/host-crash.mjs",
+    "smoke:profile-recovery": "node tests/smoke/profile-recovery.mjs",
+    "smoke:safe-mode": "node tests/smoke/safe-mode.mjs",
     "smoke:shared-home": "node tests/smoke/shared-home.mjs",
     "test:integration": "pnpm run build && vitest run --config vitest.integration.config.ts",
     "test:shared-home": "pnpm run build && pnpm run build:native && vitest run --config vitest.integration.config.ts apps/bundled-cli/test/shared-home.integration.test.ts",
