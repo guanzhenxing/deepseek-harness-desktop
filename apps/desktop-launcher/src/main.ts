@@ -212,14 +212,14 @@ async function startApplication(): Promise<void> {
         if (shell === undefined) return
         shell
           .act(action)
+          .then(() => {
+            if (action === 'quit' || shell?.state === 'stopped') app.exit(0)
+          })
           .catch((error: unknown) => {
             console.error(
               `recovery action ${action} failed:`,
               error instanceof Error ? error.message : error,
             )
-          })
-          .then(() => {
-            if (action === 'quit' || shell?.state === 'stopped') app.exit(0)
           })
       },
       isInRecovery: () => shell?.state === 'recovery',

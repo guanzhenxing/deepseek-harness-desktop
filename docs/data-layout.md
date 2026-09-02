@@ -34,7 +34,8 @@
 | `<profile>/**`                                      | `profile-manager` 与用户     | v1 只修改白名单文件并做修订校验                                                   | 修改前保存存在性、内容和 SHA-256                 |
 | `<safeProfile>/**`                                  | `profile-manager`            | 只创建 Safe Mode 自身投影，不自动修改正常 profile                                 | 可重建；不得包含第三方 bundle 或正常 patch layer |
 | `<home>/run/host.lock/`                             | `home-lease`                 | launcher 或 bundled CLI 在整个 Host writer 生命周期持有                           | 不是数据备份；只可按 owner 身份受控恢复          |
-| `<home>/run/profile-transactions/**`                | `profile-manager`            | M2 起持有 home lease 时原子写入                                                   | 用于崩溃恢复，终态最近 20 条保留；M0 不创建      |
+| `<home>/run/profile-transactions/**`                | `profile-manager`            | M2 起持有 home lease 时原子写入                                                   | 用于崩溃恢复，终态（committed/rolled-back/retained）最近 20 条保留，conflict 与未终态不自动清理；M0 不创建 |
+| `<home>/run/projection-cache-quarantine.json`       | `shell-core`                 | cache 隔离 rename 前后的意图 journal（crash 窗口 spanning）；move 落定后自清理     | 只写相对路径与字节数；不复制内容                  |
 | `<home>/storages/session_projcache.quarantine-<id>` | `shell-core`                 | 超 512 MiB 的可重建 projection cache 在持 lease、无 Host 时同文件系统 rename 隔离 | 备份保留不自动删除；rename 前后写意图 journal    |
 
 “Desktop 与 CLI 共享 home”表示它们在不同时间读写同一批数据，不表示两个 Host 可以并发写入。
@@ -85,9 +86,11 @@ M2 起，共享 home 的 reconcile 走**逐文件修订事务**：先 `planDeskt
 2. 验证 profile 路径和 symlink 约束；
 3. 原子写 transaction 意图与 before snapshot；
 4. 原子替换白名单文件；
-5. Host、surface 和 BrowserWindow 通过稳定性窗口后标记 committed；
-6. 失败时仅在当前摘要仍等于本次候选摘要时恢复 before；
-7. committed/rolled-back 记录按有界保留策略清理。
+5. Host ready 且真实窗口挂载 surface 后标记 committed（`RecoverySessionController` 的会话语义）；
+6. 失败时仅在当前摘要仍等于本次候选摘要时恢复 before；rollback 写回前对每个文件复验路径/inode/摘要，阶段间漂移返回 conflict；
+7. committed/rolled-back/retained 终态记录按有界保留策略保留最近 20 条；conflict 与未终态不自动清理。
+
+journal 是**不可信输入**：`readJournal` 校验 `ref` 必须落在 `<home>/profiles/<name>` 布局内，越界即视为 corrupt；恢复窗口对 journal 内字段不做任何路径拼接之外的信任。
 
 E3 的 generation ledger 会继续由 `profile-manager` 拥有，但本项目在 E3 ADR 确定 schema、迁移和清理策略前不创建 generation 存储目录。transaction journal 与 generation ledger 的延后不改变 profile-manager 的唯一权威。
 
@@ -96,6 +99,7 @@ E3 的 generation ledger 会继续由 `profile-manager` 拥有，但本项目在
 | 路径                                       | 所有者                             | 用途                                                          | 恢复规则                                          |
 | ------------------------------------------ | ---------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- |
 | `<userData>/window-state.json`             | `shell-core`                       | 窗口位置、大小和最大化状态                                    | 可重建；离屏时回退默认值                          |
+| `<userData>/recovery/<home 摘要>.json`     | launcher（`shell-core` 会话）      | profile 自动恢复 relaunch-once 的 marker：绑定 home 匿名摘要、transaction id、attempt；fsync 原子写 | 会话健康后清除；跨进程持久化重启预算              |
 | `<userData>/logs/**`                       | launcher/Host 结构化日志           | 本地诊断                                                      | 有界轮换；必须脱敏                                |
 | `<m0Home>/profiles/.dsh-desktop-run-*`     | Host runner                        | M0 中性启动根；包含 `cordis.yml` 与选中 bundle 的局部模块投影 | 关停前复核实际路径与目录身份；身份变化拒绝删除    |
 | `<m0Home>/profiles/node_modules/**`        | Host runner / 上游 fallback helper | 安装依赖闭包的可重建投影，不是 named profile                  | 上游锁下维护，不修改 profile manifest 或 patch    |
