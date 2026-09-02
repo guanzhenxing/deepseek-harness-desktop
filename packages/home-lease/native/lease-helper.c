@@ -49,17 +49,21 @@ static void print_result(const char *json) {
     if (fflush(stdout) != 0) exit(1);
 }
 
-static void fail(const char *error) {
-    if (strcmp(error, "refused") == 0 || strcmp(error, "unsupported") == 0 ||
+static void fail_with_errno(const char *error, int errorCode) {
+    if (strncmp(error, "refused", 7) == 0 || strcmp(error, "unsupported") == 0 ||
         strcmp(error, "busy") == 0 || strcmp(error, "unknown") == 0) {
-        printf("{\"ok\":false,\"error\":\"%s\"}\n", error);
+        printf("{\"ok\":false,\"error\":\"%s\",\"errno\":%d,\"errnoText\":\"%s\"}\n",
+               error, errorCode, strerror(errorCode));
     } else {
-        /* Non-protocol diagnostics never leak into machine-readable output. */
         print_result("{\"ok\":false,\"error\":\"internal\"}");
     }
-    fprintf(stderr, "lease-helper: %s\n", error);
+    fprintf(stderr, "lease-helper: %s (errno %d: %s)\n", error, errorCode, strerror(errorCode));
     fflush(stdout);
     exit(1);
+}
+
+static void fail(const char *error) {
+    fail_with_errno(error, errno);
 }
 
 #if defined(__APPLE__)
@@ -333,7 +337,7 @@ static int cmd_lock(const char *guardPath, const char *parentDir,
      * lstat-then-open sequence could observe a different directory between
      * the two steps. */
     int parentFd = open(parentDir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (parentFd < 0) fail("refused");
+    if (parentFd < 0) fail("refused-parent");
     struct stat parent;
     if (fstat(parentFd, &parent) != 0 || !S_ISDIR(parent.st_mode)) {
         close(parentFd);
@@ -352,13 +356,27 @@ static int cmd_lock(const char *guardPath, const char *parentDir,
     }
     long retryMs = strtol(retryMsText, NULL, 10);
     if (retryMs < 0) retryMs = 0;
-    int fd = openat(parentFd, guardName, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    /* macOS mis-reports ENOENT when O_CREAT|O_NOFOLLOW hits a file that
+     * concurrently came into existence, so create strictly exclusively and
+     * fall back to a plain O_NOFOLLOW open for an already-existing guard. */
+    int fd = -1;
+    for (int attempt = 0; attempt < 3 && fd < 0; attempt += 1) {
+        fd = openat(parentFd, guardName, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+        if (fd >= 0) break;
+        if (errno != ENOENT) break;
+        fd = openat(parentFd, guardName,
+                    O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd >= 0) break;
+        if (errno != EEXIST) break;
+        fd = -1;
+    }
+    int openatError = errno;
     close(parentFd);
     if (fd < 0) {
-        /* O_NOFOLLOW rejection, missing parent, permission: never retry a
-         * tampered or misplaced guard target. */
-        fail("refused");
+        errno = openatError;
+        fail("refused-openat");
     }
+
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
         if (retryMs == 0) {
             close(fd);

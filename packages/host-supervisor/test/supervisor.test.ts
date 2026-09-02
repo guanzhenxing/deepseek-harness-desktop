@@ -14,6 +14,10 @@ class FakeProcess implements ManagedHostProcess {
   readonly posted: unknown[] = []
   terminateCount = 0
   killCount = 0
+  /** Simulates a process that ignores signals; disabled by default. */
+  unkillable = false
+  /** Simulates a process that dies on signals; disabled by default. */
+  killable = false
   bootstrap: HostBootstrap | undefined
   #messageListeners = new Set<(message: unknown) => void>()
   #exitListeners = new Set<(exit: { code: number | null; signal: string | null }) => void>()
@@ -38,10 +42,12 @@ class FakeProcess implements ManagedHostProcess {
 
   terminate(): void {
     this.terminateCount += 1
+    if (this.killable) queueMicrotask(() => this.emitExit(0))
   }
 
   kill(): void {
     this.killCount += 1
+    if (this.killable) queueMicrotask(() => this.emitExit(null, 'SIGKILL'))
   }
 
   emitMessage(message: HostEnvelope): void {
@@ -170,8 +176,23 @@ describe('HostSupervisor lease ordering', () => {
     expect(setup.process.bootstrap).toBeUndefined()
   })
 
+  it('keeps the pending spawn flagged when an unauthorized child is unkillable', async () => {
+    const setup = fixture()
+    setup.process.unkillable = true
+    setup.lease.refuseAt = 'attachHost'
+    await expect(setup.supervisor.start(startRequest(setup.lease))).rejects.toMatchObject({
+      code: 'BOOT_FAILED',
+    })
+    expect(setup.process.bootstrap).toBeUndefined()
+    expect(setup.process.terminateCount).toBeGreaterThanOrEqual(1)
+    expect(setup.process.killCount).toBeGreaterThanOrEqual(1)
+    // No confirm: the lease keeps pendingSpawn so a release will refuse.
+    expect(setup.lease.calls).not.toContain('confirmHostExited')
+  })
+
   it('reaps an unauthorized child and clears the pending spawn when attach fails', async () => {
     const setup = fixture()
+    setup.process.killable = true
     setup.lease.refuseAt = 'attachHost'
     await expect(setup.supervisor.start(startRequest(setup.lease))).rejects.toMatchObject({
       code: 'BOOT_FAILED',

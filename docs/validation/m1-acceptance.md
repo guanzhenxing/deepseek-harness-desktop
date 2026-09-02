@@ -83,6 +83,21 @@
 | P2 缺双 doctor 竞态与 restart 间隙测试                    | 新增 `doctor-race.integration.test.ts`（3 轮并发 doctor×2+acquirer，断言胜者锁不被误删）与 shared-home 的 host-restart-gap 场景（Host SIGKILL 后 Desktop 恢复页期间第三入口仍 exit 3）                                                                 | 两文件                                                                                                         |
 | P3 M1 分支包含 M1–M4 计划文档                             | 保留：这是与用户确认过的基线化默认（计划文档作为 M1 分支第一个提交），非运行时行为                                                                                                                                                                     | `fce2d4e`                                                                                                      |
 
+### 自我审查两轮（2026-09-02，`fix: harden signal forwarding and conservative reaping`）
+
+对最终代码做两轮独立自审（第一轮攻击者/协议视角，第二轮测试/规格视角），发现并修复：
+
+| 发现                                                                                                                                                             | 修复                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 信号处理器累积且 `kill(-pgid)` 对已消亡组抛 ESRCH，可能在处理器内产生未捕获异常                                                                                  | 转发与 kill 全部 try/catch；child 退出后 `process.off` 移除全部处理器                                                      |
+| launcher supervisor 对未授权 child 有限等待后**无条件** confirmHostExited，无法证明死亡也会清 pendingSpawn → release 成功；与 CLI 侧保守语义（保留 lease）不一致 | 仅在可证明退出时 confirm；否则保留 pendingSpawn，release 以 PENDING_SPAWN 拒绝、lease 保留上报（新增 unkillable 反例测试） |
+| `defaultGroupAlive` 对 EPERM 等非 ESRCH 错误直接抛出                                                                                                             | 视为"存活"（保守）                                                                                                         |
+| 无 profile 透传路径组不可证死时返回 4 但无任何输出                                                                                                               | 打印残留进程提示                                                                                                           |
+
+第二轮（测试/规格）未发现新缺口；记录残余：guard 若被硬链接到用户自有的其他文件，fd-based fchmod 会同时收紧同一 inode——同 uid 攻击者本可直接 chmod，不在威胁模型内。
+
+自审期间的深入调查还发现并修复一个并发正确性缺陷：**8 路并发 acquire 在系统负载下偶发把 `refused-openat`（ENOENT）当作 LEASE_UNKNOWN**。逐步定位（helper 带 errno/步骤标记 + 满负载复现）证明根因是 macOS 对 `openat(O_RDWR|O_CREAT|O_NOFOLLOW)` 打开**并发中刚被创建**的已存在文件会误报 ENOENT。修复：guard 打开改为两阶段——先纯 `O_NOFOLLOW` 打开已存在文件，ENOENT 才用 `O_CREAT|O_EXCL` 独占创建，EEXIST 回退重试。修复后 40 轮 × 8 路并发 + 整套集成套件满负载复现零异常；同时 acquire 阶段把 guard 争用（GUARD_BUSY）映射为 HOME_BUSY，使并发争抢的语义确定。
+
 ### 第三轮审查修复（2026-09-02，`fix: wait for cli descendants and pin guard parent`）
 
 | 审查项                                        | 修复                                                                                                                                                                                            | 证据                                                                                                                   |

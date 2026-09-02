@@ -134,6 +134,9 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
     throw new LeaseError('HOME_STALE', 'home lock owner is no longer running', summary)
   }
 
+  // Acquisition maps guard contention to HOME_BUSY: many simultaneous
+  // entries are exactly the "another entrypoint is using this home" case,
+  // whatever layer refused first.
   await withGuard(async (): Promise<void> => {
     try {
       await mkdir(paths.lockDir, { mode: 0o700 })
@@ -156,6 +159,14 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
       appVersion: input.appVersion,
     })
     await writeOwnerWithDurability(paths.ownerPath, owner)
+  }).catch((error: unknown) => {
+    if (error instanceof LeaseError && error.code === 'GUARD_BUSY') {
+      throw new LeaseError(
+        'HOME_BUSY',
+        'the home lock critical section is contended by another entrypoint',
+      )
+    }
+    throw error
   })
 
   const lockIdentity = await directoryIdentity(paths.lockDir, 'home lock directory')

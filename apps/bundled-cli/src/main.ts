@@ -108,16 +108,34 @@ function forkCliChild(
     child.once('exit', (code, signal) => resolve({ code, signal }))
   })
   const forward = (signal: NodeJS.Signals): void => {
-    process.kill(-pgid, signal)
+    try {
+      process.kill(-pgid, signal)
+    } catch {
+      /* the group is already gone; nothing to forward to */
+    }
   }
-  process.on('SIGINT', () => forward('SIGINT'))
-  process.on('SIGTERM', () => forward('SIGTERM'))
-  process.on('SIGHUP', () => forward('SIGHUP'))
+  const handlers: [NodeJS.Signals, () => void][] = [
+    ['SIGINT', () => forward('SIGINT')],
+    ['SIGTERM', () => forward('SIGTERM')],
+    ['SIGHUP', () => forward('SIGHUP')],
+  ]
+  for (const [signal, handler] of handlers) process.on(signal, handler)
+  // Stop forwarding once the child is gone so repeated invocations never
+  // accumulate handlers or signal dead process groups.
+  void exited.then(() => {
+    for (const [signal, handler] of handlers) process.off(signal, handler)
+  })
   return {
     pid: child.pid,
     send: (message) => child.send(message as Serializable),
     exited,
-    kill: (signal = 'SIGTERM') => process.kill(-pgid, signal),
+    kill: (signal = 'SIGTERM') => {
+      try {
+        process.kill(-pgid, signal)
+      } catch {
+        /* the group is already gone */
+      }
+    },
   }
 }
 
@@ -142,8 +160,9 @@ function defaultGroupAlive(pgid: number): boolean {
     process.kill(-pgid, 0)
     return true
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
-    throw error
+    // ESRCH means the group is gone; anything else (EPERM, ...) means the
+    // group exists but cannot be probed — treat it as alive.
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
   }
 }
 
@@ -244,7 +263,12 @@ export async function runBundledCli(
     child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
     const exit = await child.exited
     const descendantsGone = await waitForDescendants(child.pid, options)
-    if (!descendantsGone) return 4
+    if (!descendantsGone) {
+      stderr.write(
+        'dsh-native: cannot prove the CLI process group exited; inspect the leftover processes\n',
+      )
+      return 4
+    }
     return exitCodeOf(exit)
   }
 

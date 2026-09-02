@@ -38,7 +38,7 @@ owner 文件不含凭据、capability、authenticated URL 或完整命令行。
 `packages/home-lease/native/lease-helper.c`（`pnpm build:native` 编译到被忽略的 `.build/` 目录）：
 
 - `identity <pid>` / `probe <pid> <start>` / `scan <excludes> <entries>`（可执行文件匹配）/ `scanargv <excludes> <needles>`（argv 针脚内存匹配，`` 分隔，绝不输出 argv）/ `lock <guard> <parentDir> <dev> <ino> <retryMs>`；
-- guard 打开使用 `openat(父目录 fd, …, O_NOFOLLOW)`——父目录先以 fd 钉住并用 `fstat` 校验 dev/ino，杜绝"先检查再按路径打开"的置换窗口；`flock(LOCK_EX|LOCK_NB)`，持锁 helper 在 stdin 关闭或收到 `release` 后退出；
+- guard 打开使用 `openat(父目录 fd, …, O_NOFOLLOW)`——父目录先以 fd 钉住并用 `fstat` 校验 dev/ino，杜绝"先检查再按路径打开"的置换窗口；已存在 guard 先以纯 `O_NOFOLLOW` 打开、不存在才 `O_CREAT|O_EXCL` 独占创建（macOS 对 O_CREAT|O_NOFOLLOW 命中并发新文件会误报 ENOENT）；`flock(LOCK_EX|LOCK_NB)`，持锁 helper 在 stdin 关闭或收到 `release` 后退出；锁失败错误带细分（`refused-parent`/`refused-openat`）与 errno；
 - 权限不足一律返回 `unknown` 状态；只输出结构化 JSON 行，不输出 argv/env；
 - 非 macOS 平台报告 unsupported；这些平台只允许注入 probe 的单测。
 

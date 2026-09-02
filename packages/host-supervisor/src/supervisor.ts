@@ -184,8 +184,9 @@ export class HostSupervisor {
         })
         process.deliverBootstrap(bootstrap)
       } catch (error) {
-        // The child never received boot credentials; reap it, clear the
-        // pending spawn registration, and report the failed attempt.
+        // The child never received boot credentials; reap it and, only when
+        // its death is provable, clear the pending spawn registration. An
+        // unreapable child keeps the lease flagged so release stays refused.
         await this.#reapUnauthorizedChild(process)
         throw error
       }
@@ -239,6 +240,11 @@ export class HostSupervisor {
         /* already gone */
       }
       await Promise.race([exitedPromise, new Promise<void>((r) => setTimeout(r, 500))])
+    }
+    if (!exited) {
+      // Leave pendingSpawn set: the lease release will refuse and the
+      // launcher reports the kept lease instead of clearing it blindly.
+      return
     }
     await this.#request?.lease.confirmHostExited().catch(() => undefined)
   }
