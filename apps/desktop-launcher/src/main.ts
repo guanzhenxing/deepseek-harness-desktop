@@ -219,18 +219,26 @@ async function startApplication(): Promise<void> {
       kind: 'ui-ready',
       launcherPid: process.pid,
       hostPid: readyHost?.pid,
+      ...(smokeMode === 'shared-home' ? { surfaceUrl: readyHost?.surface.url } : {}),
     })
     if (smokeMode === 'host-crash' && readyHost !== undefined) {
       process.kill(readyHost.pid, 'SIGKILL')
-    } else {
+    } else if (smokeMode !== 'shared-home') {
       app.quit()
     }
+    // In shared-home mode the driver owns the shutdown moment; the app stays
+    // up holding the lease until it receives SIGTERM.
   }
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) app.quit()
 else {
+  // Termination signals go through the normal before-quit chain so the Host
+  // is stopped and the home lease is released before the process exits.
+  process.on('SIGTERM', () => {
+    app.quit()
+  })
   app.on('second-instance', () => {
     const window = BrowserWindow.getAllWindows()[0]
     if (window?.isMinimized()) window.restore()

@@ -26,3 +26,32 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run repository checks
         run: pnpm check
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the native lease helper
+        run: pnpm build:native
+      - name: Run integration tests
+        run: pnpm test:integration
+      - name: Run shared-home integration tests
+        run: pnpm test:shared-home
+      - name: Run Desktop UI smoke
+        run: pnpm smoke:dsh-ui
+      - name: Run Host crash smoke
+        run: pnpm smoke:host-crash
+      - name: Run shared-home smoke
+        run: pnpm smoke:shared-home

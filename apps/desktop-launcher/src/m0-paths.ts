@@ -7,7 +7,7 @@ export async function resolveSmokeUserData(
   override: string | undefined,
 ): Promise<string | undefined> {
   if (smokeMode === undefined && override === undefined) return undefined
-  if (smokeMode !== 'ui' && smokeMode !== 'host-crash') {
+  if (!['ui', 'host-crash', 'shared-home'].includes(smokeMode ?? '')) {
     throw new Error('M0 userData overrides are available only in supported smoke modes')
   }
   if (
