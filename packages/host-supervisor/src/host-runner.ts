@@ -28,6 +28,7 @@ import {
 } from '@dsh-desktop/desktop-contracts/host-control'
 
 import { createRuntimeRoot, type RuntimeRoot } from './runtime-root.js'
+import { assertBootProfile, type BootMode } from './boot-profile.js'
 
 export interface HostControlTransport {
   postMessage(message: unknown): void
@@ -38,7 +39,7 @@ export interface HostControlTransport {
 export type RunDshHostOptions = Readonly<{
   home: string
   profileName: string
-  mode: 'normal'
+  mode: BootMode
   capability: string
   leaseGeneration: string
   hostIdentity: HostIdentity
@@ -125,6 +126,10 @@ function processEnvironment(): Record<string, string> {
 }
 
 export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHandle> {
+  const bootProfile = assertBootProfile({ mode: options.mode, profileName: options.profileName })
+  if (!bootProfile.ok)
+    throw new Error(`dsh-desktop Host boot profile invalid: ${bootProfile.reason}`)
+  const safeMode = options.mode === 'safe'
   const writer = createEnvelopeWriter(
     'host-to-launcher',
     options.capability,
@@ -317,7 +322,12 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
         surfaceId = randomUUID()
         options.transport.postMessage(writer.next({ kind: 'phase', phase: 'surface-waiting' }))
         options.transport.postMessage(
-          writer.next({ kind: 'surface', surfaceId, purpose: 'normal', surface }),
+          writer.next({
+            kind: 'surface',
+            surfaceId,
+            purpose: safeMode ? 'recovery' : 'normal',
+            surface,
+          }),
         )
       },
     }

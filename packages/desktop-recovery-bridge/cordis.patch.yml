@@ -1,0 +1,12 @@
+# Recovery bridge owns browser handoff only; the official Web runtime keeps
+# all other keys (ADR-0002: minimal first-party recovery surface).
+- id: web-runtime
+  config:
+    openBrowser: false
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+
+- insert:
+    - id: desktop-recovery-bridge
+      name: '@dsh-desktop/desktop-recovery-bridge'

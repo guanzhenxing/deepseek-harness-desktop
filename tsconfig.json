@@ -14,14 +14,35 @@
     "tests/helpers/**/*.ts"
   ],
   "references": [
-    { "path": "apps/bundled-cli" },
-    { "path": "apps/desktop-launcher" },
-    { "path": "packages/desktop-contracts" },
-    { "path": "packages/desktop-plugin" },
-    { "path": "packages/home-lease" },
-    { "path": "packages/host-supervisor" },
-    { "path": "packages/product-config" },
-    { "path": "packages/profile-manager" },
-    { "path": "packages/shell-core" }
+    {
+      "path": "apps/bundled-cli"
+    },
+    {
+      "path": "apps/desktop-launcher"
+    },
+    {
+      "path": "packages/desktop-contracts"
+    },
+    {
+      "path": "packages/desktop-plugin"
+    },
+    {
+      "path": "packages/desktop-recovery-bridge"
+    },
+    {
+      "path": "packages/home-lease"
+    },
+    {
+      "path": "packages/host-supervisor"
+    },
+    {
+      "path": "packages/product-config"
+    },
+    {
+      "path": "packages/profile-manager"
+    },
+    {
+      "path": "packages/shell-core"
+    }
   ]
 }
