@@ -83,6 +83,14 @@
 | P2 缺双 doctor 竞态与 restart 间隙测试                    | 新增 `doctor-race.integration.test.ts`（3 轮并发 doctor×2+acquirer，断言胜者锁不被误删）与 shared-home 的 host-restart-gap 场景（Host SIGKILL 后 Desktop 恢复页期间第三入口仍 exit 3）                                                                 | 两文件                                                                                                         |
 | P3 M1 分支包含 M1–M4 计划文档                             | 保留：这是与用户确认过的基线化默认（计划文档作为 M1 分支第一个提交），非运行时行为                                                                                                                                                                     | `fce2d4e`                                                                                                      |
 
+### 第三轮审查修复（2026-09-02，`fix: wait for cli descendants and pin guard parent`）
+
+| 审查项                                        | 修复                                                                                                                                                                                            | 证据                                                                                                                   |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| P1 授权 CLI 只等直接 child，不等写 home 后代  | CLI 子进程改为独立进程组（detached fork）；直接 child 退出后探测**整组**存活（`kill(-pgid,0)`），10s 宽限→组 TERM→组 KILL；仍无法证明组消亡则保留 lease、退出码 4（协议已更新）；信号转发至整组 | `cli.test.ts` 两个组测试（迟落后代收敛释放 / 组不可证死保留锁）；真实流程由 test:shared-home 与 smoke:shared-home 覆盖 |
+| P1 guard chmod TOCTOU（lstat→chmod 路径窗口） | TS 侧收紧改为 fd-based：`open(O_RDONLY                                                                                                                                                          | O_NONBLOCK                                                                                                             | O_NOFOLLOW[ | O_DIRECTORY])`+`fchmod`，symlink→ELOOP 拒绝、FIFO/非常规 inode 拒绝；helper 侧改为 `openat(父目录fd, guard名, O_NOFOLLOW…)`，父目录以 fd+fstat 钉住（dev/ino 校验后不再按路径访问） | lease 单测 symlink/FIFO 反例；helper 手工验证 refused 路径；既有权限收紧测试 |
+| P3 协议命令清单缺 scanargv                    | 协议 §3 补 `scanargv`、openat 语义、组等待语义                                                                                                                                                  | docs/protocols/home-lease.md                                                                                           |
+
 ### 第二轮审查修复（2026-09-02，`fix: enforce conservative lease release on failure paths`）
 
 | 审查项                                | 修复                                                                                                                                      | 证据                                                                                                                |
@@ -97,6 +105,6 @@
 - CI 的 `macos-15` job 尚未在 GitHub Actions 实际运行（本地同等命令已全部通过）；Linux `check` job 依赖既有配置。
 - `ParentPort` 的 `close` 事件依赖 Electron 运行时行为（类型未声明，已按 EventEmitter 订阅）；父进程死亡的兜底仍是子进程 10s bootstrap 超时。
 - smoke 输出中的 surface URL 携带一次性 token（仅存在于临时 home 场景，场景结束即销毁）；正式运行的日志不输出该 URL。
-- `dsh-native` 等待子进程退出即释放 lease；若官方 CLI 子进程自行 daemon 化留下写 home 的后代（当前固定版没有此行为），lease 会在后代仍存活时释放。M2/M3 如引入相关上游行为需复查。doctor 的 argv 针脚覆盖我们自己的入口脚本与官方 dsh bin，但不覆盖 CLI 子进程再派生的任意 pnpm 后代（其 argv 不含针脚）。
+- 写 home 后代通过进程组存活探测收敛：直接 child 退出后给整组 10s 宽限再 TERM→KILL 升级，组不可证死时保留 lease（退出码 4）。极端场景（后代脱离进程组 double-fork 进新会话）无法被组探测覆盖——当前固定版 CLI 无此行为，M2/M3 引入相关上游行为时复查。doctor 的 argv 针脚覆盖我们自己的入口脚本与官方 dsh bin，不覆盖后代派生的任意 pnpm 进程（其 argv 不含针脚）。
 - argv 针脚按子串匹配：任何把针脚路径放进自身 argv 的无关进程（如 `sh -c '<完整路径> ...'`）都会让 doctor 保守拒绝——方向安全（拒绝解锁），只影响可用性。
 - M2（修订恢复/Safe Mode）、M3（打包）、M4（兼容性）未交付；本记录只覆盖 M1 范围。

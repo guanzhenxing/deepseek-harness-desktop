@@ -119,8 +119,12 @@ describe.skipIf(!helperAvailable)('doctor and acquisition race', () => {
         await expect(stat(path.join(home, 'run', 'host.lock'))).resolves.toBeTruthy()
         expect(await ownerSupervisorPid(home)).toBe(acquirer.child.pid)
         for (const doctor of results) {
-          // No doctor may report having removed the acquirer's lock.
-          expect(doctor.output).not.toContain(`supervisor=${acquirer.child.pid}`)
+          // A doctor may refuse and name the live owner in its reason, but
+          // must never report having *unlocked* the acquirer's lock.
+          expect(
+            doctor.output.includes('unlocked') &&
+              doctor.output.includes(`supervisor=${acquirer.child.pid}`),
+          ).toBe(false)
         }
         acquirer.requestRelease()
         const exit = await acquirer.exited

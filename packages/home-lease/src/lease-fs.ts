@@ -1,5 +1,6 @@
 import type { Stats } from 'node:fs'
-import { chmod, lstat, mkdir, open, readFile } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { lstat, mkdir, open, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -71,21 +72,46 @@ export async function ensureHomeLayout(paths: LeasePaths): Promise<void> {
   }
   await directoryIdentity(paths.run, 'DSH home run directory')
   // Tighten pre-existing inodes to the protocol modes; a wider run directory
-  // or guard file would leak lease metadata to other local users.
-  const runMode = (await lstat(paths.run)).mode & 0o777
-  if (runMode !== 0o700) await chmod(paths.run, 0o700)
+  // or guard file would leak lease metadata to other local users. Tightening
+  // is fd-based (open with O_NOFOLLOW then fchmod) so a path swapped for a
+  // symlink between lookups can never make chmod touch a foreign inode.
+  await tightenByDescriptor(paths.run, 0o700, 'DSH home run directory', true)
+  await tightenByDescriptor(paths.guardPath, 0o600, 'host-lease.guard', false)
+}
+
+async function tightenByDescriptor(
+  target: string,
+  mode: number,
+  label: string,
+  requireDirectory: boolean,
+): Promise<void> {
+  const flags =
+    fsConstants.O_RDONLY |
+    fsConstants.O_NONBLOCK |
+    fsConstants.O_NOFOLLOW |
+    (requireDirectory ? fsConstants.O_DIRECTORY : 0)
+  let handle
   try {
-    const guardIdentity = await lstat(paths.guardPath)
-    // chmod would follow a symlink and touch a file outside the home; reject
-    // before any side effect, exactly like the O_NOFOLLOW open would.
-    if (guardIdentity.isSymbolicLink()) {
-      throw new LeaseError('LEASE_UNKNOWN', 'host-lease.guard must not be a symlink')
-    }
-    const guardMode = guardIdentity.mode & 0o777
-    if (guardMode !== 0o600) await chmod(paths.guardPath, 0o600)
+    handle = await open(target, flags)
   } catch (error) {
-    if (error instanceof LeaseError) throw error
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return
+    if (code === 'ELOOP') {
+      throw new LeaseError('LEASE_UNKNOWN', `${label} must not be a symlink`)
+    }
+    throw error
+  }
+  try {
+    const identity = await handle.stat()
+    if (requireDirectory && !identity.isDirectory()) {
+      throw new LeaseError('LEASE_UNKNOWN', `${label} must be a directory`)
+    }
+    if (!requireDirectory && !identity.isFile()) {
+      throw new LeaseError('LEASE_UNKNOWN', `${label} must be a regular file`)
+    }
+    if ((identity.mode & 0o777) !== mode) await handle.chmod(mode)
+  } finally {
+    await handle.close()
   }
 }
 

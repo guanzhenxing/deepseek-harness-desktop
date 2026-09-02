@@ -37,8 +37,8 @@ owner 文件不含凭据、capability、authenticated URL 或完整命令行。
 
 `packages/home-lease/native/lease-helper.c`（`pnpm build:native` 编译到被忽略的 `.build/` 目录）：
 
-- `identity <pid>` / `probe <pid> <start>` / `scan <excludes> <entries>` / `lock <guard> <parentDir> <dev> <ino> <retryMs>`；
-- guard 打开使用 `O_NOFOLLOW`，`flock(LOCK_EX|LOCK_NB)`，持锁 helper 在 stdin 关闭或收到 `release` 后退出；
+- `identity <pid>` / `probe <pid> <start>` / `scan <excludes> <entries>`（可执行文件匹配）/ `scanargv <excludes> <needles>`（argv 针脚内存匹配，`` 分隔，绝不输出 argv）/ `lock <guard> <parentDir> <dev> <ino> <retryMs>`；
+- guard 打开使用 `openat(父目录 fd, …, O_NOFOLLOW)`——父目录先以 fd 钉住并用 `fstat` 校验 dev/ino，杜绝"先检查再按路径打开"的置换窗口；`flock(LOCK_EX|LOCK_NB)`，持锁 helper 在 stdin 关闭或收到 `release` 后退出；
 - 权限不足一律返回 `unknown` 状态；只输出结构化 JSON 行，不输出 argv/env；
 - 非 macOS 平台报告 unsupported；这些平台只允许注入 probe 的单测。
 
@@ -75,7 +75,7 @@ launcher/CLI 在 lease 获取成功前不得写 home；启动失败也必须先 
 2. 按上游语义解析目标 profile（根命令 `--profile` 必填、`web` 是别名、`plugin` 必须带 `--profile`），owner 记录已解析的 profile；解析不出 profile 的调用只可能是上游的帮助/版本/报错路径，不取 lease 直接转发；
 3. 取得整 home lease（supervisor = 包装进程）→ `beforeSpawn` → fork 等待授权的子进程 → 在 lease 上登记子进程 OS 身份（`attachHost`）→ 才发送 boot 授权（子进程随即设置 `process.argv` 并 import 官方 bin）；
 4. 交互 stdio 直通，SIGINT/SIGTERM/SIGHUP 转发，子进程退出码透传（信号按 128+signo 映射）；
-5. 子进程退出并 `confirmHostExited` 后释放 lease；释放失败或未授权 child 无法证明死亡时保留 lease 并在 stderr 报告（后者退出码 4）。
+5. 子进程在独立进程组中运行（detached fork）；直接子进程退出后，包装进程等待**整个进程组**（含写 home 后代）消失，超时按 TERM→KILL 对组升级；无法证明组消亡时保留 lease、退出码 4，`confirmHostExited` 仅在组可证明消亡后调用；
 
 退出码：`0` 成功/unlocked/already-unlocked；官方 CLI 自身退出码透传；`2` doctor 拒绝（ACTIVE_OWNER / IDENTITY_UNKNOWN / LEASE_CHANGED）；`3` lease 获取被拒（HOME_BUSY / HOME_STALE / LEASE_UNKNOWN 等，stderr 给出 owner 摘要与 doctor 指引，不打印完整 home 路径）；`4` 未授权 CLI child 在 TERM→KILL 升级后仍无法证明退出，lease 保留给 doctor。
 

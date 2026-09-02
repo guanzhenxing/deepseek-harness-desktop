@@ -328,15 +328,32 @@ static int cmd_scanargv(const char *excludeCsv, const char *needleCsv) {
 
 static int cmd_lock(const char *guardPath, const char *parentDir,
                     const char *parentDevText, const char *parentInoText,
-                    const char *retryMsText) {    struct stat parent;
-    if (lstat(parentDir, &parent) != 0 || !S_ISDIR(parent.st_mode)) fail("refused");
+                    const char *retryMsText) {
+    /* Pin the parent directory by fd before touching the guard: a path-based
+     * lstat-then-open sequence could observe a different directory between
+     * the two steps. */
+    int parentFd = open(parentDir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parentFd < 0) fail("refused");
+    struct stat parent;
+    if (fstat(parentFd, &parent) != 0 || !S_ISDIR(parent.st_mode)) {
+        close(parentFd);
+        fail("refused");
+    }
     if ((uintmax_t)parent.st_dev != strtoumax(parentDevText, NULL, 10) ||
         (uintmax_t)parent.st_ino != strtoumax(parentInoText, NULL, 10)) {
+        close(parentFd);
+        fail("refused");
+    }
+    const char *separator = strrchr(guardPath, '/');
+    const char *guardName = separator == NULL ? guardPath : separator + 1;
+    if (guardName[0] == '\0') {
+        close(parentFd);
         fail("refused");
     }
     long retryMs = strtol(retryMsText, NULL, 10);
     if (retryMs < 0) retryMs = 0;
-    int fd = open(guardPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    int fd = openat(parentFd, guardName, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    close(parentFd);
     if (fd < 0) {
         /* O_NOFOLLOW rejection, missing parent, permission: never retry a
          * tampered or misplaced guard target. */

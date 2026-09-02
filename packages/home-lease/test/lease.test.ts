@@ -310,6 +310,17 @@ describe('home lease lifecycle', () => {
     expect(await readFile(target, 'utf8')).toBe('outside')
   })
 
+  it('rejects a non-regular guard inode without touching its mode', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const { execFileSync } = await import('node:child_process')
+    const { mkdir: makeDirectory, stat: statFile } = await import('node:fs/promises')
+    await makeDirectory(path.join(home, 'run'), { mode: 0o700 })
+    execFileSync('mkfifo', [path.join(home, 'run', 'host-lease.guard')])
+    await expect(acquireHomeLease(acquireInput(home, probe))).rejects.toThrow(/regular file/u)
+    expect((await statFile(path.join(home, 'run', 'host-lease.guard'))).isFIFO()).toBe(true)
+  })
+
   it('tightens pre-existing run and guard permissions to the protocol modes', async () => {
     const home = await isolatedHome()
     const probe = new FakeProbe()

@@ -94,16 +94,21 @@ export type SpawnCliChild = (
 function forkCliChild(
   input: Readonly<{ argv: readonly string[]; env: Record<string, string> }>,
 ): CliChildHandle {
+  // A detached fork puts the child (and every process it spawns) into the
+  // child's own process group, so the wrapper can observe and reap the whole
+  // write-home tree, not just the direct child.
   const child = fork(childModule, [], {
     env: input.env,
     stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    detached: true,
   })
   if (child.pid === undefined) throw new Error('forked CLI child has no PID')
+  const pgid = child.pid
   const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     child.once('exit', (code, signal) => resolve({ code, signal }))
   })
   const forward = (signal: NodeJS.Signals): void => {
-    if (!child.killed) child.kill(signal)
+    process.kill(-pgid, signal)
   }
   process.on('SIGINT', () => forward('SIGINT'))
   process.on('SIGTERM', () => forward('SIGTERM'))
@@ -112,7 +117,7 @@ function forkCliChild(
     pid: child.pid,
     send: (message) => child.send(message as Serializable),
     exited,
-    kill: (signal = 'SIGTERM') => child.kill(signal),
+    kill: (signal = 'SIGTERM') => process.kill(-pgid, signal),
   }
 }
 
@@ -125,7 +130,60 @@ export type RunBundledCliOptions = Readonly<{
   spawnChild?: SpawnCliChild
   appVersion?: string
   stderr?: NodeJS.WritableStream
+  /** Test hooks for the descendant process-group checks. */
+  groupAlive?: (pgid: number) => boolean
+  killGroup?: (pgid: number, signal: NodeJS.Signals) => void
+  descendantGraceMs?: number
+  descendantEscalationMs?: number
 }>
+
+function defaultGroupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+    throw error
+  }
+}
+
+function defaultKillGroup(pgid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pgid, signal)
+  } catch {
+    /* the group may already be gone */
+  }
+}
+
+/**
+ * Wait for the child's whole process group — including any write-home
+ * descendants — to disappear after the direct child exits. Stragglers get a
+ * bounded grace period, then TERM→KILL escalation; a group that cannot be
+ * proven dead keeps the lease.
+ */
+async function waitForDescendants(pgid: number, options: RunBundledCliOptions): Promise<boolean> {
+  const groupAlive = options.groupAlive ?? defaultGroupAlive
+  const killGroup = options.killGroup ?? defaultKillGroup
+  const graceMs = options.descendantGraceMs ?? 10_000
+  const escalationMs = options.descendantEscalationMs ?? 2_000
+  if (!groupAlive(pgid)) return true
+  const deadline = Date.now() + graceMs
+  while (Date.now() < deadline) {
+    await sleep(Math.min(100, graceMs))
+    if (!groupAlive(pgid)) return true
+  }
+  killGroup(pgid, 'SIGTERM')
+  for (let waited = 0; waited < escalationMs; waited += Math.min(100, escalationMs)) {
+    await sleep(Math.min(100, escalationMs))
+    if (!groupAlive(pgid)) return true
+  }
+  killGroup(pgid, 'SIGKILL')
+  for (let waited = 0; waited < escalationMs; waited += Math.min(100, escalationMs)) {
+    await sleep(Math.min(100, escalationMs))
+    if (!groupAlive(pgid)) return true
+  }
+  return false
+}
 
 function childEnvironment(
   env: Readonly<Record<string, string | undefined>>,
@@ -184,7 +242,10 @@ export async function runBundledCli(
     // and never writes the home on those paths, so no lease is taken.
     const child = spawnChild({ argv, env: childEnvironment(env, home) })
     child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
-    return exitCodeOf(await child.exited)
+    const exit = await child.exited
+    const descendantsGone = await waitForDescendants(child.pid, options)
+    if (!descendantsGone) return 4
+    return exitCodeOf(exit)
   }
 
   let lease
@@ -221,6 +282,17 @@ export async function runBundledCli(
       child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
       authorized = true
       const exit = await child.exited
+      // Wait for write-home descendants (pnpm and anything the official CLI
+      // spawned) before proving the home is writable again.
+      const descendantsGone = await waitForDescendants(child.pid, options)
+      if (!descendantsGone) {
+        leaseKeptForDiagnosis = true
+        stderr.write(
+          'dsh-native: cannot prove the CLI process group exited; keeping the home lease\n' +
+            'dsh-native: run dsh-native doctor --unlock once the processes are gone\n',
+        )
+        return 4
+      }
       await lease.confirmHostExited()
       return exitCodeOf(exit)
     } catch (error) {

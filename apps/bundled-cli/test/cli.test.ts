@@ -284,6 +284,57 @@ describe('runBundledCli', () => {
     expect((await statAsync(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
   })
 
+  it('waits for lingering write-home descendants before releasing the lease', async () => {
+    const home = await isolatedHome()
+    const child = makeFakeChild(0)
+    let probes = 0
+    const groupKills: string[] = []
+    const code = await runBundledCli(['--profile', 'headless', 'run'], {
+      env: { DSH_HOME: home },
+      probe: fakeProbe,
+      guard: createInProcessGuardLock(),
+      spawnChild: child.spawn,
+      stderr: new MemoryStderr(),
+      groupAlive: () => {
+        probes += 1
+        return probes <= 3
+      },
+      killGroup: (_pgid, signal) => {
+        groupKills.push(signal)
+      },
+    })
+    expect(code).toBe(0)
+    expect(probes).toBeGreaterThan(3)
+    expect(groupKills).toEqual([])
+    await expect(statAsync(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('keeps the lease when the CLI process group cannot be proven dead', async () => {
+    const home = await isolatedHome()
+    const child = makeFakeChild(0)
+    const stderr = new MemoryStderr()
+    const groupKills: string[] = []
+    const code = await runBundledCli(['--profile', 'headless', 'run'], {
+      env: { DSH_HOME: home },
+      probe: fakeProbe,
+      guard: createInProcessGuardLock(),
+      spawnChild: child.spawn,
+      stderr,
+      groupAlive: () => true,
+      killGroup: (_pgid, signal) => {
+        groupKills.push(signal)
+      },
+      descendantGraceMs: 50,
+      descendantEscalationMs: 50,
+    })
+    expect(code).toBe(4)
+    expect(groupKills).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(stderr.text()).toContain('keeping the home lease')
+    expect((await statAsync(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+  })
+
   it('reaps the unauthorized child when host registration fails', async () => {
     const home = await isolatedHome()
     const child = makeFakeChild(0)
