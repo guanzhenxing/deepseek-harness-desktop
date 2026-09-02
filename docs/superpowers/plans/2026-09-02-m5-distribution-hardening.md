@@ -1,0 +1,86 @@
+# M5 Distribution Engineering Follow-up Plan
+
+> **For agentic workers:** M1–M4 全部验收后才进入本阶段。实施时使用 superpowers:writing-plans 根据 M4 验收提交细化各任务，再用 superpowers:executing-plans 顺序执行；本文件不触发当前阶段开发。
+
+**Goal:** 在 M4 已交付的本机可用版本上，吸收 dsh-forge 的发行工程经验，增强证据自动汇总、故障验证和插件引入流程。
+
+**Architecture:** 沿用独立 Host、薄 launcher、整 home lease、profile-manager 与独立版本能力契约。复用 M3/M4 的打包和兼容性流水线，增加工程工具与针对性验证，不引入另一套 profile 或版本权威。
+
+**Tech Stack:** 使用 M4 验收时锁定的 Electron、DSH、Node、pnpm 和测试工具；本阶段安排不指定依赖升级。
+
+**Spec:** 用户于 2026-09-02 决定将 dsh-forge 调研的新增吸收项安排到 M5，避免打断 M1–M4；既有边界见 [执行总览](2026-09-02-m1-m4-execution-roadmap.md)、[架构](../../architecture.md)与[主方案](../../native-dsh-desktop-plan.md)。
+
+## 状态与启动条件
+
+- 状态：后续阶段范围已记录，尚未启动；本文件是排期与验收范围，不是已冻结的逐文件实施方案。
+- 执行顺序：M1 → M2 → M3 → M4 → M5。
+- M5 以 M4 实际验收提交、健康 DMG、发行清单和验收记录为输入，不使用当前 M1 工作分支作为实施基线。
+- M5 不是 M1–M4 或 v1 放行的前置条件，不回写其任务清单，不增加其验收门槛。
+- M1–M4 已有要求仍在原阶段完成；不能因为本文件提到同一主题而推迟原阶段任务。
+- 此次仅增加本文件，不修改现有计划、运行代码、依赖或测试。
+
+## 已有工作与 M5 增量
+
+| 主题 | 原阶段继续负责 | M5 额外吸收的内容 |
+| --- | --- | --- |
+| 启动健康与恢复 | M2 的 Host/renderer 挂载与稳定、失败分类、Safe Mode、修订恢复 | 对照实际验收结果补充阶段诊断与有意义的失败注入，必要时增强交互就绪判定 |
+| 真实安装包验证 | M3 的完整 Host/CLI 闭包、原生 ABI、脱离源码运行、DMG 安装 smoke | 补充尚未覆盖的动态导入、原生依赖和资源损坏场景，将结果关联到具体制品 |
+| 发行兼容性 | M4 的发行清单、来源、闭包、补丁账本、预检、升级与拒绝降级演练 | 自动汇总 SBOM、许可证清单和测试证据，检查证据之间是否对应同一制品 |
+| 插件引入 | 不给 M1–M4 新增社区插件 | 建立精确来源、版本、审核记录及隔离验证的可复用引入流程 |
+
+## M5 工作包与验收
+
+### 工作包 1：依据 M4 验收结果确定增量
+
+- [ ] 读取 M1–M4 的实际验收记录，将上表逐项标为“已有证据覆盖”或“存在具体缺口”，并记录证据位置。
+- [ ] 只为具体缺口编写实施任务；已覆盖项直接引用，避免重复建设检查器、清单或状态机。
+- [ ] 形成 `docs/validation/m5-scope-review.md`，记录 M4 基线提交、制品标识、保留的工作项及对应验收场景。
+
+验收：每个新增任务都能说明它补充了什么已有门禁尚未证明的事实；原 M1–M4 要求没有被迁出。
+
+### 工作包 2：发行证据自动汇总
+
+- [ ] 从 M4 最终 Host/CLI 依赖闭包生成 SBOM 和许可证清单；沿用已有来源与完整性记录，不手工维护第二份版本列表。
+- [ ] 汇总制品 SHA、源码提交、内嵌发行清单摘要、OS/架构、实际运行时版本、安装包检查和 smoke 结果。
+- [ ] 将汇总输出放在现有 `release/` 制品树中；源码文档只保存脱敏摘要和证据引用。
+- [ ] 用混入旧 smoke、错误架构、替换制品、缺失必要证据四类 fixture 验证汇总会拒绝放行；未运行的平台不得标为通过。
+
+验收：给定一个候选制品，可由单一报告追溯其构建输入和对应验证；报告是已有事实的投影，不成为新的运行时兼容性权威。
+
+### 工作包 3：补足安装包和启动健康的验证缺口
+
+- [ ] 在临时安装副本中，对 M3 尚未覆盖的缺失动态导入、错误 native ABI、缺失 Web 资源或损坏 helper 建立负例。
+- [ ] 按 M2 最终接口检查 Host ready、HTTP 可达、窗口挂载和 renderer 可用之间的失败边界；只为未覆盖的边界增加故障注入。
+- [ ] 若需要增加正式的交互就绪信号，通过现有 Host-control/窗口职责边界设计和版本化，不把 renderer 检查或 DSH 业务移入 Electron Main。
+- [ ] 验证各失败能定位到具体阶段，不误标健康，不误回滚用户 profile，且 launcher 的恢复与退出仍可用。
+
+验收：新增检查分别由可重复的失败案例证明有效；全部场景使用临时 home 和安装目录，保留既有独立 Host 与恢复语义。
+
+### 工作包 4：建立可复用的插件引入流程
+
+- [ ] 定义来源记录：包名、精确版本或完整 Git commit、完整性信息、许可证、依赖/peer、生命周期脚本、所需能力、验证平台与证据。
+- [ ] 用仓库内合成 bundle 验证记录与实际内容的一致性；未知来源、版本漂移或缺少验证证据时给出明确拒绝原因。
+- [ ] 编写与本项目构建流程一致的引入指南；需要技能时按实际使用的 Agent 规范组织，避免直接套用 Forge 的 profile 编译器约定。
+- [ ] 在隔离 profile 和临时安装包中完成一次引入演练，不更改用户当前 profile，不顺带把 sidebar 或 skin 插件加入默认产品。
+
+验收：插件来源与验收结果可追溯，流程能够复用；流程交付不依赖页面式市场、在线安装或不可变插件 generation 已实现。
+
+## 仍独立安排的能力
+
+完整在线 updater、插件市场、跨平台发行、公开签名/公证发布和运行时 profile 切换继续按主方案的扩展边界安排，不自动并入 M5。
+
+Forge 的升级回执可作为后续 updater 的参考；其同进程 Host 模型、仅恢复部分 profile 文件的安装 WAL，以及未校验发布清单与安装包摘要/签名的 OTA 通道，不作为本项目的替代实现。
+
+## 固定参考资料
+
+本阶段参考 `ptonlix/dsh-forge` 的提交 `754047462b9c69e45d1380be436642047ddce357`。参考仓库不是本项目依赖或升级信号，使用新版本思路时另记来源。
+
+- [架构与 OTA 边界](https://github.com/ptonlix/dsh-forge/blob/754047462b9c69e45d1380be436642047ddce357/docs/design/dsh-forge.zh.md)
+- [Profile 工具链](https://github.com/ptonlix/dsh-forge/blob/754047462b9c69e45d1380be436642047ddce357/tools/profile-toolchain/README.zh.md)
+- [安装包 smoke](https://github.com/ptonlix/dsh-forge/blob/754047462b9c69e45d1380be436642047ddce357/scripts/smoke-package.ts)
+- [Generation 健康判定](https://github.com/ptonlix/dsh-forge/blob/754047462b9c69e45d1380be436642047ddce357/apps/desktop/runtime/generation.ts)
+- [插件引入技能](https://github.com/ptonlix/dsh-forge/blob/754047462b9c69e45d1380be436642047ddce357/skills/dsh-forge-add-plugin/SKILL.md)
+
+## 完成记录
+
+M5 结束时新增 `docs/validation/m5-acceptance.md`，记录实际基线、完成的增量、复用的 M1–M4 证据、命令与退出码、临时资源清理结果及未验证范围。M5 的结果不反向改变此前验收记录。
