@@ -221,6 +221,59 @@ try {
     if (session.controller.state !== 'stopped') throw new Error('quit from safe mode did not stop')
   }
 
+  // ── Broken bridge: both Hosts failed, the local recovery page still works ──
+  {
+    const userData = await freshRoot('bridge-dead')
+    const home = path.join(userData, 'home')
+    await mkdir(path.join(home, 'profiles', 'desktop'), { recursive: true, mode: 0o700 })
+    const lease = await acquireHomeLease({
+      home,
+      entrypoint: 'desktop',
+      profile: 'desktop',
+      appVersion: '0.0.0',
+      probe: sameProbe(),
+      guard: createInProcessGuardLock(),
+    })
+    const bridgeFailure = new StartupFailureError({
+      stage: 'publish-surface',
+      code: 'SURFACE_MISSING',
+      category: 'renderer',
+      summary: 'recovery bridge did not publish a surface',
+      retryable: true,
+    })
+    const session = { views: [], controller: undefined }
+    session.controller = new RecoverySessionController({
+      acquireLease: async () => lease,
+      profile: createDesktopProfileRecovery({ home, profileName: 'desktop' }),
+      // Both the normal boot and the safe boot fail.
+      createAttempt: () => ({
+        start: () => Promise.reject(bridgeFailure),
+        stop: async () => undefined,
+      }),
+      loadSurface: async () => undefined,
+      window: {
+        showRecoveryView: async (view) => {
+          session.views.push(view)
+        },
+        destroySurface: () => undefined,
+      },
+    })
+    await session.controller.start().catch(() => undefined)
+    if (session.controller.state !== 'recovery') throw new Error('normal failure not in recovery')
+    await session.controller.act('safe-mode')
+    // The broken bridge lands back on the local recovery page with diagnosis
+    // and a working quit — never a crash loop or a dead window.
+    if (session.controller.state !== 'recovery') {
+      throw new Error('broken bridge did not return to the recovery page')
+    }
+    const view = session.controller.getView()
+    if (view.failure.code !== 'SURFACE_MISSING') {
+      throw new Error(`recovery page lost the bridge failure: ${view.failure.code}`)
+    }
+    await session.controller.act('quit')
+    if (session.controller.state !== 'stopped') throw new Error('quit after broken bridge failed')
+  }
+
   console.log('M2 safe-mode smoke passed')
 } finally {
   await disposeRoots()
