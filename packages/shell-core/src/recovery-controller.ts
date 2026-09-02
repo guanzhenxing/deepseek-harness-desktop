@@ -33,9 +33,10 @@ export type ProfilePrepareResult =
 
 /**
  * The profile-manager operations the session drives. Injected as a port so
- * shell-core never depends on profile-manager; `prepare` settles interrupted
- * journals from previous runs, quarantines the rebuildable projection cache,
- * and applies the journaled reconcile before any Host boot.
+ * the session stays testable against a fake profile layer; the production
+ * implementation is `createDesktopProfileRecovery`. `prepare` settles
+ * interrupted journals from previous runs, quarantines the rebuildable
+ * projection cache, and applies the journaled reconcile before any Host boot.
  */
 export interface ProfileRecoveryPort {
   prepare(lease: HomeLease): Promise<ProfilePrepareResult>
@@ -224,6 +225,9 @@ export class RecoverySessionController implements RecoveryController {
       return
     }
     if (action === 'retry' && this.#state === 'recovery') {
+      // The view hides the button; the controller still refuses non-retryable
+      // failures so no renderer can force boot cycles the policy denied.
+      if (this.#failure?.retryable === false) return
       if (this.#retryBudgetRemaining() <= 0) return
       const retry = this.#runAct(this.#retry())
       await retry

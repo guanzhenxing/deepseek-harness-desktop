@@ -31,6 +31,15 @@ const profileWriteFailure: StartupFailure = {
   retryable: false,
 }
 
+/** A retryable, rollback-eligible failure (e.g. a transient apply fault). */
+const retryableProfileWriteFailure: StartupFailure = {
+  stage: 'reconcile-profile',
+  code: 'RECONCILE_FAILED',
+  category: 'profile-write',
+  summary: 'profile write failed transiently',
+  retryable: true,
+}
+
 class RecordingLease implements HomeLease {
   readonly home = '/tmp/recovery-home'
   readonly generation = 'gen-1'
@@ -184,7 +193,7 @@ describe('RecoverySessionController', () => {
       attemptStart: () => {
         boot += 1
         return boot <= 3
-          ? Promise.reject(new StartupFailureError(profileWriteFailure))
+          ? Promise.reject(new StartupFailureError(retryableProfileWriteFailure))
           : Promise.resolve(ready)
       },
     })
@@ -201,6 +210,18 @@ describe('RecoverySessionController', () => {
     expect(setup.attempts).toHaveLength(3)
     expect(setup.portCalls.rolledBack).toEqual(['tx-1', 'tx-2', 'tx-3'])
     expect(setup.views).toHaveLength(2)
+  })
+
+  it('refuses to retry a failure classified as non-retryable', async () => {
+    const setup = fixture({
+      attemptStart: () => Promise.reject(new StartupFailureError(profileWriteFailure)),
+    })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    expect(setup.controller.getView().retryAllowed).toBe(false)
+    // Two attempts: the initial boot plus the one automatic relaunch the
+    // rollback earned; the refused manual retry adds none.
+    await setup.controller.act('retry')
+    expect(setup.attempts).toHaveLength(2)
   })
 
   it('recovers to healthy without a recovery view when the relaunch succeeds', async () => {

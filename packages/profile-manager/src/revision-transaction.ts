@@ -361,7 +361,10 @@ export async function rollbackProfileTransaction(
         await syncDirectory(path.dirname(filename))
         continue
       }
-      continue
+      // In-place drift between the phases on a file this transaction created:
+      // the same divergence the before-exists branch treats as conflict.
+      await writeJournalDurable(lease.home, { ...journal, state: 'conflict' })
+      return 'conflict'
     }
     if (sha === write.before.sha256) continue
     if (sha === write.candidateSha256) {

@@ -22,7 +22,6 @@ import {
   RecoverySessionController,
   StartupFailureError,
   toStartupFailure,
-  type ShellWindowPort,
   type StartupFailure,
 } from '@dsh-desktop/shell-core'
 
@@ -32,7 +31,6 @@ import { createRecoveryWindow, type RecoveryWindowHandle } from './recovery-wind
 import { resolveSmokeUserData } from './m0-paths.js'
 import { DESKTOP_WEB_PREFERENCES, denyWindowOpen } from './window-policy.js'
 
-const recoveryPath = fileURLToPath(new URL('../src/recovery.html', import.meta.url))
 const hostEntryPath = fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
 const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
@@ -41,7 +39,8 @@ if (userDataOverride !== undefined) app.setPath('userData', path.resolve(userDat
 
 app.setName(PRODUCT.name)
 
-class ElectronWindowPort implements ShellWindowPort {
+/** The main window port: loads the Host surface and can retire it. */
+class ElectronWindowPort {
   readonly window: BrowserWindow
   #allowedOrigin: string | undefined
 
@@ -81,14 +80,6 @@ class ElectronWindowPort implements ShellWindowPort {
     if (!isAllowedMainFrameNavigation(origin, this.window.webContents.getURL())) {
       throw new Error('BrowserWindow finished on an untrusted origin')
     }
-    this.window.show()
-  }
-
-  async showRecovery(code: 'BOOT_FAILED' | 'HOST_CRASHED'): Promise<void> {
-    if (this.window.isDestroyed()) return
-    this.#allowedOrigin = undefined
-    if (!this.window.webContents.isDestroyed()) this.window.webContents.stop()
-    await this.window.loadFile(recoveryPath, { query: { code } })
     this.window.show()
   }
 

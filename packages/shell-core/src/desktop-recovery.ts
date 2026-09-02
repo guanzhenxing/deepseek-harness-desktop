@@ -67,7 +67,20 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
           }),
         }
       }
-      const cache = await quarantineProjectionCache({ home, lease, thresholdBytes })
+      let cache: Awaited<ReturnType<typeof quarantineProjectionCache>>
+      try {
+        cache = await quarantineProjectionCache({ home, lease, thresholdBytes })
+      } catch (error) {
+        throw new StartupFailureError(
+          toStartupFailure({
+            stage: 'cache-quarantine',
+            code: 'CACHE_QUARANTINE_FAILED',
+            summary: error instanceof Error ? error.message : String(error),
+            retryable: true,
+            home,
+          }),
+        )
+      }
       if (cache.kind === 'unknown-layout') {
         console.error('projection cache layout unrecognized; leaving it untouched')
       }

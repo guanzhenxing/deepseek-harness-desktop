@@ -274,16 +274,31 @@ try {
   {
     const home = await freshHome('retention')
     await seedSentinels(home)
-    for (let round = 0; round < 12; round++) {
+    const manifestPath = path.join(home, 'profiles', 'desktop', 'package.json')
+    for (let round = 0; round < 24; round++) {
+      // Each round leaves the manifest one third-party bundle away from the
+      // desired state, so every boot plans and retains a fresh transaction —
+      // without this the reconcile is a no-op after the first round.
+      const raw = await readFile(manifestPath, 'utf8').catch(() => null)
+      const manifest = raw === null ? { dsh: { profile: { bundles: [] } } } : JSON.parse(raw)
+      manifest.dsh.profile.bundles = [
+        `@fixture/retention-${round}`,
+        ...manifest.dsh.profile.bundles.filter(
+          (bundle) => !String(bundle).startsWith('@fixture/retention-'),
+        ),
+      ]
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
       const session = await leasedSession(home, {
         boot: () => Promise.reject(runtimeFailure),
       })
       await session.controller.start().catch(() => undefined)
       await session.controller.act('quit')
     }
-    // 12 retained transactions from failed boots; nothing terminal exceeds 20.
+    // 24 retained transactions pruned to exactly the 20 most recent.
     const states = await journalStates(home)
-    if (states.length > 20) throw new Error(`journal retention exceeded 20: ${states.length}`)
+    if (states.length !== 20) {
+      throw new Error(`journal retention did not settle at 20: ${states.length}`)
+    }
     if (states.some((state) => state !== 'retained')) {
       throw new Error(`non-terminal journals left behind: ${JSON.stringify(states)}`)
     }
