@@ -24,17 +24,18 @@
 
 ## 2. DSH home
 
-| 路径                                 | 权威/所有者                  | Desktop 写入规则                                        | 备份与迁移                                       |
-| ------------------------------------ | ---------------------------- | ------------------------------------------------------- | ------------------------------------------------ |
-| `<home>/.credentials.yaml`           | 用户/DSH credential provider | Desktop 不复制、不回滚内容                              | 由 DSH/用户负责；日志不得包含内容                |
-| `<home>/settings.yaml`               | 用户与所有 profile           | 只由正式 DSH 设置能力修改；启动恢复不覆盖               | 格式迁移由对应 DSH provider 定义                 |
-| `<home>/cordis.patch.yml`            | 用户                         | Desktop 启动恢复不修改                                  | 用户负责；错误只诊断                             |
-| `<home>/sessions/**`                 | DSH session provider         | 仅活跃 Host 写入                                        | 升级测试使用副本，不能在真实数据上演练           |
-| `<home>/storages/**`                 | DSH storage providers        | 仅活跃 Host 写入                                        | 迁移和降级范围进入兼容性清单                     |
-| `<profile>/**`                       | `profile-manager` 与用户     | v1 只修改白名单文件并做修订校验                         | 修改前保存存在性、内容和 SHA-256                 |
-| `<safeProfile>/**`                   | `profile-manager`            | 只创建 Safe Mode 自身投影，不自动修改正常 profile       | 可重建；不得包含第三方 bundle 或正常 patch layer |
-| `<home>/run/host.lock/`              | `home-lease`                 | launcher 或 bundled CLI 在整个 Host writer 生命周期持有 | 不是数据备份；只可按 owner 身份受控恢复          |
-| `<home>/run/profile-transactions/**` | future `profile-manager`     | M2 起持有 home lease 时原子写入                         | 用于崩溃恢复，终态经保留策略清理；M0 不创建      |
+| 路径                                                | 权威/所有者                  | Desktop 写入规则                                                                  | 备份与迁移                                       |
+| --------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `<home>/.credentials.yaml`                          | 用户/DSH credential provider | Desktop 不复制、不回滚内容                                                        | 由 DSH/用户负责；日志不得包含内容                |
+| `<home>/settings.yaml`                              | 用户与所有 profile           | 只由正式 DSH 设置能力修改；启动恢复不覆盖                                         | 格式迁移由对应 DSH provider 定义                 |
+| `<home>/cordis.patch.yml`                           | 用户                         | Desktop 启动恢复不修改                                                            | 用户负责；错误只诊断                             |
+| `<home>/sessions/**`                                | DSH session provider         | 仅活跃 Host 写入                                                                  | 升级测试使用副本，不能在真实数据上演练           |
+| `<home>/storages/**`                                | DSH storage providers        | 仅活跃 Host 写入                                                                  | 迁移和降级范围进入兼容性清单                     |
+| `<profile>/**`                                      | `profile-manager` 与用户     | v1 只修改白名单文件并做修订校验                                                   | 修改前保存存在性、内容和 SHA-256                 |
+| `<safeProfile>/**`                                  | `profile-manager`            | 只创建 Safe Mode 自身投影，不自动修改正常 profile                                 | 可重建；不得包含第三方 bundle 或正常 patch layer |
+| `<home>/run/host.lock/`                             | `home-lease`                 | launcher 或 bundled CLI 在整个 Host writer 生命周期持有                           | 不是数据备份；只可按 owner 身份受控恢复          |
+| `<home>/run/profile-transactions/**`                | `profile-manager`            | M2 起持有 home lease 时原子写入                                                   | 用于崩溃恢复，终态最近 20 条保留；M0 不创建      |
+| `<home>/storages/session_projcache.quarantine-<id>` | `shell-core`                 | 超 512 MiB 的可重建 projection cache 在持 lease、无 Host 时同文件系统 rename 隔离 | 备份保留不自动删除；rename 前后写意图 journal    |
 
 “Desktop 与 CLI 共享 home”表示它们在不同时间读写同一批数据，不表示两个 Host 可以并发写入。
 

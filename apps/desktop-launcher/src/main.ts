@@ -16,6 +16,7 @@ import { PRODUCT } from '@dsh-desktop/product-config'
 import { createProfileRef, reconcileDesktopProfile } from '@dsh-desktop/profile-manager'
 import {
   isAllowedMainFrameNavigation,
+  quarantineProjectionCache,
   RecoverySessionController,
   StartupFailureError,
   toStartupFailure,
@@ -191,6 +192,16 @@ async function startApplication(): Promise<void> {
         probe,
       }),
     reconcile: async (lease) => {
+      // Rebuildable projection cache over 512 MiB is quarantined while we
+      // hold the lease and no Host is running (M2 Task 4).
+      const cache = await quarantineProjectionCache({
+        home,
+        lease,
+        thresholdBytes: 512 * 1024 * 1024,
+      })
+      if (cache.kind === 'unknown-layout') {
+        console.error('projection cache layout unrecognized; leaving it untouched')
+      }
       await reconcileDesktopProfile(createProfileRef(home, profileName), lease)
     },
     createAttempt: (lease) => {
