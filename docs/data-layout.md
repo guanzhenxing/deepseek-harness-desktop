@@ -8,15 +8,15 @@
 
 本文使用以下逻辑路径：
 
-| 变量            | 解析规则                                                                                                                   |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 变量            | 解析规则                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `<home>`        | `resolveDesktopHome()`（`packages/home-lease`）：`$DSH_HOME` trim 后非空时生效（支持 `~` 展开，相对路径相对进程 cwd），否则为 `~/.dsh`；解析结果不得为 filesystem root。语义与固定版上游 `resolveDshHome` 在隔离进程中对照测试 |
-| `<m0Home>`      | `<userData>/m0-dsh-home`；M0 launcher 单实例私有，不是共享 `<home>`                                                        |
-| `<profile>`     | v1 为 `<home>/profiles/desktop`                                                                                            |
-| `<safeProfile>` | M2 计划交付的恢复能力使用 `<home>/profiles/desktop-safe-mode`，同时作为 E3 前置                                         |
-| `<userData>`    | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下的 DeepSeek Harness 专属目录 |
-| `<launchRoot>`  | M0 为 `<m0Home>/profiles/.dsh-desktop-run-*` 临时目录；M1 起可迁移到 `<userData>/runtime/launch-root`                      |
-| `<testHome>`    | 测试通过系统临时目录 API 单独创建的 DSH home，绝不能指向真实 `<home>`                                                      |
+| `<m0Home>`      | `<userData>/m0-dsh-home`；M0 launcher 单实例私有，不是共享 `<home>`                                                                                                                                                            |
+| `<profile>`     | v1 为 `<home>/profiles/desktop`                                                                                                                                                                                                |
+| `<safeProfile>` | M2 计划交付的恢复能力使用 `<home>/profiles/desktop-safe-mode`，同时作为 E3 前置                                                                                                                                                |
+| `<userData>`    | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下的 DeepSeek Harness 专属目录                                                                                                     |
+| `<launchRoot>`  | M0 为 `<m0Home>/profiles/.dsh-desktop-run-*` 临时目录；M1 起可迁移到 `<userData>/runtime/launch-root`                                                                                                                          |
+| `<testHome>`    | 测试通过系统临时目录 API 单独创建的 DSH home，绝不能指向真实 `<home>`                                                                                                                                                          |
 
 所有可写路径先解析为绝对路径并验证预期父目录。写入逻辑不得跟随用户可植入的目标 symlink 覆盖其他位置。
 
@@ -67,9 +67,7 @@ lease 目录通过原子 `mkdir` 创建。任何清理都必须重新验证 gene
 
 ## 4. Profile 修改事务
 
-M0 reconcile 只在私有 `<m0Home>` 中修改白名单文件，拒绝 home、profiles、profile 目录及三个受管文件的 symlink，原子替换 manifest，并返回修改前后 SHA-256 与 changed-files；它不承诺崩溃回滚，也不创建持久 transaction journal。
-
-M2 引入恢复时，reconcile/recovery 事务放在：
+M2 起，共享 home 的 reconcile 走**逐文件修订事务**：先 `planDesktopReconcile` 计算纯写入计划（只含白名单三文件的相对路径、before 存在性/SHA/字节、候选字节/SHA），再 `applyProfileTransaction` 持久化 journal 并逐文件应用；`commitProfileTransaction` 仅在 Host ready 后写 committed；`rollbackProfileTransaction` 验证所有受影响文件只处于 before/candidate 后幂等恢复，出现第三种内容返回 conflict 并保留；`recoverInterruptedTransactions` 在新 Host boot 前处理中断事务（未达 applied 的幂等恢复，applied 无归因的返回 needs-review，明确不可回滚的以 retained 终态记录失败类别）。M0 的隔离 authority 路径保持直接写入，不建 journal。事务目录：
 
 ```text
 <home>/run/profile-transactions/<transaction-id>/

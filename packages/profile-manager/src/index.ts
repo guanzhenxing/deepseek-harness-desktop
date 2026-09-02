@@ -1,2 +1,6 @@
 export * from './profile-ref.js'
 export * from './reconcile.js'
+export * from './reconcile-plan.js'
+export * from './revision-transaction.js'
+export * from './revision-recovery.js'
+export * from './reconcile-templates.js'

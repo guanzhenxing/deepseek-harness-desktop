@@ -4,24 +4,21 @@ import path from 'node:path'
 
 import { isHomeLease, type HomeLease } from '@dsh-desktop/home-lease'
 
+import { planDesktopReconcile } from './reconcile-plan.js'
+import { applyProfileTransaction } from './revision-transaction.js'
+
+export { isHomeLease }
+
 import type { ProfileRef } from './profile-ref.js'
 
-export const DESKTOP_BUNDLE_PREFIX = [
-  '@deepseek-ai/dsh-base',
-  '@deepseek-ai/dsh-web-app',
-  '@dsh-desktop/desktop-plugin',
-] as const
+import {
+  DESKTOP_BUNDLE_PREFIX,
+  PROFILE_PATCH_TEMPLATE,
+  PROFILE_WORKSPACE,
+} from './reconcile-templates.js'
+export { DESKTOP_BUNDLE_PREFIX }
 
 const authorityBrand = Symbol('ProfileWriteAuthority')
-const PROFILE_PATCH_TEMPLATE = `# Your patch layer for this dsh profile, applied after every bundle layer:
-[]
-`
-const PROFILE_WORKSPACE = `packages:
-  - .
-
-nodeLinker: hoisted
-autoInstallPeers: false
-`
 
 type ProfileManifest = Record<string, unknown> & {
   dsh?: Record<string, unknown> & {
@@ -47,6 +44,7 @@ export type ReconcileResult = Readonly<{
   changedFiles: readonly string[]
   beforeRevision: string | undefined
   afterRevision: string
+  transactionId?: string
 }>
 
 export function createIsolatedHomeAuthority(home: string, userData: string): IsolatedHomeAuthority {
@@ -227,24 +225,53 @@ export async function reconcileDesktopProfile(
   ref: ProfileRef,
   authority: ProfileWriteAuthority,
 ): Promise<ReconcileResult> {
-  let assertAuthority: () => Promise<void>
+  if (ref.name !== 'desktop')
+    throw new Error('reconcileDesktopProfile only owns the desktop profile')
+
   if (isHomeLease(authority)) {
     if (authority.home !== ref.home) {
       throw new Error('profile write authority does not match ProfileRef home')
     }
-    assertAuthority = () => authority.assertHeld()
-  } else if (
-    authority[authorityBrand] === true &&
-    authority.kind === 'm0-isolated-home' &&
-    authority.home === ref.home
+    return reconcileUnderLease(ref, authority)
+  }
+  if (
+    authority[authorityBrand] !== true ||
+    authority.kind !== 'm0-isolated-home' ||
+    authority.home !== ref.home
   ) {
-    assertAuthority = () => Promise.resolve()
-  } else {
     throw new Error('profile write authority does not match ProfileRef home')
   }
-  if (ref.name !== 'desktop')
-    throw new Error('reconcileDesktopProfile only owns the desktop profile')
+  return legacyIsolatedReconcile(ref, () => Promise.resolve())
+}
 
+/** Shared-home reconcile: plan, apply as a journaled revision transaction. */
+async function reconcileUnderLease(ref: ProfileRef, lease: HomeLease): Promise<ReconcileResult> {
+  await ensureContainedProfileDirectory(ref)
+  const plan = await planDesktopReconcile(ref, lease)
+  const manifestWrite = plan.writes.find((write) => write.path === 'package.json')
+  let transactionId: string | undefined
+  if (plan.writes.length > 0) {
+    const tx = await applyProfileTransaction(plan, lease)
+    transactionId = tx.id
+  }
+  const manifestPath = path.join(ref.dir, 'package.json')
+  const currentRaw = await readFile(manifestPath, 'utf8')
+  return Object.freeze({
+    ref,
+    changed: plan.writes.length > 0,
+    changedFiles: Object.freeze(plan.writes.map((write) => path.join(ref.dir, write.path))),
+    beforeRevision: manifestWrite?.before.sha256 ?? undefined,
+    afterRevision: sha256(currentRaw),
+    ...(transactionId === undefined ? {} : { transactionId }),
+  })
+}
+
+/** Legacy direct writes for the M0 isolated-home smoke authority. */
+async function legacyIsolatedReconcile(
+  ref: ProfileRef,
+  assertAuthority: () => Promise<void>,
+): Promise<ReconcileResult> {
+  const assertWritable = assertAuthority
   await ensureContainedProfileDirectory(ref)
 
   const manifestPath = path.join(ref.dir, 'package.json')
@@ -260,12 +287,12 @@ export async function reconcileDesktopProfile(
   const beforeRaw =
     existed.get(manifestPath) === true ? await readFile(manifestPath, 'utf8') : undefined
 
-  await initializeProfile(ref.dir, assertAuthority)
+  await initializeProfile(ref.dir, assertWritable)
   const currentRaw = await readFile(manifestPath, 'utf8')
   const current = parseProfileManifest(currentRaw)
   const desiredRaw = `${JSON.stringify(reconciledManifest(current), undefined, 2)}\n`
   if (desiredRaw !== currentRaw) {
-    await assertAuthority()
+    await assertWritable()
     await writeFileAtomic(manifestPath, desiredRaw)
   }
 
