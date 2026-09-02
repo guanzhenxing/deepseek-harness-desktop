@@ -157,7 +157,7 @@ export async function withDesktop(home, userData, action) {
   const reports = []
   const nextReport = (predicate) => waitFor(() => reports.find(predicate), 90_000, 'desktop report')
   consumeLines(child.stdout, (line) => {
-    process.stdout.write(`${line}\n`)
+    if (!line.includes('"surfaceUrl"')) process.stdout.write(`${line}\n`)
     if (line.startsWith('DSH_DESKTOP_SMOKE ')) {
       reports.push(JSON.parse(line.slice('DSH_DESKTOP_SMOKE '.length)))
     }

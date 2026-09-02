@@ -98,6 +98,13 @@
 
 自审期间的深入调查还发现并修复一个并发正确性缺陷：**8 路并发 acquire 在系统负载下偶发把 `refused-openat`（ENOENT）当作 LEASE_UNKNOWN**。逐步定位（helper 带 errno/步骤标记 + 满负载复现）证明根因是 macOS 对 `openat(O_RDWR|O_CREAT|O_NOFOLLOW)` 打开**并发中刚被创建**的已存在文件会误报 ENOENT。修复：guard 打开改为两阶段——先纯 `O_NOFOLLOW` 打开已存在文件，ENOENT 才用 `O_CREAT|O_EXCL` 独占创建，EEXIST 回退重试。修复后 40 轮 × 8 路并发 + 整套集成套件满负载复现零异常；同时 acquire 阶段把 guard 争用（GUARD_BUSY）映射为 HOME_BUSY，使并发争抢的语义确定。
 
+### 第二次自我审查两轮（2026-09-02，`fix: redact smoke surface tokens and defer empty profiles`）
+
+按 codex 同款 Standards/Spec 视角再做两遍：
+
+- **Standards**：共享 home driver 曾把 Electron 每行 stdout 原样回显，包括带一次性 `?token=` 的 ui-ready 报告（会进入 CI 日志）——现在该行不回显（smoke 日志 `token=` 出现次数为 0，已验证）；`--profile ''` 原先被包装层以退出码 3 拒绝，现视为未解析直通，由上游自己报错（遵循上游语义）；边界导入复查无违规（launcher 的 `@deepseek-ai/dsh-*` 字符串仅是 UI 标记比较，非 import；home-lease 仅 dsh-atomic-write）。
+- **Spec**：逐条对照计划 Task 1–6 checkbox 与协议声明（退出码 0/透传/2/3/4 两处一致、`bin.dsh` 解析、唯一解析 home 传入 bootstrap、Linux 仅注入 probe、会话持久化重读验证、恢复页不持锁）——无新缺口。
+
 ### 第三轮审查修复（2026-09-02，`fix: wait for cli descendants and pin guard parent`）
 
 | 审查项                                        | 修复                                                                                                                                                                                            | 证据                                                                                                                   |

@@ -74,6 +74,8 @@ export function planCliInvocation(argv: readonly string[]): CliInvocationPlan {
     }
     if (expectingValue) profile = undefined
   }
+  // An empty profile name is upstream's own error to report, not ours.
+  if (profile === '') profile = undefined
   return { kind: 'passthrough', profile }
 }
 
