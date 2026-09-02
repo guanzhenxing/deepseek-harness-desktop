@@ -277,6 +277,15 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
             describeLeaseOwner(current.owner),
           )
         }
+        // Re-verify the supervisor identity inside the guard: a matching
+        // generation alone must never authorize removal.
+        if ((await probe.inspect(current.owner.supervisor)) !== 'same') {
+          throw new LeaseError(
+            'LEASE_CHANGED',
+            'the recorded supervisor identity is not this process',
+            describeLeaseOwner(current.owner),
+          )
+        }
         if (current.owner.host !== null) {
           const status = await probe.inspect(current.owner.host)
           if (status === 'same') {

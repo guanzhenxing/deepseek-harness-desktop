@@ -211,16 +211,23 @@ export async function runBundledCli(
 
   try {
     await lease.beforeSpawn(plan.profile)
+    let child: CliChildHandle | undefined
+    let authorized = false
     try {
-      const child = spawnChild({ argv, env: childEnvironment(env, home) })
+      child = spawnChild({ argv, env: childEnvironment(env, home) })
       const identity = await probe.identify(child.pid)
       await lease.attachHost(identity)
       child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
+      authorized = true
       const exit = await child.exited
       await lease.confirmHostExited()
       return exitCodeOf(exit)
     } catch (error) {
-      // Never leave a pending spawn behind when the child never booted.
+      // A forked child that never received authorization must be reaped
+      // before the lease registration is cleared and released.
+      if (child !== undefined && !authorized) {
+        await reapUnauthorizedChild(child)
+      }
       await lease.confirmHostExited().catch(() => undefined)
       throw error
     }
@@ -233,4 +240,11 @@ export async function runBundledCli(
       )
     })
   }
+}
+
+async function reapUnauthorizedChild(child: CliChildHandle): Promise<void> {
+  child.kill('SIGTERM')
+  await Promise.race([child.exited, new Promise<void>((r) => setTimeout(r, 2_000))])
+  child.kill('SIGKILL')
+  await Promise.race([child.exited, new Promise<void>((r) => setTimeout(r, 500))])
 }

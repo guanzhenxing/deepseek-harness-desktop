@@ -17,6 +17,12 @@ export type CliRuntimePaths = Readonly<{
    * packaged builds replace this with the bundled app binary.
    */
   desktopEntryExecutables: readonly string[]
+  /**
+   * Absolute paths matched against the argv of running processes during
+   * doctor scans: our wrapper script, the authorized CLI child module, the
+   * Electron Host entry, and the official dsh bin (also catches bare `dsh`).
+   */
+  scanArgvNeedles: readonly string[]
 }>
 
 /** Resolve the official `dsh` bin through the package manifest only. */
@@ -50,10 +56,18 @@ export function resolveCliRuntime(
   const entries: string[] = []
   const electron = desktopElectronBinary()
   if (electron !== undefined) entries.push(electron)
+  const dshBin = resolveOfficialDshBin()
+  const needles = [
+    dshBin,
+    path.join(packageRoot, '..', '..', 'scripts', 'dsh-native.mjs'),
+    path.join(packageRoot, 'lib', 'cli-child.js'),
+    path.join(packageRoot, '..', 'desktop-launcher', 'lib', 'host-entry.js'),
+  ]
   return Object.freeze({
-    dshBin: resolveOfficialDshBin(),
+    dshBin,
     nodeExecutable: process.execPath,
     leaseHelper: resolveLeaseHelperPath(env),
     desktopEntryExecutables: Object.freeze(entries),
+    scanArgvNeedles: Object.freeze(needles),
   })
 }

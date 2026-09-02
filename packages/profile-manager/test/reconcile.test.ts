@@ -1,5 +1,4 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -11,36 +10,27 @@ import {
 } from '@dsh-desktop/home-lease'
 
 import {
+  createIsolatedHomeFixture,
+  type IsolatedHomeFixture,
+} from '../../../tests/helpers/isolated-home.js'
+
+import {
   DESKTOP_BUNDLE_PREFIX,
   createIsolatedHomeAuthority,
   createProfileRef,
   reconcileDesktopProfile,
 } from '../src/index.js'
 
-const homes: string[] = []
+const fixtures: IsolatedHomeFixture[] = []
 
 async function testHome() {
-  const userData = await mkdtemp(path.join(tmpdir(), 'dsh-profile-manager-'))
-  homes.push(userData)
-  const home = path.join(userData, 'm0-dsh-home')
-  await mkdir(home)
-  return home
+  const fixture = await createIsolatedHomeFixture()
+  fixtures.push(fixture)
+  return fixture.home
 }
 
 afterEach(async () => {
-  for (const home of homes.splice(0)) {
-    const resolved = path.resolve(home)
-    const stat = await lstat(resolved)
-    if (
-      path.dirname(resolved) !== path.resolve(tmpdir()) ||
-      !path.basename(resolved).startsWith('dsh-profile-manager-') ||
-      !stat.isDirectory() ||
-      stat.isSymbolicLink()
-    ) {
-      throw new Error(`refusing to clean an unsafe profile fixture: ${resolved}`)
-    }
-    await rm(resolved, { recursive: true })
-  }
+  for (const fixture of fixtures.splice(0)) await fixture.dispose()
 })
 
 class SameProbe implements ProcessProbe {

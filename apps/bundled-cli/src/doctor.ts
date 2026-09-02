@@ -19,6 +19,7 @@ function doctorProbe(): ProcessProbe {
   return createNativeProcessProbe({
     helperPath: runtime.leaseHelper,
     entryExecutables: runtime.desktopEntryExecutables,
+    scanArgvNeedles: runtime.scanArgvNeedles,
     excludePids: [process.pid],
   })
 }

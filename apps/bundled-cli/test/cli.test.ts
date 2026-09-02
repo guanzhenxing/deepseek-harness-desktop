@@ -66,8 +66,13 @@ const fakeProbe: ProcessProbe = {
   },
 }
 
-function makeFakeChild(exitCode = 0): { spawn: SpawnCliChild; forwarded: () => unknown[] } {
+function makeFakeChild(exitCode = 0): {
+  spawn: SpawnCliChild
+  forwarded: () => unknown[]
+  kills: () => readonly NodeJS.Signals[]
+} {
   const forwardedMessages: unknown[] = []
+  const killSignals: NodeJS.Signals[] = []
   const spawn: SpawnCliChild = () => {
     const handle: CliChildHandle = {
       pid: 5555,
@@ -75,13 +80,13 @@ function makeFakeChild(exitCode = 0): { spawn: SpawnCliChild; forwarded: () => u
         forwardedMessages.push(message)
       },
       exited: Promise.resolve({ code: exitCode, signal: null }),
-      kill() {
-        /* test child never needs killing */
+      kill(signal = 'SIGTERM') {
+        killSignals.push(signal)
       },
     }
     return handle
   }
-  return { spawn, forwarded: () => forwardedMessages }
+  return { spawn, forwarded: () => forwardedMessages, kills: () => [...killSignals] }
 }
 
 function ownerPathOf(home: string): string {
@@ -239,6 +244,31 @@ describe('runBundledCli', () => {
       stderr: new MemoryStderr(),
     })
     expect(code).toBe(7)
+    await expect(statAsync(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('reaps the unauthorized child when host registration fails', async () => {
+    const home = await isolatedHome()
+    const child = makeFakeChild(0)
+    const brokenProbe: ProcessProbe = {
+      ...fakeProbe,
+      async identify() {
+        throw new Error('identity lookup failed')
+      },
+    }
+    await expect(
+      runBundledCli(['--profile', 'headless', 'task'], {
+        env: { DSH_HOME: home },
+        probe: brokenProbe,
+        guard: createInProcessGuardLock(),
+        spawnChild: child.spawn,
+        stderr: new MemoryStderr(),
+      }),
+    ).rejects.toThrow('identity lookup failed')
+    expect(child.kills()).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(child.forwarded()).toEqual([])
     await expect(statAsync(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
       code: 'ENOENT',
     })

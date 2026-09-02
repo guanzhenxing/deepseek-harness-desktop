@@ -118,13 +118,16 @@ class RecordingLease implements HomeLease {
   }
 }
 
-function fixture(options: { acquireError?: Error } = {}) {
+function fixture(options: { acquireError?: Error; loadSurfaceError?: Error } = {}) {
   const events: string[] = []
   const lease = new RecordingLease(events)
-  const loadSurface = vi.fn(async () => undefined)
+  const loadSurface = vi.fn(async () => {
+    if (options.loadSurfaceError !== undefined) throw options.loadSurfaceError
+  })
   const showRecovery = vi.fn(async () => undefined)
   const destroySurface = vi.fn()
   const onLeaseReleaseError = vi.fn()
+  const stopHosts: ReturnType<typeof vi.fn>[] = []
   let spawned = 0
 
   const process = new HandshakeProcess((bootstrap) => {
@@ -167,6 +170,10 @@ function fixture(options: { acquireError?: Error } = {}) {
       stabilityMs: 0,
       terminateGraceMs: 100,
     })
+    const stopHost = vi.fn((reason: 'quit' | 'restart', deadlineMs: number) =>
+      supervisor.stop(reason, deadlineMs),
+    )
+    stopHosts.push(stopHost)
     return {
       async start() {
         const hostReady = await supervisor.start({
@@ -179,7 +186,7 @@ function fixture(options: { acquireError?: Error } = {}) {
         events.push('ready')
         return hostReady
       },
-      stop: (reason, deadlineMs) => supervisor.stop(reason, deadlineMs),
+      stop: (reason, deadlineMs) => stopHost(reason, deadlineMs),
     }
   }
 
@@ -203,6 +210,7 @@ function fixture(options: { acquireError?: Error } = {}) {
   return {
     createAttempt,
     destroySurface,
+    stopHosts,
     events,
     lease,
     loadSurface,
@@ -236,6 +244,17 @@ describe('DesktopShellController startup chain', () => {
     expect(setup.events).toEqual(['lease-failed'])
     expect(setup.spawned()).toBe(0)
     expect(setup.lease.calls).toEqual([])
+    expect(setup.showRecovery).toHaveBeenCalledWith('BOOT_FAILED')
+    expect(setup.shell.state).toBe('recovery')
+  })
+
+  it('stops the started Host and keeps the lease when surface loading fails', async () => {
+    const setup = fixture({ loadSurfaceError: new Error('surface failed to mount') })
+    await expect(setup.shell.start()).rejects.toThrow('surface failed to mount')
+    expect(setup.stopHosts).toHaveLength(1)
+    expect(setup.stopHosts[0]).toHaveBeenCalledWith('quit', 5_000)
+    expect(setup.lease.calls).toContain('confirmHostExited')
+    expect(setup.lease.calls).not.toContain('release')
     expect(setup.showRecovery).toHaveBeenCalledWith('BOOT_FAILED')
     expect(setup.shell.state).toBe('recovery')
   })

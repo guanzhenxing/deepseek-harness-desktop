@@ -84,6 +84,17 @@ export class DesktopShellController {
       await this.#options.window.loadSurface(ready.surface, ready.origin)
       this.state = 'healthy'
     } catch (error) {
+      // A failure after the attempt exists must still stop the Host and
+      // confirm its exit before the shell settles into diagnostics; the
+      // lease stays held while the recovery surface is alive and is released
+      // by the normal stop chain on quit.
+      if (this.#attempt !== undefined) {
+        try {
+          await this.#attempt.stop('quit', this.#options.shutdownDeadlineMs ?? 5_000)
+        } catch {
+          /* the original startup failure is the diagnosis to report */
+        }
+      }
       this.state = 'recovery'
       await this.#options.window.showRecovery('BOOT_FAILED')
       throw error

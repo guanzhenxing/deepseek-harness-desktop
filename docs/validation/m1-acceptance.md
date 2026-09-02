@@ -2,7 +2,7 @@
 
 - 日期：2026-09-02
 - 基线：`main` @ `2f84e04`（M0 验收）
-- 结果提交：`codex/m1-shared-home` @ `2d3f0c6`（本记录随 `docs: record verified m1 shared home acceptance` 提交）
+- 结果提交：`codex/m1-shared-home` 初版 @ `2d3f0c6`；审查修复轮见 §7（表内门禁数字为修复后复跑结果）
 - 执行计划：[M1 Implementation Plan](../superpowers/plans/2026-09-02-m1-shared-home-single-host.md)
 - 决策记录：[ADR-0005](../adr/0005-home-lease-process-identity.md)、[home-lease 协议](../protocols/home-lease.md)
 
@@ -28,10 +28,10 @@
 
 | 命令 | 退出码 | 结果摘要 | 耗时 |
 | --- | --- | --- | --- |
-| `corepack pnpm@11.7.0 check` | 0 | 15 个测试文件 / 111 个单测通过；prettier/eslint/边界/文档检查通过 | 11s |
+| `corepack pnpm@11.7.0 check` | 0 | 15 个测试文件 / 115 个单测通过；prettier/eslint/边界/文档检查通过 | 11s |
 | `corepack pnpm@11.7.0 build:native` | 0 | `lease-helper` 编译成功 | 1s |
-| `corepack pnpm@11.7.0 test:integration` | 0 | 4 个文件 / 19 个集成测试通过（真实 DSH Host boot、双进程抢锁、doctor、会话图） | 25s |
-| `corepack pnpm@11.7.0 test:shared-home` | 0 | 双向场景各持久化 2 轮；跨 profile 互斥负例 | 25s |
+| `corepack pnpm@11.7.0 test:integration` | 0 | 5 个文件 / 22 个集成测试通过（真实 DSH Host boot、双进程抢锁、doctor 竞态、会话图、restart 间隙） | 28s |
+| `corepack pnpm@11.7.0 test:shared-home` | 0 | 双向场景各持久化 2 轮；跨 profile 互斥与 restart 间隙负例 | 26s |
 | `corepack pnpm@11.7.0 smoke:dsh-ui` | 0 | ui-ready，launcher/Host 进程分离 | 8s |
 | `corepack pnpm@11.7.0 smoke:host-crash` | 0 | ui-ready + host-crash-recovery | 3s |
 | `corepack pnpm@11.7.0 smoke:shared-home` | 0 | 双向接续 + 双向拒绝 + settings/凭据 sentinel + 退出后无残留锁 | 34s |
@@ -68,10 +68,26 @@
 - **Spec（主方案 M1 前四项共享 home 测试）**：① CLI 创建→Desktop 列出并继续 ✓；② Desktop 创建→CLI 继续续 ✓（均验证 `session/list` + `session/create` 采纳同一 sessionId + `session/prompt` 真实一轮，`turn/end` 计数 = 2）；③ 同 home 串行互斥（双方向 + 跨 profile）✓；④ 所有权诊断与安全退出（doctor 三态、退出链 stop→confirmHostExited→release，release 失败保留 lease 并报告）✓。
 - **安全边界**：PID 重用由 boottime+启动时间身份区分（`kill(pid,0)` 不作为身份）；双 doctor 竞态由 guard `flock` 短临界区消除（并发新 acquisition 不会被旧 doctor 删除）；owner 写入为原子替换 + 文件/目录 fsync；guard `O_NOFOLLOW` + 父目录 dev/ino 校验拒绝置换。
 
-## 7. 未验证项与遗留风险
+## 7. 审查修复（2026-09-02 第二轮，codex review 后）
+
+初版验收后 codex 审查指出租约故障路径缺口，以下修复均已落地并有测试：
+
+| 审查项 | 修复 | 证据 |
+| --- | --- | --- |
+| P1 doctor 只扫描 Electron、漏扫活跃 dsh-native/Node child | 原生 helper 新增 `scanargv`（KERN_PROCARGS2 内存匹配 argv 针脚，绝不输出 argv）；doctor 扫描 = 可执行文件匹配 + argv 针脚匹配（dsh-native 脚本、CLI child 模块、Host 入口、官方 dsh bin，裸 `dsh` 也保守拒绝），任一扫描不可判定即 unknown fail-closed | `doctor-race.integration.test.ts` "refuses to unlock a corrupt owner while a supported CLI process is running" |
+| P1 Desktop 取得 lease 后启动失败不 stop/确认 | `DesktopShellController.#start` 失败路径先 `attempt.stop('quit')`（含 confirmHostExited）再进恢复页；lease 由正常退出链释放 | `lifecycle.test.ts` "stops the started Host and keeps the lease when surface loading fails" |
+| P1 CLI child fork 后 identify/attachHost 失败不回收 | 未授权 child 先 SIGTERM→SIGKILL 回收并等待退出，再清登记、释放 lease | `cli.test.ts` "reaps the unauthorized child when host registration fails" |
+| P1（Spec）release 未复核 supervisor 身份 | release 在 guard 内增加 supervisor 身份复核（≠same → LEASE_CHANGED） | `lease.test.ts` "refuses to release when the recorded supervisor identity is not this process" |
+| P2 run/guard 权限未收紧 | `ensureHomeLayout` 将既有 `run/` chmod 0700、`host-lease.guard` chmod 0600 | `lease.test.ts` "tightens pre-existing run and guard permissions" |
+| P2 测试 fixture 不一致 | `reconcile.test.ts` 迁移到 `createIsolatedHomeFixture` | 全部 home 测试统一走 fixture |
+| P2 缺双 doctor 竞态与 restart 间隙测试 | 新增 `doctor-race.integration.test.ts`（3 轮并发 doctor×2+acquirer，断言胜者锁不被误删）与 shared-home 的 host-restart-gap 场景（Host SIGKILL 后 Desktop 恢复页期间第三入口仍 exit 3） | 两文件 |
+| P3 M1 分支包含 M1–M4 计划文档 | 保留：这是与用户确认过的基线化默认（计划文档作为 M1 分支第一个提交），非运行时行为 | `fce2d4e` |
+
+## 8. 未验证项与遗留风险
 
 - CI 的 `macos-15` job 尚未在 GitHub Actions 实际运行（本地同等命令已全部通过）；Linux `check` job 依赖既有配置。
 - `ParentPort` 的 `close` 事件依赖 Electron 运行时行为（类型未声明，已按 EventEmitter 订阅）；父进程死亡的兜底仍是子进程 10s bootstrap 超时。
 - smoke 输出中的 surface URL 携带一次性 token（仅存在于临时 home 场景，场景结束即销毁）；正式运行的日志不输出该 URL。
-- `dsh-native` 等待子进程退出即释放 lease；若官方 CLI 子进程自行 daemon 化留下写 home 的后代（当前固定版没有此行为），lease 会在后代仍存活时释放。M2/M3 如引入相关上游行为需复查。
+- `dsh-native` 等待子进程退出即释放 lease；若官方 CLI 子进程自行 daemon 化留下写 home 的后代（当前固定版没有此行为），lease 会在后代仍存活时释放。M2/M3 如引入相关上游行为需复查。doctor 的 argv 针脚覆盖我们自己的入口脚本与官方 dsh bin，但不覆盖 CLI 子进程再派生的任意 pnpm 后代（其 argv 不含针脚）。
+- argv 针脚按子串匹配：任何把针脚路径放进自身 argv 的无关进程（如 `sh -c '<完整路径> ...'`）都会让 doctor 保守拒绝——方向安全（拒绝解锁），只影响可用性。
 - M2（修订恢复/Safe Mode）、M3（打包）、M4（兼容性）未交付；本记录只覆盖 M1 范围。

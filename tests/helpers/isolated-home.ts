@@ -15,7 +15,10 @@ export interface IsolatedHomeFixture {
 
 function isInsideDirectory(parent: string, child: string): boolean {
   const relative = path.relative(parent, child)
-  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  return (
+    relative === '' ||
+    (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  )
 }
 
 function assertOutsideForbiddenRoots(home: string): void {

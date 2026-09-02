@@ -23,10 +23,24 @@ export function runDshNative(
   argv: readonly string[],
   options?: { home: string; cwd?: string; env?: Record<string, string> },
 ): Promise<DshNativeResult>
+export interface DesktopReport {
+  kind: string
+  launcherPid?: number
+  hostPid?: number
+  surfaceUrl?: string
+  code?: string
+  stage?: string
+}
+
 export function withDesktop(
   home: string,
   userData: string,
-  action: (input: { client: WebApiClient; surfaceUrl: string }) => Promise<void>,
+  action: (input: {
+    client: WebApiClient
+    surfaceUrl: string
+    report: DesktopReport
+    waitForReport(predicate: (report: DesktopReport) => boolean): Promise<DesktopReport>
+  }) => Promise<void>,
 ): Promise<void>
 export function withCliWeb(
   home: string,
@@ -34,21 +48,26 @@ export function withCliWeb(
   action: (input: { client: WebApiClient; surfaceUrl: string }) => Promise<void>,
 ): Promise<void>
 export function createWebApiClient(surfaceUrl: string): Promise<WebApiClient>
-export function listSessions(
-  home: string,
-): Promise<
+export function listSessions(home: string): Promise<
   {
     file: string
     header: { id: string; cwd: string }
     turns: number
   }[]
 >
-export function waitForTurns(sessionFile: string, expected: number, timeoutMs?: number): Promise<number>
-export function driveOneTurn(client: WebApiClient, input: {
-  cwd: string
-  sessionId?: string
-  text?: string
-}): Promise<string>
+export function waitForTurns(
+  sessionFile: string,
+  expected: number,
+  timeoutMs?: number,
+): Promise<number>
+export function driveOneTurn(
+  client: WebApiClient,
+  input: {
+    cwd: string
+    sessionId?: string
+    text?: string
+  },
+): Promise<string>
 export function firstSessionId(client: WebApiClient): Promise<string | undefined>
 export function runSharedHomeScenario(
   direction: 'cli-to-desktop' | 'desktop-to-cli',

@@ -135,6 +135,7 @@ export async function withDesktop(home, userData, action) {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const reports = []
+  const nextReport = (predicate) => waitFor(() => reports.find(predicate), 90_000, 'desktop report')
   consumeLines(child.stdout, (line) => {
     process.stdout.write(`${line}\n`)
     if (line.startsWith('DSH_DESKTOP_SMOKE ')) {
@@ -157,7 +158,12 @@ export async function withDesktop(home, userData, action) {
       throw new Error('desktop ui-ready report did not include the surface URL')
     }
     const client = await createWebApiClient(ready.surfaceUrl)
-    await action({ client, surfaceUrl: ready.surfaceUrl })
+    await action({
+      client,
+      surfaceUrl: ready.surfaceUrl,
+      report: ready,
+      waitForReport: (predicate) => nextReport(predicate),
+    })
   } finally {
     child.kill('SIGTERM')
     const exit = await new Promise((resolve) => {

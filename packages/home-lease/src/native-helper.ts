@@ -269,6 +269,8 @@ export function createInProcessGuardLock(): GuardLock {
 export interface NativeProbeOptions {
   readonly helperPath: string
   readonly entryExecutables: readonly string[]
+  /** Absolute paths matched against other processes' argv during scans. */
+  readonly scanArgvNeedles?: readonly string[]
   readonly excludePids?: readonly number[]
 }
 
@@ -288,11 +290,21 @@ async function identifyPid(helperPath: string, pid: number): Promise<ProcessIden
 /**
  * ProcessProbe backed by the compiled macOS helper. It only reports
  * structured identity/status values — never argv, env, or file descriptors of
- * other processes.
+ * other processes. `scanSupported` combines an executable-path scan with an
+ * in-memory argv-needle scan so Node-based supported entrypoints
+ * (`dsh-native`, the CLI child, the official `dsh` bin) are detected too;
+ * either scan being inconclusive fails closed.
  */
 export function createNativeProcessProbe(options: NativeProbeOptions): ProcessProbe {
   const entryCsv = options.entryExecutables.join(',')
+  const needleCsv = (options.scanArgvNeedles ?? []).join('\x1f')
   const excludeCsv = (options.excludePids ?? []).join(',')
+  const runScan = async (kind: 'scan' | 'scanargv', csv: string): Promise<ProcessScanResult> => {
+    const parsed = requireOk(await runHelper(options.helperPath, [kind, excludeCsv, csv]), kind)
+    const result = parsed.result
+    if (result === 'none' || result === 'active') return result
+    return 'unknown'
+  }
   return {
     async current() {
       return identifyPid(options.helperPath, process.pid)
@@ -322,13 +334,12 @@ export function createNativeProcessProbe(options: NativeProbeOptions): ProcessPr
     },
     async scanSupported(): Promise<ProcessScanResult> {
       try {
-        const parsed = requireOk(
-          await runHelper(options.helperPath, ['scan', excludeCsv, entryCsv]),
-          'scan',
-        )
-        const result = parsed.result
-        if (result === 'none' || result === 'active') return result
-        return 'unknown'
+        const byExecutable = entryCsv === '' ? ('none' as const) : await runScan('scan', entryCsv)
+        if (byExecutable === 'active') return 'active'
+        const byArgv = needleCsv === '' ? ('none' as const) : await runScan('scanargv', needleCsv)
+        if (byArgv === 'active') return 'active'
+        if (byExecutable === 'unknown' || byArgv === 'unknown') return 'unknown'
+        return 'none'
       } catch {
         return 'unknown'
       }

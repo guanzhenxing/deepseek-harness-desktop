@@ -1,5 +1,5 @@
 import type { Stats } from 'node:fs'
-import { lstat, mkdir, open, readFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -70,6 +70,16 @@ export async function ensureHomeLayout(paths: LeasePaths): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
   }
   await directoryIdentity(paths.run, 'DSH home run directory')
+  // Tighten pre-existing inodes to the protocol modes; a wider run directory
+  // or guard file would leak lease metadata to other local users.
+  const runMode = (await lstat(paths.run)).mode & 0o777
+  if (runMode !== 0o700) await chmod(paths.run, 0o700)
+  try {
+    const guardMode = (await lstat(paths.guardPath)).mode & 0o777
+    if (guardMode !== 0o600) await chmod(paths.guardPath, 0o600)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
 }
 
 export async function writeOwnerWithDurability(

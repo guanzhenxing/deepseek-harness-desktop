@@ -85,7 +85,7 @@ doctor 在同一 guard 短临界区内完成"重读 owner → 探测身份 → �
 
 - owner 可读且 supervisor/Host 身份仍 `same` → ACTIVE_OWNER 拒绝；
 - 任一身份 `unknown`，或 `pendingSpawn` 未确认 → IDENTITY_UNKNOWN 拒绝（可能存在从未收到 boot 授权的子进程）；
-- owner 缺失/损坏 → 先 `scanSupported` 扫描受支持入口可执行文件（开发期为 Electron 二进制；排除 doctor 自身与只读 helper；无法判定返回 unknown）；
+- owner 缺失/损坏 → 先 `scanSupported` 扫描受支持入口：可执行文件匹配（Electron 二进制）+ argv 针脚匹配（`dsh-native` 包装脚本、授权式 CLI child 模块、Electron Host 入口、官方 `dsh` bin——裸 `dsh` 也会被保守拒绝）；排除 doctor 自身与只读 helper，任一扫描无法判定即返回 unknown（fail closed）；argv 只在 helper 内存中匹配，绝不输出；
 - 只有所有身份 `absent/different` 且无未确认 writer 才删除 owner 与 `host.lock/`；
 - 删除前复核 lock 目录 dev/ino；`ENOTEMPTY` 视为 IDENTITY_UNKNOWN；
 - `--unlock` 本身就是用户明确的清理请求，不提供 `--force` 绕过。

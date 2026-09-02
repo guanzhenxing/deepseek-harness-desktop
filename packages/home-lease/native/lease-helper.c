@@ -205,10 +205,130 @@ static int cmd_scan(const char *excludeCsv, const char *entryCsv) {
     return 0;
 }
 
+#define ARGV_BUFFER_SIZE (64 * 1024)
+
+/*
+ * Match a process when one of its kernel-stored argv strings contains a
+ * needle path. Doctor uses this to detect supported Node entrypoints
+ * (dsh-native wrapper, CLI child, official dsh bin) that an executable-path
+ * scan cannot distinguish from unrelated Node processes. Needle fields are
+ * separated by \x1f; argv contents are matched in memory only and never
+ * printed.
+ */
+typedef enum {
+    ARGV_NO_MATCH,
+    ARGV_MATCH,
+    ARGV_UNKNOWN
+} argv_match_t;
+
+static argv_match_t argv_matches_needles(pid_t pid, const char *needleCsv) {
+    if (needleCsv == NULL || needleCsv[0] == '\0') return ARGV_NO_MATCH;
+    static int mib[3] = {CTL_KERN, KERN_PROCARGS2, 0};
+    mib[2] = pid;
+    size_t size = 0;
+    if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0) {
+        return errno == ESRCH ? ARGV_NO_MATCH : ARGV_UNKNOWN;
+    }
+    if (size > ARGV_BUFFER_SIZE) size = ARGV_BUFFER_SIZE;
+    char *buffer = malloc(size);
+    if (buffer == NULL) fail("out of memory");
+    if (sysctl(mib, 3, buffer, &size, NULL, 0) != 0) {
+        int error = errno;
+        free(buffer);
+        return error == ESRCH ? ARGV_NO_MATCH : ARGV_UNKNOWN;
+    }
+    if (size < 5) {
+        free(buffer);
+        return ARGV_NO_MATCH;
+    }
+    int argcCount;
+    memcpy(&argcCount, buffer, sizeof(argcCount));
+    if (argcCount < 0 || argcCount > 4096) {
+        free(buffer);
+        return ARGV_UNKNOWN;
+    }
+    size_t position = sizeof(argcCount);
+    /* Skip the executable path that precedes argv[0]. */
+    while (position < size && buffer[position] != '\0') position += 1;
+    position += 1;
+    for (int index = 0; index < argcCount && position < size; index += 1) {
+        while (position < size && buffer[position] == '\0') position += 1;
+        if (position >= size) break;
+        const char *argument = buffer + position;
+        size_t length = strnlen(argument, size - position);
+        position += length + 1;
+        const char *cursor = needleCsv;
+        while (cursor != NULL && *cursor != '\0') {
+            const char *separator = strchr(cursor, '\x1f');
+            size_t needleLength =
+                separator == NULL ? strlen(cursor) : (size_t)(separator - cursor);
+            if (needleLength > 0 && needleLength <= length &&
+                memmem(argument, length, cursor, needleLength) != NULL) {
+                free(buffer);
+                return ARGV_MATCH;
+            }
+            cursor = separator == NULL ? NULL : separator + 1;
+        }
+    }
+    free(buffer);
+    return ARGV_NO_MATCH;
+}
+
+static int cmd_scanargv(const char *excludeCsv, const char *needleCsv) {
+    if (needleCsv == NULL || needleCsv[0] == '\0') {
+        print_result("{\"ok\":true,\"result\":\"none\"}");
+        return 0;
+    }
+    static int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) != 0) {
+        print_result("{\"ok\":true,\"result\":\"unknown\"}");
+        return 0;
+    }
+    struct kinfo_proc *processes = malloc(size);
+    if (processes == NULL) fail("out of memory");
+    if (sysctl(mib, 4, processes, &size, NULL, 0) != 0) {
+        free(processes);
+        print_result("{\"ok\":true,\"result\":\"unknown\"}");
+        return 0;
+    }
+    size_t count = size / sizeof(struct kinfo_proc);
+    uid_t selfUid = geteuid();
+    pid_t selfPid = getpid();
+    for (size_t index = 0; index < count; index += 1) {
+        pid_t pid = processes[index].kp_proc.p_pid;
+        uid_t uid = processes[index].kp_eproc.e_ucred.cr_uid;
+        if (pid == selfPid || uid != selfUid) continue;
+        if (processes[index].kp_proc.p_stat == SZOMB) continue;
+        if (csv_contains(excludeCsv, (long)pid)) continue;
+        argv_match_t matched = argv_matches_needles(pid, needleCsv);
+        if (matched == ARGV_UNKNOWN) {
+            free(processes);
+            print_result("{\"ok\":true,\"result\":\"unknown\"}");
+            return 0;
+        }
+        if (matched == ARGV_MATCH) {
+            char start[128];
+            if (!process_identity(pid, start, sizeof(start))) {
+                free(processes);
+                print_result("{\"ok\":true,\"result\":\"unknown\"}");
+                return 0;
+            }
+            free(processes);
+            printf("{\"ok\":true,\"result\":\"active\",\"pid\":%d,\"start\":\"%s\"}\n",
+                   pid, start);
+            fflush(stdout);
+            return 0;
+        }
+    }
+    free(processes);
+    print_result("{\"ok\":true,\"result\":\"none\"}");
+    return 0;
+}
+
 static int cmd_lock(const char *guardPath, const char *parentDir,
                     const char *parentDevText, const char *parentInoText,
-                    const char *retryMsText) {
-    struct stat parent;
+                    const char *retryMsText) {    struct stat parent;
     if (lstat(parentDir, &parent) != 0 || !S_ISDIR(parent.st_mode)) fail("refused");
     if ((uintmax_t)parent.st_dev != strtoumax(parentDevText, NULL, 10) ||
         (uintmax_t)parent.st_ino != strtoumax(parentInoText, NULL, 10)) {
@@ -263,6 +383,9 @@ int main(int argc, char **argv) {
     }
     if (argc == 4 && strcmp(argv[1], "scan") == 0) {
         return cmd_scan(argv[2], argv[3]);
+    }
+    if (argc == 4 && strcmp(argv[1], "scanargv") == 0) {
+        return cmd_scanargv(argv[2], argv[3]);
     }
     if (argc == 7 && strcmp(argv[1], "lock") == 0) {
         return cmd_lock(argv[2], argv[3], argv[4], argv[5], argv[6]);

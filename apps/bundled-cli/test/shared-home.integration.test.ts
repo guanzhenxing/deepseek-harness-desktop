@@ -10,6 +10,7 @@ import {
   runDshNative,
   runSharedHomeScenario,
   withCliWeb,
+  withDesktop,
 } from '../../../tests/helpers/shared-home-driver.mjs'
 
 const helperAvailable =
@@ -68,6 +69,24 @@ describe.skipIf(!helperAvailable)('sequential shared home (real DSH graph)', () 
     expect(next.code).toBe(0)
     await expect(stat(path.join(fixture.home, 'run', 'host.lock'))).rejects.toMatchObject({
       code: 'ENOENT',
+    })
+  }, 300_000)
+
+  it('keeps rejecting third entries while the Desktop sits in its host-restart gap', async () => {
+    await withDesktop(fixture.home, fixture.userData, async ({ report, waitForReport }) => {
+      if (typeof report.hostPid !== 'number') {
+        throw new Error('ui-ready report did not include the Host pid')
+      }
+      // Simulate the restart gap: the Host is dead, the launcher stays in
+      // recovery, and the whole-home lease must still be held.
+      process.kill(report.hostPid, 'SIGKILL')
+      await waitForReport((candidate) => candidate.kind === 'host-crash-recovery')
+      const headless = await runDshNative(['--profile', 'headless', 'must stay rejected'], {
+        home: fixture.home,
+        cwd: fixture.cwd,
+      })
+      expect(headless.code).toBe(3)
+      expect(headless.output).toContain('HOME_BUSY')
     })
   }, 300_000)
 })

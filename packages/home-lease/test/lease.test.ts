@@ -275,4 +275,30 @@ describe('home lease lifecycle', () => {
     expect(await readFile(extra, 'utf8')).toBe('keep')
     expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
   })
+
+  it('refuses to release when the recorded supervisor identity is not this process', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    // Same generation, but the owner now names a different supervisor.
+    const ownerFile = await ownerPathOf(home)
+    const raw = JSON.parse(await readFile(ownerFile, 'utf8'))
+    raw.supervisor = { pid: 9191, startIdentity: 'someone-else' }
+    await writeFile(ownerFile, JSON.stringify(raw, null, 2))
+    await expect(lease.release()).rejects.toMatchObject({ code: 'LEASE_CHANGED' })
+    // The lock stays for doctor.
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+  })
+
+  it('tightens pre-existing run and guard permissions to the protocol modes', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const { mkdir: makeDirectory, writeFile: write } = await import('node:fs/promises')
+    await makeDirectory(path.join(home, 'run'), { mode: 0o755 })
+    await write(path.join(home, 'run', 'host-lease.guard'), 'loose', { mode: 0o644 })
+    await acquireHomeLease(acquireInput(home, probe))
+    expect((await stat(path.join(home, 'run'))).mode & 0o777).toBe(0o700)
+    expect((await stat(path.join(home, 'run', 'host-lease.guard'))).mode & 0o777).toBe(0o600)
+    expect((await stat(await ownerPathOf(home))).mode & 0o777).toBe(0o600)
+  })
 })
