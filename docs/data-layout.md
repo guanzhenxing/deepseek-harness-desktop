@@ -44,11 +44,13 @@ M0 的 `<m0Home>` 由 Electron 单实例独占，不与 CLI 或其他 DSH Host �
 
 正常启动不接受任意 userData 覆盖。只有 `ui`/`host-crash` smoke 可使用系统临时目录下通过 symlink/实际路径检查的专用目录。profile-manager 的隔离 authority 必须绑定调用方指定 userData 的 `m0-dsh-home` 子目录；该 authority 是受信调用方的写入前提，不是对同用户任意代码的安全沙箱。
 
-lease 目录固定为：
+lease 目录固定为（协议细节见 [home-lease 协议](protocols/home-lease.md)）：
 
 ```text
-<home>/run/host.lock/
-└── owner.json
+<home>/run/
+├── host-lease.guard    # 永久 owner-only advisory lock 文件，原生 helper flock 短临界区
+└── host.lock/
+    └── owner.json
 ```
 
 `owner.json` 至少记录：

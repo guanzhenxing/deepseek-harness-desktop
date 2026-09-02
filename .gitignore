@@ -17,3 +17,4 @@ test-results/
 *.log
 *.tsbuildinfo
 *.zip
+packages/home-lease/native/.build/

@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc -b",
+    "build:native": "node scripts/build-lease-helper.mjs",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit && pnpm run check:docs",
     "check:boundaries": "node scripts/verify-boundaries.mjs",
     "check:docs": "node scripts/verify-docs.mjs",

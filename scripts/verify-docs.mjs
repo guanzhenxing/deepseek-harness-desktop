@@ -12,6 +12,7 @@ const requiredDocuments = [
   'docs/development.md',
   'docs/compatibility.json',
   'docs/protocols/host-control.md',
+  'docs/protocols/home-lease.md',
   'docs/adr/README.md',
 ]
 
