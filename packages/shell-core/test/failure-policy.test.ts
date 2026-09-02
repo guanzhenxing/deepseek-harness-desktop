@@ -135,6 +135,21 @@ describe('toStartupFailure', () => {
     expect(failure.summary.length).toBeLessThanOrEqual(1_024)
   })
 
+  it('redacts quoted tokens, bearer headers, and api-key/password shapes', () => {
+    const failure = toStartupFailure({
+      stage: 'boot',
+      code: 'BOOT_FAILED',
+      summary:
+        'auth token="quoted-secret" api-key=ak-live-123 password=hunter2 ' +
+        'Authorization: Bearer eyJhbGciOi.abcdef',
+      retryable: true,
+    })
+    expect(failure.summary).not.toContain('quoted-secret')
+    expect(failure.summary).not.toContain('ak-live-123')
+    expect(failure.summary).not.toContain('hunter2')
+    expect(failure.summary).not.toContain('eyJhbGciOi')
+  })
+
   it('falls back to a safe summary when none is usable', () => {
     const failure = toStartupFailure({
       stage: 'boot',

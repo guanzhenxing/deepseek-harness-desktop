@@ -323,10 +323,7 @@ export class RecoverySessionController implements RecoveryController {
     // window) runs while the session is already healthy, so a crash in it
     // is still a post-ready crash.
     await Promise.resolve(this.#options.onHealthy?.()).catch((error: unknown) => {
-      console.error(
-        'healthy-session hook failed:',
-        error instanceof Error ? error.message : error,
-      )
+      console.error('healthy-session hook failed:', error instanceof Error ? error.message : error)
     })
   }
 

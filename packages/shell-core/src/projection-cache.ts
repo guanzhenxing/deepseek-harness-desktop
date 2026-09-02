@@ -12,6 +12,7 @@ export type CacheQuarantineResult =
 const CACHE_RELATIVE = 'storages/session_projcache/sessions'
 const CACHE_ROOT_RELATIVE = 'storages/session_projcache'
 const QUARANTINE_PREFIX = 'session_projcache.quarantine-'
+const QUARANTINE_RELATIVE_PREFIX = 'storages/'
 const JOURNAL_RELATIVE = 'run/projection-cache-quarantine.json'
 
 type QuarantineJournal = Readonly<{
@@ -55,6 +56,16 @@ async function readJournal(home: string): Promise<QuarantineJournal | undefined>
     const record = value as Record<string, unknown>
     if (record.schemaVersion !== 1) return undefined
     if (typeof record.backupRelative !== 'string') return undefined
+    // The journal is untrusted input: only the exact backup naming this
+    // module writes is ever resolved against the home.
+    if (
+      typeof record.sourceRelative !== 'string' ||
+      record.sourceRelative !== CACHE_RELATIVE ||
+      !record.backupRelative.startsWith(`${QUARANTINE_RELATIVE_PREFIX}${QUARANTINE_PREFIX}`) ||
+      record.backupRelative.includes('..')
+    ) {
+      return undefined
+    }
     return record as unknown as QuarantineJournal
   } catch {
     return undefined
@@ -123,6 +134,16 @@ export async function quarantineProjectionCache(
   const sourceRelative = CACHE_RELATIVE
   const sourceDir = path.join(input.home, sourceRelative)
   const storagesDir = path.join(input.home, CACHE_ROOT_RELATIVE)
+  const storagesRoot = path.join(input.home, 'storages')
+  // Every path component of the fixed layout must be a real directory: a
+  // symlinked `storages/` or `session_projcache/` must never be moved.
+  for (const component of [storagesRoot, storagesDir]) {
+    const identity = await lstat(component).catch(() => undefined)
+    if (identity === undefined) return { kind: 'unchanged' }
+    if (identity.isSymbolicLink() || !identity.isDirectory()) {
+      return { kind: 'unknown-layout' }
+    }
+  }
   const sourceIdentity = await lstat(sourceDir).catch(() => undefined)
   if (sourceIdentity === undefined) return { kind: 'unchanged' }
   if (sourceIdentity.isSymbolicLink() || !sourceIdentity.isDirectory()) {

@@ -60,7 +60,15 @@ export function categorizeFailure(
 const SUMMARY_LIMIT = 1_024
 // eslint-disable-next-line no-control-regex -- stripping control characters is the purpose
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000e-\u001f\u007f]/gu
-const TOKEN_PATTERN = /token=[^\s&"']+/giu
+// token=... / token="..." / Bearer / api-key / password shapes; a missing
+// match only leaves the summary less redacted, never crashes.
+const SECRET_PATTERNS: RegExp[] = [
+  /token=[^\s&"']+/giu,
+  /token="[^"]*"/giu,
+  /token='[^']*'/giu,
+  /\bbearer\s+[a-z0-9._~+/=-]+/giu,
+  /(?:api-?key|password|secret)=[^\s&"']+/giu,
+]
 const HOME_HINT = 'the configured DSH home'
 
 function sanitizeSummary(summary: string, home: string | undefined): string {
@@ -68,7 +76,9 @@ function sanitizeSummary(summary: string, home: string | undefined): string {
   if (home !== undefined && home.length > 0) {
     text = text.split(home).join(HOME_HINT)
   }
-  text = text.replace(TOKEN_PATTERN, 'token=<redacted>')
+  for (const pattern of SECRET_PATTERNS) {
+    text = text.replace(pattern, (match) => `${match.split(/[=':\s]/u)[0]}=<redacted>`)
+  }
   text = text.replace(CONTROL_CHARACTERS, ' ')
   text = text.trim()
   if (text.length > SUMMARY_LIMIT) text = `${text.slice(0, SUMMARY_LIMIT - 1)}…`

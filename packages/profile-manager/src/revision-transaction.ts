@@ -87,6 +87,25 @@ export async function readJournal(
   if (typeof record.id !== 'string' || record.id !== id) return 'corrupt'
   if (typeof record.state !== 'string') return 'corrupt'
   if (typeof record.createdAt !== 'string') return 'corrupt'
+  // The ref comes from disk; a journal whose recorded profile escapes this
+  // home's profiles/<name> layout is corrupt, never a rollback target.
+  const ref = record.ref
+  if (typeof ref !== 'object' || ref === null) return 'corrupt'
+  const refRecord = ref as Record<string, unknown>
+  if (
+    typeof refRecord.home !== 'string' ||
+    refRecord.home !== home ||
+    typeof refRecord.name !== 'string' ||
+    refRecord.name === '' ||
+    refRecord.name === '.' ||
+    refRecord.name === '..' ||
+    refRecord.name.includes('/') ||
+    refRecord.name.includes('\\') ||
+    typeof refRecord.dir !== 'string' ||
+    refRecord.dir !== path.join(home, 'profiles', refRecord.name)
+  ) {
+    return 'corrupt'
+  }
   if (!Array.isArray(record.writes)) return 'corrupt'
   for (const write of record.writes) {
     if (typeof write !== 'object' || write === null) return 'corrupt'

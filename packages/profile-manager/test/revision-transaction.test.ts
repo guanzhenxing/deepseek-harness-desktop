@@ -242,6 +242,20 @@ describe('revision transactions', () => {
     await lease.release()
   })
 
+  it('treats a journal whose recorded profile escapes the home as corrupt', async () => {
+    const { ref, lease } = await leasedHome()
+    const plan = await planDesktopReconcile(ref, lease)
+    const tx = await applyProfileTransaction(plan, lease)
+    // Tamper: point the journal's ref at a directory outside this home.
+    const journalFile = path.join(transactionDir(ref.home, tx.id), 'transaction.json')
+    const raw = JSON.parse(await readFile(journalFile, 'utf8')) as { ref: { dir: string } }
+    raw.ref.dir = path.join(ref.home, '..', 'escaped-profile')
+    await writeFile(journalFile, `${JSON.stringify(raw, null, 2)}\n`)
+    expect(await readJournal(ref.home, tx.id)).toBe('corrupt')
+    await expect(recoverInterruptedTransactions(ref, lease)).resolves.toBe('needs-review')
+    await lease.release()
+  })
+
   it('keeps journal snapshots private and stores only whitelisted relative paths', async () => {
     const { ref, lease } = await leasedHome()
     const plan = await planDesktopReconcile(ref, lease)

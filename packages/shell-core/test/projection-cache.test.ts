@@ -130,6 +130,22 @@ describe('quarantineProjectionCache', () => {
     })
     await lease.release()
 
+    // A symlinked parent of the fixed layout is equally uncertified.
+    const dirParent = await home()
+    const externalParent = await home()
+    await mkdir(path.join(externalParent, 'session_projcache', 'sessions'), { recursive: true })
+    await mkdir(path.join(dirParent, 'storages'), { recursive: true })
+    await symlink(
+      path.join(externalParent, 'session_projcache'),
+      path.join(dirParent, 'storages', 'session_projcache'),
+      'dir',
+    )
+    const parentLease = await leaseOf(dirParent)
+    expect(
+      await quarantineProjectionCache({ home: dirParent, lease: parentLease, thresholdBytes: 1 }),
+    ).toEqual({ kind: 'unknown-layout' })
+    await parentLease.release()
+
     // Extra sibling under the storage root means an uncertified layout.
     const dir2 = await home()
     await writeCache(dir2, 2048)
