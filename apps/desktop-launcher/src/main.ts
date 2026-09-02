@@ -11,17 +11,21 @@ import {
   resolveDesktopHome,
   resolveLeaseHelperPath,
 } from '@dsh-desktop/home-lease'
-import { HostSupervisor, type HostReady } from '@dsh-desktop/host-supervisor'
+import { HostSupervisor, type HostFatalDetail, type HostReady } from '@dsh-desktop/host-supervisor'
 import { PRODUCT } from '@dsh-desktop/product-config'
 import { createProfileRef, reconcileDesktopProfile } from '@dsh-desktop/profile-manager'
 import {
-  DesktopShellController,
   isAllowedMainFrameNavigation,
+  RecoverySessionController,
+  StartupFailureError,
+  toStartupFailure,
   type ShellWindowPort,
+  type StartupFailure,
 } from '@dsh-desktop/shell-core'
 
 import { createElectronHostProcessFactory } from './electron-host-process.js'
 import { describeLeaseBlock, resolveSmokeHome } from './lease-diagnostics.js'
+import { createRecoveryWindow, type RecoveryWindowHandle } from './recovery-window.js'
 import { resolveSmokeUserData } from './m0-paths.js'
 import { DESKTOP_WEB_PREFERENCES, denyWindowOpen } from './window-policy.js'
 
@@ -145,7 +149,8 @@ async function waitForOfficialUi(window: BrowserWindow): Promise<void> {
   throw new Error('Official DSH UI did not reach the M0 smoke markers')
 }
 
-let shell: DesktopShellController | undefined
+let shell: RecoverySessionController | undefined
+let recoveryWindow: RecoveryWindowHandle | undefined
 let shutdownComplete = false
 let shutdownStarted = false
 
@@ -163,25 +168,20 @@ async function startApplication(): Promise<void> {
   const profileName = PRODUCT.defaultProfileName
   const windowPort = new ElectronWindowPort()
   let readyHost: HostReady | undefined
-  const supervisor = new HostSupervisor({
-    factory: createElectronHostProcessFactory(hostEntryPath),
-    stabilityMs: smokeMode === undefined ? 1_000 : 100,
-    onEvent: (event) => {
-      if (event.kind === 'failed') {
-        smokeReport({ kind: 'host-failed', code: event.error.code, summary: event.error.message })
-      }
-      if (event.kind !== 'crashed') return
-      if (shutdownStarted) return
-      void shell
-        ?.hostCrashed()
-        .then(() => {
-          smokeReport({ kind: 'host-crash-recovery', launcherPid: process.pid })
-          if (smokeMode === 'host-crash') app.quit()
+  let lastFatal: HostFatalDetail | undefined
+  // The recovery window is created lazily on first failure: an eagerly
+  // created, never-loaded hidden window stalls Electron's quit sequence.
+  const ensureRecoveryWindow = (): RecoveryWindowHandle =>
+    (recoveryWindow ??= createRecoveryWindow({
+      onAction: (action) => {
+        if (shell === undefined) return
+        void shell.act(action).then(() => {
+          if (action === 'quit' || shell?.state === 'stopped') app.exit(0)
         })
-        .catch(() => smokeReport({ kind: 'failed', stage: 'host-crash-recovery' }))
-    },
-  })
-  shell = new DesktopShellController({
+      },
+      isInRecovery: () => shell?.state === 'recovery',
+    }))
+  shell = new RecoverySessionController({
     acquireLease: () =>
       acquireHomeLease({
         home,
@@ -193,19 +193,78 @@ async function startApplication(): Promise<void> {
     reconcile: async (lease) => {
       await reconcileDesktopProfile(createProfileRef(home, profileName), lease)
     },
-    createAttempt: (lease) => ({
-      start: () => {
-        const started = supervisor.start({ home, profileName, mode: 'normal', lease, probe })
-        void started
-          .then((ready) => {
+    createAttempt: (lease) => {
+      const attemptSupervisor = new HostSupervisor({
+        factory: createElectronHostProcessFactory(hostEntryPath),
+        stabilityMs: smokeMode === undefined ? 1_000 : 100,
+        onEvent: (event) => {
+          if (event.kind === 'failed') {
+            if (event.fatal !== undefined) lastFatal = event.fatal
+            smokeReport({
+              kind: 'host-failed',
+              code: event.error.code,
+              summary: event.error.message,
+            })
+          }
+          if (event.kind !== 'crashed') return
+          if (shutdownStarted) return
+          void shell
+            ?.hostCrashed()
+            .then(() => {
+              smokeReport({ kind: 'host-crash-recovery', launcherPid: process.pid })
+              if (smokeMode === 'host-crash') app.exit(0)
+            })
+            .catch((error: unknown) => {
+              console.error(
+                'host-crash recovery failed:',
+                error instanceof Error ? error.message : error,
+              )
+              smokeReport({ kind: 'failed', stage: 'host-crash-recovery' })
+            })
+        },
+      })
+      return {
+        start: async () => {
+          try {
+            const ready = await attemptSupervisor.start({
+              home,
+              profileName,
+              mode: 'normal',
+              lease,
+              probe,
+            })
             readyHost = ready
-          })
-          .catch(() => undefined)
-        return started
+            return ready
+          } catch (error) {
+            const fatal = lastFatal
+            lastFatal = undefined
+            const failure: StartupFailure = toStartupFailure({
+              stage: fatal?.stage ?? 'boot',
+              code: fatal?.code ?? 'BOOT_FAILED',
+              summary: fatal?.summary ?? (error instanceof Error ? error.message : String(error)),
+              retryable: fatal?.retryable ?? true,
+              home,
+            })
+            smokeReport({ kind: 'host-failed', code: failure.code, stage: failure.stage })
+            throw new StartupFailureError(failure)
+          }
+        },
+        stop: (reason, deadlineMs) => attemptSupervisor.stop(reason, deadlineMs),
+      }
+    },
+    loadSurface: async (ready) => {
+      await windowPort.loadSurface(ready.surface, ready.origin)
+    },
+    window: {
+      showRecoveryView: async (view) => {
+        smokeReport({ kind: 'recovery-view', stage: view.failure.stage, code: view.failure.code })
+        await ensureRecoveryWindow().showRecoveryView(view)
       },
-      stop: (reason, deadlineMs) => supervisor.stop(reason, deadlineMs),
-    }),
-    window: windowPort,
+      destroySurface: () => windowPort.destroySurface(),
+    },
+    onSessionFailure: (failure) => {
+      void failure
+    },
     onLeaseReleaseError: (error) => {
       smokeReport({ kind: 'lease-release-refused' })
       console.error('keeping the home lease:', error instanceof Error ? error.message : error)
@@ -249,10 +308,16 @@ else {
     event.preventDefault()
     if (shutdownStarted) return
     shutdownStarted = true
-    void (shell?.stop() ?? Promise.resolve()).finally(() => {
-      shutdownComplete = true
-      app.quit()
-    })
+    void (shell?.act('quit') ?? Promise.resolve())
+      .catch(() => undefined)
+      .finally(() => {
+        recoveryWindow?.destroy()
+        shutdownComplete = true
+        // The stop chain has completed (Host stopped, lease released); a
+        // prevented-then-reissued quit can be swallowed by Electron, so exit
+        // explicitly from here.
+        app.exit(0)
+      })
   })
   app.on('window-all-closed', () => app.quit())
   void app
@@ -264,6 +329,7 @@ else {
       smokeReport({ kind: 'failed', stage: 'startup' })
       if (smokeMode !== undefined) {
         shutdownStarted = true
+        recoveryWindow?.destroy()
         app.exit(1)
       }
     })

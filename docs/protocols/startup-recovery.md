@@ -33,4 +33,4 @@ launcher 侧阶段：`lease`（M1 lease 错误码）、`reconcile-profile`（pro
 2. 本次 reconcile 确实修改了 profile；
 3. 失败 category ∈ { profile-write, profile-composition }。
 
-其余一切失败（lease、home-config、credentials、network、runtime、renderer、native-ui、unknown）保持用户数据原样，进入恢复窗口（M2 Task 3）由用户选择重试、Safe Mode 或退出；每窗口的自动恢复 relaunch 上限为一次。
+其余一切失败（lease、home-config、credentials、network、runtime、renderer、native-ui、unknown）保持用户数据原样，进入恢复窗口（ADR-0007）由用户选择重试、Safe Mode 或退出。重试预算：滚动 60 秒窗口内手动重试至多 3 次；post-ready 崩溃不自动重启；恢复窗口存活期间不持 lease（失败链已按协议 stop→确认→释放）。lease 获取失败不进恢复窗口——保持入口生命周期行为（Desktop 对话框+退出 1，CLI 退出码 3）。Safe Mode 在 Task 5 前不可选（`safeModeAllowed=false`）。

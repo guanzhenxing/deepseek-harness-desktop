@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' recovery-view.js; style-src 'unsafe-inline'"
+    />
+    <title>DeepSeek Harness Desktop — 恢复</title>
+    <style>
+      body {
+        font-family: -apple-system, system-ui, sans-serif;
+        margin: 2rem;
+        max-width: 40rem;
+        color: #d8d8d8;
+        background: #1e1e20;
+      }
+      code {
+        background: #2c2c30;
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+      }
+      .actions {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 0.75rem;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1.25rem;
+      }
+      .muted {
+        color: #8f8f95;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>启动失败</h1>
+    <p>阶段 <code id="failure-stage"></code>，错误 <code id="failure-code"></code>：</p>
+    <pre id="failure-summary"></pre>
+    <p class="muted">你的数据没有被本次启动修改；恢复操作只影响本次会话。</p>
+    <p id="doctor-command" style="display: none">
+      锁残留时可在完全退出后运行：<code id="doctor-command-text"></code>
+    </p>
+    <div class="actions">
+      <button id="action-retry" type="button">重试</button>
+      <button id="action-safe-mode" type="button" style="display: none">安全模式</button>
+      <button id="action-quit" type="button">退出</button>
+    </div>
+    <script src="recovery-view.js" defer></script>
+  </body>
+</html>

@@ -22,4 +22,15 @@ export default tseslint.config(
     files: ['**/*.mjs', '**/*.js'],
     languageOptions: { globals: { console: 'readonly', process: 'readonly', URL: 'readonly' } },
   },
+  {
+    // Sandboxed CommonJS preload (Electron ESM limitation) and the recovery
+    // renderer are intentionally plain scripts with DOM/require globals.
+    files: ['apps/desktop-launcher/src/recovery-preload.cts'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+    languageOptions: { globals: { require: 'readonly' } },
+  },
+  {
+    files: ['apps/desktop-launcher/src/recovery-view.js'],
+    languageOptions: { globals: { document: 'readonly', window: 'readonly' } },
+  },
 )
