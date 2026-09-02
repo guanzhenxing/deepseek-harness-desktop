@@ -493,6 +493,8 @@ catalog、overrides 和 lock 文件由脚本生成与校验，禁止手工维护
 
 ### 7.4 版本所有权与兼容性清单
 
+M0 已建立 [`compatibility.json`](compatibility.json) 作为首份机器可读清单。当前清单状态为 `development-source-smoke`；M3 才加入安装制品、平台矩阵和制品 SHA-256。
+
 Desktop 发行版同时涉及四条独立版本轴：
 
 | 版本轴 | 所有者 | 升级风险 |
@@ -585,15 +587,17 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ## 10. 实施里程碑
 
-### M0：独立最小闭环（3–5 天）
+### M0：独立最小闭环（已于 2026-09-02 完成源码级验收）
 
 - 建立 workspace、`apps/desktop-launcher`、`packages/desktop-plugin`、`packages/desktop-contracts`、`packages/host-supervisor`、`packages/profile-manager` 与 `packages/shell-core`。`desktop-recovery-bridge` 是 E3 前置交付，不在 M0 实现。
 - 实现独立 Host runner、私有控制通道、结构化握手、稳定性窗口与有界关停；Electron Main 不直接调用 DSH `boot()`。
 - 在 `profile-manager` 实现并测试 `reconcileDesktopProfile()`：初始化缺失 profile，修复本项目拥有的 bundle 前缀，并保留第三方 bundle。
 - 以本项目为唯一 source of truth 实现 Desktop 插件、Electron 自举和通用 shell 机制，不引入其他产品的领域行为或运行时依赖。
-- 仍使用隔离测试 home，跑通 `smoke:dsh-ui`。
+- 仍使用 Electron `userData/m0-dsh-home` 隔离 home，跑通 `smoke:dsh-ui` 与 `smoke:host-crash`；不读写 `~/.dsh`。
 
 验收：新建与已有 `desktop` profile 都通过 Electron-independent `profile-manager` 的 reconcile 测试；独立 Host 子进程加载 `desktop-plugin`，插件经窄化且 publisher-neutral 的 `desktopSurface` 控制契约调度官方 DSH UI；终止 Host 不会同时终止 Electron 壳。
+
+完成证据：Host-control 1.0、profile reconcile、bundle、监督器和 shell-core 单元测试；真实 DSH 独立 PID 集成测试；官方 UI 与 Host crash 两条 Electron smoke。M0 未包含 home lease、Safe Mode、安装包或发布能力。
 
 ### M1：共享 home 与单 Host（1–1.5 天）
 

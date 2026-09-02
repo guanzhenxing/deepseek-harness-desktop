@@ -1,7 +1,7 @@
 # 架构
 
-- 状态：M0 实施基线
-- 日期：2026-09-01
+- 状态：M0 已实现
+- 日期：2026-09-02
 - 决策来源：[ADR 索引](adr/README.md)
 - 详细里程碑：[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)
 
@@ -17,6 +17,18 @@
 4. 市场、远程和更新以后可以作为独立能力加入，而不扩张成通用 `desktopRuntime`。
 
 ## 2. 系统上下文
+
+M0 当前运行路径：
+
+```text
+Electron desktop-launcher
+├── sandboxed BrowserWindow
+├── profile-manager → userData/m0-dsh-home/profiles/desktop
+└── host-supervisor → utilityProcess
+    └── Host runner → DSH + desktop-plugin → official Web UI
+```
+
+v1 目标路径在 M1 增加 `home-lease` 与共享 `~/.dsh`，在 M2 增加恢复投影，在 M3 增加安装制品：
 
 ```text
 macOS
@@ -60,7 +72,7 @@ Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host run
 - 解析产品配置；
 - 调用 `shell-core` 编排启动、窗口、恢复和关停；
 - 提供 boot-independent 的最低恢复/更新 UI；
-- 不导入 DSH Host 包或第三方插件。
+- Electron Main 只导入监督器根入口，不导入 DSH Host 包或第三方插件；专用 `host-entry` subpath 在 utility process 内导入 Host runner。
 
 ### 4.2 DSH 插件
 
@@ -93,6 +105,7 @@ Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host run
 - 建立私有控制通道；
 - 验证握手、Host 身份、稳定性窗口和有界关停；
 - 把 Host 异常转化为结构化状态，不直接拥有窗口或 profile。
+- 根 export 只暴露监督器；DSH Host runner 只能从 `./host-runner` subpath 导入，防止 Electron Main 间接求值 DSH。
 
 `packages/profile-manager`：
 
@@ -137,6 +150,8 @@ desktop-recovery-bridge
 
 ## 5. 正常启动
 
+下列是 v1 目标顺序；M0 跳过 lease，并把 home 固定在 Electron `userData/m0-dsh-home`：
+
 ```text
 launcher identity/single-instance
 → resolve DSH home
@@ -180,6 +195,8 @@ Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依�
 | 原生能力协议 | `desktop-contracts/<capability>` | Host proxy 与 launcher adapter |
 | 发行版兼容范围 | machine-readable compatibility manifest | launcher、updater、诊断与文档生成 |
 
+M0 的机器可读事实见 [`compatibility.json`](compatibility.json)。该文件描述源码 smoke，不代表 `.app`/DMG 已打包或签名。
+
 路径、备份和迁移规则见[数据布局](data-layout.md)。
 
 ## 8. 扩展规则
@@ -216,4 +233,3 @@ Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依�
 改变进程边界、状态权威、信任边界、持久化格式或公共协议 major version 时必须新建 ADR。可逆的内部实现调整记录在对应 issue/spec 和测试中，不为每次重构建立 ADR。
 
 开发、审查和发布流程见[开发指南](development.md)。
-

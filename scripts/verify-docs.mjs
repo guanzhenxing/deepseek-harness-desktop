@@ -10,6 +10,7 @@ const requiredDocuments = [
   'docs/architecture.md',
   'docs/data-layout.md',
   'docs/development.md',
+  'docs/compatibility.json',
   'docs/protocols/host-control.md',
   'docs/adr/README.md',
 ]
@@ -28,6 +29,43 @@ const ignoredDirectories = new Set([
 ])
 
 const errors = []
+
+async function verifyCompatibilityManifest() {
+  const compatibilityPath = path.join(repositoryRoot, 'docs', 'compatibility.json')
+  const rootManifestPath = path.join(repositoryRoot, 'package.json')
+  const launcherManifestPath = path.join(repositoryRoot, 'apps', 'desktop-launcher', 'package.json')
+  const hostManifestPath = path.join(repositoryRoot, 'packages', 'host-supervisor', 'package.json')
+  if (!(await exists(compatibilityPath))) return
+  try {
+    const compatibility = JSON.parse(await readFile(compatibilityPath, 'utf8'))
+    const rootManifest = JSON.parse(await readFile(rootManifestPath, 'utf8'))
+    const launcherManifest = JSON.parse(await readFile(launcherManifestPath, 'utf8'))
+    const hostManifest = JSON.parse(await readFile(hostManifestPath, 'utf8'))
+    const expected = {
+      desktopVersion: rootManifest.version,
+      electron: launcherManifest.devDependencies?.electron,
+      pnpm: rootManifest.packageManager?.replace(/^pnpm@/u, ''),
+      nodeEngines: rootManifest.engines?.node,
+      dshNpmVersion: hostManifest.dependencies?.['@deepseek-ai/dsh'],
+    }
+    const actual = {
+      desktopVersion: compatibility.desktopVersion,
+      electron: compatibility.electron,
+      pnpm: compatibility.pnpm,
+      nodeEngines: compatibility.node?.engines,
+      dshNpmVersion: compatibility.dsh?.npmVersion,
+    }
+    for (const key of Object.keys(expected)) {
+      if (actual[key] !== expected[key]) {
+        errors.push(
+          `docs/compatibility.json: ${key} is ${JSON.stringify(actual[key])}, expected ${JSON.stringify(expected[key])}`,
+        )
+      }
+    }
+  } catch (error) {
+    errors.push(`docs/compatibility.json: cannot validate manifest: ${error.message}`)
+  }
+}
 
 async function exists(filePath) {
   try {
@@ -115,6 +153,7 @@ for (const relativePath of requiredDocuments) {
 
 const markdownFiles = await collectMarkdownFiles(repositoryRoot)
 await Promise.all(markdownFiles.map(verifyMarkdownFile))
+await verifyCompatibilityManifest()
 
 if (errors.length > 0) {
   console.error(`Documentation check failed with ${errors.length} error(s):`)
@@ -123,4 +162,3 @@ if (errors.length > 0) {
 } else {
   console.log(`Documentation check passed (${markdownFiles.length} Markdown files).`)
 }
-

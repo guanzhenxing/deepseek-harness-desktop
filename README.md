@@ -4,7 +4,9 @@ DeepSeek Harness Desktop 是面向 macOS 个人本机使用的原生 DSH 桌面�
 
 ## 当前状态
 
-pre-M0 架构与仓库基线已经完成，M0 功能实现尚未开始。当前仓库包含设计、协议、数据、安全和开发流程文档，以及验证这些文档的 CI 骨架；还没有可运行的 Electron 应用。
+M0 独立最小闭环已经实现：Electron launcher 在独立 `utilityProcess` 中启动 DSH Host，`desktop` bundle 插件通过 Host-control 1.0 发布 authenticated loopback surface，BrowserWindow 加载官方 DSH Web UI；Host 被终止后 launcher 保持存活并显示自有恢复页。
+
+M0 仍是开发源码入口，只使用 Electron `userData/m0-dsh-home` 下的隔离 home，不读取或修改 `~/.dsh`。共享 home/配套 CLI 属于 M1，Safe Mode 与修订恢复属于 M2，`.app`/DMG 打包属于 M3；当前结果不应作为日用版安装。
 
 v1 目标：
 
@@ -32,12 +34,13 @@ v1 的受支持入口遵循整份 home 单 Host 规则：
 
 ```text
 Electron launcher
-  → home-lease
-  → profile-manager
+  → profile-manager (M0 isolated home)
   → host-supervisor
-      → isolated DSH Host
+      → independent DSH Host
           → desktop-plugin
           → official DSH Web UI
+
+M1 adds: home-lease + shared ~/.dsh + supported CLI
 ```
 
 正常 Desktop 产品逻辑属于 `desktop-plugin`；进程创建、boot 前 lease、Electron 资源和 boot-independent 恢复属于 launcher。第三方 DSH 插件与 Host 同权运行，独立 Host 进程是故障边界而不是权限 sandbox。
@@ -48,13 +51,15 @@ Electron launcher
 - pnpm：11.7.0；
 - DSH：[`dsh-v0.1.2-alpha.3`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.3)，commit [`dd6322d604e00eec1ba5e0c8541159906a21094a`](https://github.com/deepseek-ai/deepseek-harness/commit/dd6322d604e00eec1ba5e0c8541159906a21094a)。
 
-该 DSH tag 已在 2026-09-01 进入 pre-M0 前重新检查；当时没有更新的 `dsh-v*` tag。M0 正式引入依赖时仍以 lockfile 和 compatibility manifest 为版本权威。
+机器可读版本权威是 [`docs/compatibility.json`](docs/compatibility.json) 与 lockfile；Markdown 中的版本只用于说明，不独立决定兼容性。
 
 安装并运行当前门禁：
 
 ```bash
 corepack pnpm@11.7.0 install --frozen-lockfile
 corepack pnpm@11.7.0 check
+corepack pnpm@11.7.0 smoke:dsh-ui
+corepack pnpm@11.7.0 smoke:host-crash
 ```
 
 ## 文档
@@ -65,6 +70,7 @@ corepack pnpm@11.7.0 check
 - [数据布局](docs/data-layout.md)：路径、所有权、恢复和迁移；
 - [安全策略](SECURITY.md)：威胁模型与未来能力进入条件；
 - [开发指南](docs/development.md)：分支、测试、审查和发布流程；
+- [兼容性清单](docs/compatibility.json)：M0 的 Desktop、DSH、Electron、Node、pnpm 与协议版本事实；
 - [ADR 索引](docs/adr/README.md)：已接受的架构决策。
 
 ## 仓库结构
@@ -73,12 +79,11 @@ corepack pnpm@11.7.0 check
 .github/workflows/   # CI 门禁
 docs/                # 方案、架构、协议、ADR 和开发文档
 scripts/             # 仓库验证与后续构建脚本
-apps/                # M0 开始后建立应用入口
-packages/            # M0 开始后建立机制包和 DSH 插件
-tests/               # M0 开始后建立隔离 fixture、集成和冒烟测试
+apps/                # Electron launcher 与独立 Host 入口
+packages/            # 契约、profile、插件、监督器与 shell-core
+tests/               # 隔离 home 的源码级桌面冒烟
 ```
 
 ## 许可证
 
 当前仓库是个人使用、未公开发行的私有项目，根 package 标记为 `UNLICENSED`。公开发布或接受外部贡献前必须明确许可证，并记录任何直接移植代码的第三方版权与许可。
-

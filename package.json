@@ -13,11 +13,11 @@
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit && pnpm run check:docs",
     "check:boundaries": "node scripts/verify-boundaries.mjs",
     "check:docs": "node scripts/verify-docs.mjs",
-    "format:check": "prettier --check eslint.config.js vitest.config.ts vitest.integration.config.ts scripts/verify-boundaries.mjs scripts/verify-boundaries.test.mjs \"{apps,packages}/**/*.{ts,json}\" --ignore-unknown --no-error-on-unmatched-pattern",
+    "format:check": "prettier --check eslint.config.js vitest.config.ts vitest.integration.config.ts docs/compatibility.json scripts/*.mjs tests/smoke/*.mjs \"{apps,packages}/**/*.{ts,json}\" --ignore-unknown --no-error-on-unmatched-pattern",
     "lint": "eslint . && pnpm run check:boundaries",
     "smoke:dsh-ui": "node tests/smoke/dsh-ui.mjs",
     "smoke:host-crash": "node tests/smoke/host-crash.mjs",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration": "pnpm run build && vitest run --config vitest.integration.config.ts",
     "test:unit": "node --test scripts/verify-boundaries.test.mjs && vitest run",
     "typecheck": "tsc -b --force --pretty false"
   },

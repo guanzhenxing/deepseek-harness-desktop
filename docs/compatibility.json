@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "milestone": "M0",
+  "status": "development-source-smoke",
+  "desktopVersion": "0.0.0",
+  "dsh": {
+    "tag": "dsh-v0.1.2-alpha.3",
+    "commit": "dd6322d604e00eec1ba5e0c8541159906a21094a",
+    "npmVersion": "0.1.2-alpha.3"
+  },
+  "electron": "44.1.0",
+  "node": {
+    "engines": "^22.19.0 || >=24.0.0",
+    "ci": "24.11.1",
+    "localSmoke": "26.3.0"
+  },
+  "pnpm": "11.7.0",
+  "hostControl": {
+    "name": "dsh-desktop/host-control",
+    "major": 1,
+    "minor": 0
+  },
+  "profile": {
+    "name": "desktop",
+    "schemaVersion": 1,
+    "m0HomePolicy": "electron-userData-isolated"
+  },
+  "verification": [
+    {
+      "date": "2026-09-02",
+      "os": "darwin",
+      "arch": "arm64",
+      "artifact": "development-source",
+      "smokes": ["dsh-ui", "host-crash"]
+    }
+  ]
+}

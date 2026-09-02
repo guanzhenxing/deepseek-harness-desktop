@@ -1,11 +1,11 @@
 # 开发指南
 
-- 状态：M0 进入流程
-- 日期：2026-09-01
+- 状态：M0 已实现，进入 M1 前审查
+- 日期：2026-09-02
 
 ## 1. 当前阶段
 
-仓库已完成 pre-M0 的架构、协议、数据、安全和流程基线。M0 尚未实现 Electron 或 DSH 功能代码。
+仓库已完成 M0 独立最小闭环。当前开发入口使用隔离 home，尚未实现共享 `~/.dsh`、home lease、配套 CLI、Safe Mode、安装包或发布流程。
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 
@@ -32,21 +32,20 @@ corepack pnpm@11.7.0 check
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm check:docs` | 检查必需文档、本地链接、尾随空白和最终换行 |
-| `pnpm check` | 当前仓库总门禁；pre-M0 等同于文档检查 |
-
-M0 加入代码时，根 workspace 统一增加并维护以下入口：
-
 | 命令 | 要求 |
 | --- | --- |
+| `pnpm build` | 构建全部 TypeScript project references |
 | `pnpm format:check` | 检查格式但不修改文件 |
 | `pnpm lint` | 静态规则与依赖边界 |
 | `pnpm typecheck` | Host、client 与脚本 TypeScript 类型检查 |
 | `pnpm test:unit` | 纯函数、schema、state machine 和组件单元测试 |
-| `pnpm test:integration` | 独立 Host、profile、lease 和共享 home fixture |
-| `pnpm smoke:dsh-ui` | 开发产物的最小官方 DSH UI 闭环 |
-| `pnpm smoke:package` | 安装后的 `.app`/DMG 冒烟 |
+| `pnpm test:integration` | 构建后用隔离 home 启动真实 DSH Host 和官方 Web surface |
+| `pnpm smoke:dsh-ui` | 独立 Electron/Host PID 的最小官方 DSH UI 闭环 |
+| `pnpm smoke:host-crash` | 只终止 Host，验证 launcher 恢复页与最终无残留进程 |
+| `pnpm check:docs` | 检查必需文档、兼容性事实、本地链接与文本格式 |
 | `pnpm check` | 合并当前阶段要求的全部快速阻塞门禁 |
+
+`pnpm smoke:package` 在 M3 建立；在此之前不能把源码 smoke 描述成安装包验收。
 
 命令名是仓库契约；package 内部脚本可以变化，但 CI 和开发文档不引用临时实现路径。
 
@@ -163,7 +162,7 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 | `docs/data-layout.md` | 路径、所有权、备份和迁移 | 新持久化状态或迁移出现 |
 | `SECURITY.md` | 威胁模型和安全进入条件 | 信任边界、公开发行或报告流程变化 |
 
-版本事实只从依赖锁或 machine-readable compatibility manifest 生成。不要在多个 Markdown 文件中手工维护不同的“当前版本”。
+版本事实只从依赖锁或 [`compatibility.json`](compatibility.json) 生成。不要在多个 Markdown 文件中手工维护不同的“当前版本”。
 
 `pnpm check:docs` 必须随新增文档继续验证本地链接和格式。
 
@@ -182,15 +181,13 @@ v1 只发布本机候选 DMG：
 
 公开分发前必须另立 ADR，完成 Developer ID、hardened runtime、notarization、正式许可证、隐私说明、安全联系和更新通道。
 
-## 9. M0 进入条件
+## 9. M0 完成证据
 
-开始 M0 前必须同时满足：
+- `desktop-contracts`、`profile-manager`、`desktop-plugin`、`host-supervisor` 与 `shell-core` 均有自动测试；
+- Electron Main 的监督器根入口不导出 Host runner，只有独立 `host-entry` 加载 DSH；
+- `pnpm test:integration` 从独立 Node PID 验证 authenticated official boot graph；
+- `pnpm smoke:dsh-ui` 验证官方 modules、侧栏、会话输入区域和设置入口；
+- `pnpm smoke:host-crash` 验证 Host 崩溃不带走 launcher，并验证最终无残留 PID；
+- 所有测试和开发启动使用显式隔离 home，不触碰默认 DSH home。
 
-- Git、Node、pnpm、lockfile 和 CI 文档门禁可复现；
-- ADR-0001 至 ADR-0004 已接受并有索引；
-- Safe Mode surface 不依赖正常 `desktop-plugin`；
-- `profile-manager` 是独立 Electron-free 边界；
-- Host-control 1.0 已定义消息、状态机、协商和测试；
-- 数据、安全和开发规则已发布；
-- `pnpm check` 通过且 Git 工作区干净。
-
+进入 M1 时必须先保持这些证据继续通过，再引入 home lease 和共享数据测试。
