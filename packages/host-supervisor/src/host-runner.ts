@@ -53,6 +53,39 @@ export type DshHostHandle = Readonly<{
   dispose(): Promise<void>
 }>
 
+/**
+ * Marks where in the boot sequence an error was captured. The stage/code pair
+ * travels on the fatal envelope so the launcher can classify locally without
+ * guessing from message words.
+ */
+class StagedBootError extends Error {
+  readonly stage: string
+  readonly code: string
+  readonly retryable: boolean
+
+  constructor(stage: string, code: string, retryable: boolean, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'StagedBootError'
+    this.stage = stage
+    this.code = code
+    this.retryable = retryable
+  }
+}
+
+async function staged<Value>(
+  stage: string,
+  code: string,
+  retryable: boolean,
+  operation: () => Promise<Value>,
+): Promise<Value> {
+  try {
+    return await operation()
+  } catch (error) {
+    if (error instanceof StagedBootError) throw error
+    throw new StagedBootError(stage, code, retryable, error)
+  }
+}
+
 const PROFILE_ROOT_CONFIG = `# dsh desktop profile root; compose through bundle and user patch layers.
 []
 `
@@ -218,40 +251,57 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
     process.env.DSH_HOME = options.home
 
     const installAnchor = options.installAnchor ?? DSH_INSTALL_ANCHOR
-    runtimeRoot = await createRuntimeRoot(options.home)
+    // Named boot stages, classified at the capture site: runtime resolution
+    // (neutral launch root, fallback healing, bundle projections), profile
+    // resolution, home patch parsing, the Cordis boot itself, and surface
+    // publication. Attribution no stage can make stays BOOT_FAILED/unknown.
+    await staged('resolve-runtime', 'RUNTIME_UNAVAILABLE', true, async () => {
+      runtimeRoot = await createRuntimeRoot(options.home)
+      // Product composition belongs to the caller. These shared fallbacks only
+      // mirror the two installed closures; neither writes the named profile.
+      for (const anchor of new Set([installAnchor, options.productInstallAnchor])) {
+        await healProfilesModuleFallback({ installAnchor: anchor, home: options.home })
+      }
+    })
+    if (runtimeRoot === undefined) throw new Error('launch root was not created')
+    const launchDir = runtimeRoot.dir
     // Keep the Host cwd inside the neutral launch root so workspace/config
     // discovery never walks up into the launcher's project directory.
-    process.chdir(runtimeRoot.dir)
-    // Product composition belongs to the caller. These shared fallbacks only
-    // mirror the two installed closures; neither writes the named profile.
-    for (const anchor of new Set([installAnchor, options.productInstallAnchor])) {
-      await healProfilesModuleFallback({ installAnchor: anchor, home: options.home })
-    }
-    const profile = loadProfile('dsh-desktop', options.profileName, installAnchor, options.home)
-    // Keep the transient Cordis root outside the named profile while retaining
-    // Node's parent-directory lookup for the shared profiles/node_modules fallback.
-    const rootConfigPath = path.join(runtimeRoot.dir, PROFILE_ROOT_FILENAME)
-    await writeFile(rootConfigPath, PROFILE_ROOT_CONFIG, { mode: 0o600 })
-    await healProfilesModuleFallback({
-      installAnchor,
-      profile: { ...profile, dir: runtimeRoot.dir },
-      home: options.home,
-    })
-    // Upstream projects bundle dependencies but excludes the bundles themselves:
-    // they normally already live in profile/node_modules. Our neutral root must
-    // also project those selected packages, without touching the source profile.
-    for (const [packageName, packageDir] of new Map(
-      profile.layers.map((layer) => [layer.packageName, layer.packageDir]),
-    )) {
-      if (!/^(?:@[a-z\d][a-z\d._-]*\/)?[a-z\d][a-z\d._-]*$/iu.test(packageName)) {
-        throw new Error('Selected bundle must use a valid package name')
+    process.chdir(launchDir)
+    const profile = await staged('resolve-profile', 'PROFILE_INVALID', false, async () =>
+      loadProfile('dsh-desktop', options.profileName, installAnchor, options.home),
+    )
+    const rootConfigPath = path.join(launchDir, PROFILE_ROOT_FILENAME)
+    await staged('resolve-runtime', 'RUNTIME_UNAVAILABLE', true, async () => {
+      // Keep the transient Cordis root outside the named profile while retaining
+      // Node's parent-directory lookup for the shared profiles/node_modules fallback.
+      await writeFile(rootConfigPath, PROFILE_ROOT_CONFIG, { mode: 0o600 })
+      await healProfilesModuleFallback({
+        installAnchor,
+        profile: { ...profile, dir: launchDir },
+        home: options.home,
+      })
+      // Upstream projects bundle dependencies but excludes the bundles themselves:
+      // they normally already live in profile/node_modules. Our neutral root must
+      // also project those selected packages, without touching the source profile.
+      for (const [packageName, packageDir] of new Map(
+        profile.layers.map((layer) => [layer.packageName, layer.packageDir]),
+      )) {
+        if (!/^(?:@[a-z\d][a-z\d._-]*\/)?[a-z\d][a-z\d._-]*$/iu.test(packageName)) {
+          throw new Error('Selected bundle must use a valid package name')
+        }
+        const link = path.join(launchDir, 'node_modules', packageName)
+        await mkdir(path.dirname(link), { recursive: true })
+        await symlink(realpathSync.native(packageDir), link, 'dir')
       }
-      const link = path.join(runtimeRoot.dir, 'node_modules', packageName)
-      await mkdir(path.dirname(link), { recursive: true })
-      await symlink(realpathSync.native(packageDir), link, 'dir')
-    }
-    const homePatches =
-      loadOptionalPatches('dsh-desktop', path.join(options.home, 'cordis.patch.yml')) ?? []
+    })
+    const homePatches = await staged(
+      'load-home-patch',
+      'HOME_PATCH_INVALID',
+      false,
+      async () =>
+        loadOptionalPatches('dsh-desktop', path.join(options.home, 'cordis.patch.yml')) ?? [],
+    )
     const patches = structuredClone([
       ...profile.layers.flatMap((layer) => layer.patches),
       ...profile.patches,
@@ -272,18 +322,28 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
       },
     }
 
-    context = await boot('dsh-desktop', rootConfigPath, patches, (hostContext) => {
-      context = hostContext
-      contextReady.resolve(hostContext)
-      hostContext.provide('desktopSurface', desktopSurface)
-      hostContext.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
-      provideCmdline(hostContext, {
-        args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
-        exit: () => void disposeHost(false),
-      })
-    })
-    if (surfaceId === undefined) throw new Error('desktop-plugin did not publish a surface')
-    options.transport.postMessage(writer.next({ kind: 'ready', surfaceId }))
+    context = await staged('boot', 'BOOT_FAILED', true, () =>
+      boot('dsh-desktop', rootConfigPath, patches, (hostContext) => {
+        context = hostContext
+        contextReady.resolve(hostContext)
+        hostContext.provide('desktopSurface', desktopSurface)
+        hostContext.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
+        provideCmdline(hostContext, {
+          args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
+          exit: () => void disposeHost(false),
+        })
+      }),
+    )
+    const publishedSurfaceId = await staged(
+      'publish-surface',
+      'SURFACE_MISSING',
+      false,
+      async () => {
+        if (surfaceId === undefined) throw new Error('desktop-plugin did not publish a surface')
+        return surfaceId
+      },
+    )
+    options.transport.postMessage(writer.next({ kind: 'ready', surfaceId: publishedSurfaceId }))
     return Object.freeze({
       disposed: disposed.promise.finally(removeMessageListener),
       dispose: () => disposeHost(false),
@@ -300,13 +360,15 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
       home: options.home,
     }).slice(0, 1024)
     if (!isDisposing()) {
+      const stagedDetail =
+        error instanceof StagedBootError
+          ? { stage: error.stage, code: error.code, retryable: error.retryable }
+          : { stage: 'boot', code: 'BOOT_FAILED', retryable: true }
       options.transport.postMessage(
         writer.next({
           kind: 'fatal',
-          stage: 'boot',
-          code: 'BOOT_FAILED',
+          ...stagedDetail,
           summary: summary === '' ? 'DSH Host boot failed' : summary,
-          retryable: true,
         }),
       )
     }

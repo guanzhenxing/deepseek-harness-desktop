@@ -107,6 +107,12 @@ function fixture(options: { stabilityMs?: number; startupTimeoutMs?: number } = 
   const process = new FakeProcess()
   const lease = new RecordingLease()
   const events: string[] = []
+  const fatalEvents: {
+    stage: string
+    code: string
+    summary: string
+    retryable: boolean
+  }[] = []
   const supervisor = new HostSupervisor({
     factory: {
       async spawnWaiting() {
@@ -117,9 +123,12 @@ function fixture(options: { stabilityMs?: number; startupTimeoutMs?: number } = 
     stabilityMs: options.stabilityMs ?? 0,
     startupTimeoutMs: options.startupTimeoutMs ?? 10_000,
     terminateGraceMs: 100,
-    onEvent: (event) => events.push(event.kind),
+    onEvent: (event) => {
+      events.push(event.kind)
+      if (event.kind === 'failed' && event.fatal !== undefined) fatalEvents.push(event.fatal)
+    },
   })
-  return { events, lease, process, supervisor }
+  return { events, fatalEvents, lease, process, supervisor }
 }
 
 function startRequest(lease: RecordingLease) {
@@ -290,6 +299,27 @@ describe('HostSupervisor', () => {
     setup.process.emitExit(1)
     await expect(started).rejects.toMatchObject({ code: 'BOOT_FAILED' })
     await vi.waitFor(() => expect(setup.lease.calls).toContain('confirmHostExited'))
+  })
+
+  it('preserves the fatal stage and code instead of flattening to BOOT_FAILED', async () => {
+    const setup = fixture()
+    const { hostWriter, started } = await startAndHello(setup)
+    setup.process.emitMessage(
+      hostWriter.next({
+        kind: 'fatal',
+        stage: 'load-home-patch',
+        code: 'HOME_PATCH_INVALID',
+        summary: 'yaml is not a patch list',
+        retryable: false,
+      }),
+    )
+    await expect(started).rejects.toMatchObject({ code: 'BOOT_FAILED' })
+    expect(setup.fatalEvents[0]).toEqual({
+      stage: 'load-home-patch',
+      code: 'HOME_PATCH_INVALID',
+      summary: 'yaml is not a patch list',
+      retryable: false,
+    })
   })
 
   it('keeps the supervisor alive and reports HOST_CRASHED after ready', async () => {

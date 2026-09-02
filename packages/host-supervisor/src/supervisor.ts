@@ -43,12 +43,35 @@ export interface HostProcessFactory {
 export type HostSupervisorState =
   'idle' | 'starting' | 'healthy' | 'draining' | 'stopped' | 'failed'
 
+/** The Host's own fatal facts, preserved instead of collapsing to BOOT_FAILED. */
+export type HostFatalDetail = Readonly<{
+  stage: string
+  code: string
+  summary: string
+  retryable: boolean
+}>
+
+/**
+ * Carries the Host's fatal envelope detail through to the launcher-side
+ * failure classifier instead of flattening it into a bare BOOT_FAILED.
+ */
+class FatalHostControlError extends HostControlError {
+  constructor(
+    code: 'BOOT_FAILED',
+    message: string,
+    readonly fatal: HostFatalDetail,
+  ) {
+    super(code, message)
+    this.name = 'FatalHostControlError'
+  }
+}
+
 export type HostSupervisorEvent =
   | { kind: 'starting'; pid: number }
   | { kind: 'healthy'; pid: number }
   | { kind: 'crashed'; error: HostControlError }
   | { kind: 'stopped' }
-  | { kind: 'failed'; error: HostControlError }
+  | { kind: 'failed'; error: HostControlError; fatal?: HostFatalDetail }
 
 export type HostReady = Readonly<{
   pid: number
@@ -309,8 +332,15 @@ export class HostSupervisor {
           this.#emit({ kind: 'healthy', pid: this.#process.pid })
         }, this.#options.stabilityMs)
         return
-      case 'fatal':
-        throw new HostControlError('BOOT_FAILED', message.summary)
+      case 'fatal': {
+        const fatal: HostFatalDetail = {
+          stage: message.stage,
+          code: message.code,
+          summary: message.summary,
+          retryable: message.retryable,
+        }
+        throw new FatalHostControlError('BOOT_FAILED', message.summary, fatal)
+      }
       case 'dispose-ack':
       case 'phase':
         return
@@ -358,7 +388,11 @@ export class HostSupervisor {
     this.#clearTimers()
     this.state = 'failed'
     this.#ready.reject(error)
-    this.#emit({ kind: 'failed', error })
+    this.#emit({
+      kind: 'failed',
+      error,
+      ...(error instanceof FatalHostControlError ? { fatal: error.fatal } : {}),
+    })
     this.#terminateFailedProcess()
   }
 

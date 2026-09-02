@@ -10,7 +10,7 @@ ADR 记录本项目难以无成本撤销、会约束后续实现的架构决策�
 | [ADR-0002：使用最小第一方 recovery bridge 发布 Safe Mode surface](0002-use-a-minimal-recovery-bridge.md) | 已接受 | 解决 Safe Mode 不加载正常 Desktop 插件时的 surface handoff  |
 | [ADR-0003：以独立 profile-manager 统一拥有 profile 状态](0003-separate-profile-manager.md)               | 已接受 | profile reconcile、恢复、Safe Mode 与 generation 的唯一权威 |
 | [ADR-0004：按原生能力独立定义和版本化跨进程契约](0004-version-native-capabilities-independently.md)      | 已接受 | capability subpath、协议演进和敏感操作确认                  |
-| [ADR-0005：以进程启动身份与短临界区 guard 实现整 home lease](0005-home-lease-process-identity.md)         | 已接受 | 共享 home 互斥、owner 身份与 doctor 清理边界                |
+| [ADR-0005：以进程启动身份与短临界区 guard 实现整 home lease](0005-home-lease-process-identity.md)        | 已接受 | 共享 home 互斥、owner 身份与 doctor 清理边界                |
 
 ## 状态
 
