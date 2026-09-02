@@ -4,9 +4,9 @@ DeepSeek Harness Desktop 是面向 macOS 个人本机使用的原生 DSH 桌面�
 
 ## 当前状态
 
-M0 独立最小闭环已经实现：Electron launcher 在独立 `utilityProcess` 中启动 DSH Host，`desktop` bundle 插件通过 Host-control 1.0 发布 authenticated loopback surface，BrowserWindow 加载官方 DSH Web UI；Host 被终止后 launcher 保持存活并显示自有恢复页。
+M1 共享 home 已完成源码级验收：Desktop 与配套 CLI `dsh-native` 顺序共享同一 DSH home，任何 Host boot、profile 写入前都必须先取得整 home lease（原子 `mkdir` 锁 + OS 进程启动身份 + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）。CLI 子进程在 lease 上登记 OS 身份并等待授权后才 import 官方 `@deepseek-ai/dsh` 入口；`dsh-native doctor --unlock` 在确认没有活跃 owner 后清理残留锁，不提供 force 绕过。双向会话接续（CLI 创建→Desktop 继续、Desktop 创建→CLI 继续）有真实官方 DSH 图 + mock LLM 的集成与冒烟证据。
 
-M0 仍是开发源码入口，只使用 Electron `userData/m0-dsh-home` 下的隔离 home，不读取或修改 `~/.dsh`。共享 home/配套 CLI 属于 M1，Safe Mode 与修订恢复属于 M2，`.app`/DMG 打包属于 M3；当前结果不应作为日用版安装。
+Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。当前仍是源码阶段：Safe Mode 与修订恢复属于 M2，`.app`/DMG 打包属于 M3，版本闭包与升级演练属于 M4；当前结果不应作为日用版安装。验收细节见 [M1 验收记录](docs/validation/m1-acceptance.md)。
 
 v1 目标：
 
@@ -25,22 +25,21 @@ v1 目标：
 
 v1 的受支持入口遵循整份 home 单 Host 规则：
 
-- Desktop 运行时，不启动另一个会写该 home 的 DSH Host，也不执行修改该 home/profile 的 `dsh plugin`；
-- 使用 CLI 管理或运行 DSH 前，先完全退出 Desktop；
-- M1 将提供持有相同 home lease 的 `dsh-native` 配套 CLI；
+- Desktop 运行时，`dsh-native` 的 boot 与 `plugin` 变更会被 home lease 拒绝（退出码 3）；反之亦然；不同 profile 不构成例外；
+- `dsh-native` 是唯一受本项目支持并遵守 lease 的 CLI；其他裸 `dsh` 不经过本项目拦截，使用前必须完全退出 Desktop 与 `dsh-native`；
+- 残留锁用 `dsh-native doctor --unlock` 在确认无活跃 owner 后清理；
 - 长期路线是一个 Host 被 Electron、本地 CLI 和授权远程客户端复用。
 
 ## 架构摘要
 
 ```text
-Electron launcher
-  → profile-manager (M0 isolated home)
+Electron launcher / dsh-native wrapper
+  → home-lease (whole-home writer lease)
+  → profile-manager (desktop profile reconcile)
   → host-supervisor
-      → independent DSH Host
+      → independent DSH Host (waits for boot authorization)
           → desktop-plugin
           → official DSH Web UI
-
-M1 adds: home-lease + shared ~/.dsh + supported CLI
 ```
 
 正常 Desktop 产品逻辑属于 `desktop-plugin`；进程创建、boot 前 lease、Electron 资源和 boot-independent 恢复属于 launcher。第三方 DSH 插件与 Host 同权运行，独立 Host 进程是故障边界而不是权限 sandbox。
@@ -57,17 +56,23 @@ M1 adds: home-lease + shared ~/.dsh + supported CLI
 
 ```bash
 corepack pnpm@11.7.0 install --frozen-lockfile
-corepack pnpm@11.7.0 check
+corepack pnpm@11.7.0 check            # format/lint/typecheck/单测/文档检查
+corepack pnpm@11.7.0 build:native     # 编译 lease helper（需要 Xcode CLT，macOS）
+corepack pnpm@11.7.0 test:integration
+corepack pnpm@11.7.0 test:shared-home # 双向共享 home 会话接续
 corepack pnpm@11.7.0 smoke:dsh-ui
 corepack pnpm@11.7.0 smoke:host-crash
+corepack pnpm@11.7.0 smoke:shared-home
+corepack pnpm@11.7.0 dsh-native -- --profile headless "..."   # 开发入口（持 lease）
 ```
 
 ## 文档
 
-- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；四份分阶段计划已编写，尚未实施；
+- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1 已实施并通过验收，M2–M4 待执行；
 - [实施方案](docs/native-dsh-desktop-plan.md)：v1 范围、里程碑、测试和扩展路线；
 - [架构](docs/architecture.md)：组件、进程、信任边界和依赖方向；
 - [Host-control 1.0](docs/protocols/host-control.md)：launcher/Host normative 协议；
+- [home-lease 协议](docs/protocols/home-lease.md)：整 home 写入互斥、owner 身份与 doctor 清锁（含 `dsh-native` 退出码）；
 - [数据布局](docs/data-layout.md)：路径、所有权、恢复和迁移；
 - [安全策略](SECURITY.md)：威胁模型与未来能力进入条件；
 - [开发指南](docs/development.md)：分支、测试、审查和发布流程；
@@ -80,9 +85,9 @@ corepack pnpm@11.7.0 smoke:host-crash
 .github/workflows/   # CI 门禁
 docs/                # 方案、架构、协议、ADR 和开发文档
 scripts/             # 仓库验证与后续构建脚本
-apps/                # Electron launcher 与独立 Host 入口
-packages/            # 契约、profile、插件、监督器与 shell-core
-tests/               # 隔离 home 的源码级桌面冒烟
+apps/                # Electron launcher、bundled CLI（dsh-native）与独立 Host 入口
+packages/            # 契约、product-config、home-lease、profile、插件、监督器与 shell-core
+tests/               # 隔离 home 的源码级桌面冒烟与共享 home driver
 ```
 
 ## 许可证

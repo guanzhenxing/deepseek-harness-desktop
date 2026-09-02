@@ -588,7 +588,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ## 10. 实施里程碑
 
-M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。这些计划以 M0 验收提交 `2f84e04` 为起点，编写计划不代表对应阶段已实现。
+M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。这些计划以 M0 验收提交 `2f84e04` 为起点；M1 已在该基线上实施并通过验收，M2–M4 尚未实施。
 
 ### M0：独立最小闭环（2026-09-02 完成源码级验收）
 
@@ -602,7 +602,7 @@ M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接
 
 完成证据：63 项单元测试、7 项依赖边界测试、6 项真实 DSH 集成测试，以及官方 UI 与 Host crash 两条 Electron smoke 全部通过；Standards 与 Spec 审查阻塞已关闭。详细记录见 [M0 实施计划](superpowers/plans/2026-09-01-m0-independent-minimal-loop.md#验收记录2026-09-02)。M0 未包含 home lease、Safe Mode、安装包或发布能力。
 
-### M1：共享 home 与单 Host
+### M1：共享 home 与单 Host（已完成源码级验收，见 [M1 验收记录](validation/m1-acceptance.md)）
 
 执行文档：[M1 Implementation Plan](superpowers/plans/2026-09-02-m1-shared-home-single-host.md)。
 

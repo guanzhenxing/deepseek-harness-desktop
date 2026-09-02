@@ -59,7 +59,7 @@ Host-process capability 只能证明消息来自 launcher 创建的 Host，不�
 
 - 同一 home 同时只允许一个受支持 Host writer；
 - 共享或用户选择的 DSH home 在任何 boot、profile mutation 或 cache 隔离前获取 home lease；
-- M0 只使用 launcher 单实例私有的 `<userData>/m0-dsh-home`，不访问 `~/.dsh`；该阶段的私有 home authority 是明确的临时例外，M1 在切换共享 home 前引入 lease；
+- M1 起 Desktop 与 `dsh-native` 在任何 boot、profile mutation 或 cache 隔离前获取整 home lease（`<home>/run/host.lock` + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）；owner 未知或进程活跃时拒绝清锁，`doctor --unlock` 不提供 force 绕过；M0 的私有 `<userData>/m0-dsh-home` 只保留给受支持 smoke 入口；
 - lease 不按年龄自动抢占；
 - profile 恢复只处理白名单并要求候选 SHA 仍匹配；
 - Desktop 不自动回滚 credentials、settings、home patch、sessions 或 storages；
