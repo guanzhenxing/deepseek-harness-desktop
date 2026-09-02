@@ -1,52 +1,241 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import type { HomeLease, ProcessIdentity, ProcessProbe } from '@dsh-desktop/home-lease'
+import {
+  createEnvelopeWriter,
+  type HostEnvelope,
+} from '@dsh-desktop/desktop-contracts/host-control'
 import type { HostReady } from '@dsh-desktop/host-supervisor'
+import {
+  HostSupervisor,
+  type HostBootstrap,
+  type ManagedHostProcess,
+} from '@dsh-desktop/host-supervisor'
 
-import { DesktopShellController } from '../src/lifecycle.js'
+import { DesktopShellController, type HostAttempt } from '../src/lifecycle.js'
 
-const ready: HostReady = {
+const readySurface: HostReady = {
   pid: 4321,
   startIdentity: 'start-123',
   surface: { kind: 'loopback', url: 'http://127.0.0.1:43123/?token=secret' },
   origin: 'http://127.0.0.1:43123',
 }
 
-function fixture(overrides: { startHost?: () => Promise<HostReady> } = {}) {
-  const prepareProfile = vi.fn(async () => undefined)
-  const startHost = vi.fn(overrides.startHost ?? (async () => ready))
-  const stopHost = vi.fn(async () => undefined)
-  const loadSurface = vi.fn(async () => undefined)
-  const showRecovery = vi.fn(async () => undefined)
-  const destroySurface = vi.fn()
-  const shell = new DesktopShellController({
-    prepareProfile,
-    host: { start: startHost, stop: stopHost },
-    window: { loadSurface, showRecovery, destroySurface },
-  })
-  return {
-    destroySurface,
-    loadSurface,
-    prepareProfile,
-    shell,
-    showRecovery,
-    startHost,
-    stopHost,
+class HandshakeProcess implements ManagedHostProcess {
+  readonly pid = 4321
+  readonly startIdentity = 'start-123'
+  #messageListeners = new Set<(message: unknown) => void>()
+  #exitListeners = new Set<(exit: { code: number | null; signal: string | null }) => void>()
+  #exited = false
+
+  constructor(readonly onBootstrap: (bootstrap: HostBootstrap) => void) {}
+
+  deliverBootstrap(bootstrap: HostBootstrap): void {
+    queueMicrotask(() => this.onBootstrap(bootstrap))
+  }
+
+  postMessage(message: unknown): void {
+    const envelope = message as { message?: { kind?: string } }
+    if (envelope?.message?.kind === 'dispose') {
+      queueMicrotask(() => this.emitExit(0))
+    }
+  }
+
+  onMessage(listener: (message: unknown) => void): () => void {
+    this.#messageListeners.add(listener)
+    return () => this.#messageListeners.delete(listener)
+  }
+
+  onExit(listener: (exit: { code: number | null; signal: string | null }) => void): () => void {
+    this.#exitListeners.add(listener)
+    return () => this.#exitListeners.delete(listener)
+  }
+
+  terminate(): void {
+    if (!this.#exited) queueMicrotask(() => this.emitExit(null, 'SIGTERM'))
+  }
+
+  kill(): void {
+    if (!this.#exited) queueMicrotask(() => this.emitExit(null, 'SIGKILL'))
+  }
+
+  emitMessage(message: HostEnvelope): void {
+    for (const listener of this.#messageListeners) listener(message)
+  }
+
+  emitExit(code: number | null = 0, signal: string | null = null): void {
+    this.#exited = true
+    for (const listener of [...this.#exitListeners]) listener({ code, signal })
   }
 }
 
-describe('DesktopShellController', () => {
-  it('becomes healthy only after profile, Host and BrowserWindow succeed', async () => {
+const fakeProbe: ProcessProbe = {
+  async current() {
+    return { pid: process.pid, startIdentity: 'probe-self' }
+  },
+  async identify(pid) {
+    return { pid, startIdentity: 'os-identity' }
+  },
+  async inspect() {
+    return 'same' as const
+  },
+  async scanSupported() {
+    return 'none' as const
+  },
+}
+
+class RecordingLease implements HomeLease {
+  readonly home = '/tmp/isolated-home'
+  readonly generation = 'lease-generation-1'
+  readonly calls: string[] = []
+  releaseError: Error | undefined
+
+  constructor(readonly events: string[]) {}
+
+  async assertHeld(): Promise<void> {
+    this.calls.push('assertHeld')
+    this.events.push('assertHeld')
+  }
+
+  async beforeSpawn(profile: string): Promise<void> {
+    this.calls.push(`beforeSpawn:${profile}`)
+    this.events.push(`beforeSpawn:${profile}`)
+  }
+
+  async attachHost(identity: ProcessIdentity): Promise<void> {
+    this.calls.push(`attachHost:${identity.pid}`)
+    this.events.push(`attachHost:${identity.pid}`)
+  }
+
+  async confirmHostExited(): Promise<void> {
+    this.calls.push('confirmHostExited')
+    this.events.push('confirmHostExited')
+  }
+
+  async release(): Promise<void> {
+    this.calls.push('release')
+    if (this.releaseError !== undefined) throw this.releaseError
+  }
+}
+
+function fixture(options: { acquireError?: Error } = {}) {
+  const events: string[] = []
+  const lease = new RecordingLease(events)
+  const loadSurface = vi.fn(async () => undefined)
+  const showRecovery = vi.fn(async () => undefined)
+  const destroySurface = vi.fn()
+  const onLeaseReleaseError = vi.fn()
+  let spawned = 0
+
+  const process = new HandshakeProcess((bootstrap) => {
+    const hostWriter = createEnvelopeWriter(
+      'host-to-launcher',
+      bootstrap.capability,
+      bootstrap.leaseGeneration,
+    )
+    process.emitMessage(
+      hostWriter.next({
+        kind: 'hello',
+        host: { pid: process.pid, startIdentity: process.startIdentity },
+        profile: { name: bootstrap.profileName },
+        mode: bootstrap.mode,
+        supportedMinor: { min: 0, max: 0 },
+      }),
+    )
+    process.emitMessage(hostWriter.next({ kind: 'phase', phase: 'booting' }))
+    process.emitMessage(
+      hostWriter.next({
+        kind: 'surface',
+        surfaceId: 'surface-1',
+        purpose: 'normal',
+        surface: { kind: 'loopback', url: readySurface.surface.url },
+      }),
+    )
+    process.emitMessage(hostWriter.next({ kind: 'ready', surfaceId: 'surface-1' }))
+  })
+
+  const createAttempt = (heldLease: HomeLease): HostAttempt => {
+    expect(heldLease).toBe(lease)
+    const supervisor = new HostSupervisor({
+      factory: {
+        async spawnWaiting() {
+          spawned += 1
+          events.push('spawn-waiting')
+          return process
+        },
+      },
+      stabilityMs: 0,
+      terminateGraceMs: 100,
+    })
+    return {
+      async start() {
+        const hostReady = await supervisor.start({
+          home: '/tmp/isolated-home',
+          profileName: 'desktop',
+          mode: 'normal',
+          lease: heldLease,
+          probe: fakeProbe,
+        })
+        events.push('ready')
+        return hostReady
+      },
+      stop: (reason, deadlineMs) => supervisor.stop(reason, deadlineMs),
+    }
+  }
+
+  const shell = new DesktopShellController({
+    acquireLease: async () => {
+      if (options.acquireError !== undefined) {
+        events.push('lease-failed')
+        throw options.acquireError
+      }
+      events.push('lease')
+      return lease
+    },
+    reconcile: async () => {
+      events.push('reconcile')
+    },
+    createAttempt,
+    window: { loadSurface, showRecovery, destroySurface },
+    onLeaseReleaseError,
+  })
+
+  return {
+    createAttempt,
+    destroySurface,
+    events,
+    lease,
+    loadSurface,
+    onLeaseReleaseError,
+    process,
+    shell,
+    showRecovery,
+    spawned: () => spawned,
+  }
+}
+
+describe('DesktopShellController startup chain', () => {
+  it('runs lease → reconcile → beforeSpawn → spawn-waiting → attachHost → bootstrap → ready', async () => {
     const setup = fixture()
     await setup.shell.start()
-    expect(setup.prepareProfile).toHaveBeenCalledBefore(setup.startHost)
-    expect(setup.startHost).toHaveBeenCalledBefore(setup.loadSurface)
-    expect(setup.loadSurface).toHaveBeenCalledWith(ready.surface, ready.origin)
+    expect(setup.events).toEqual([
+      'lease',
+      'reconcile',
+      'beforeSpawn:desktop',
+      'spawn-waiting',
+      'attachHost:4321',
+      'ready',
+    ])
+    expect(setup.loadSurface).toHaveBeenCalledWith(readySurface.surface, readySurface.origin)
     expect(setup.shell.state).toBe('healthy')
   })
 
-  it('shows launcher-owned recovery when startup fails', async () => {
-    const setup = fixture({ startHost: async () => Promise.reject(new Error('boot failed')) })
-    await expect(setup.shell.start()).rejects.toThrow('boot failed')
+  it('never reconciles or spawns when the home is busy', async () => {
+    const setup = fixture({ acquireError: new Error('another entrypoint holds this home') })
+    await expect(setup.shell.start()).rejects.toThrow('another entrypoint')
+    expect(setup.events).toEqual(['lease-failed'])
+    expect(setup.spawned()).toBe(0)
+    expect(setup.lease.calls).toEqual([])
     expect(setup.showRecovery).toHaveBeenCalledWith('BOOT_FAILED')
     expect(setup.shell.state).toBe('recovery')
   })
@@ -57,15 +246,26 @@ describe('DesktopShellController', () => {
     await setup.shell.hostCrashed()
     expect(setup.destroySurface).toHaveBeenCalledOnce()
     expect(setup.showRecovery).toHaveBeenCalledWith('HOST_CRASHED')
-    expect(setup.stopHost).not.toHaveBeenCalled()
+    expect(setup.lease.calls).not.toContain('release')
     expect(setup.shell.state).toBe('recovery')
   })
 
-  it('merges shutdown and stops Host exactly once', async () => {
+  it('stops the Host, confirms its exit, and releases the lease exactly once', async () => {
     const setup = fixture()
     await setup.shell.start()
     await Promise.all([setup.shell.stop(), setup.shell.stop()])
-    expect(setup.stopHost).toHaveBeenCalledOnce()
+    expect(setup.lease.calls).toContain('confirmHostExited')
+    expect(setup.lease.calls.filter((call) => call === 'release')).toHaveLength(1)
+    expect(setup.onLeaseReleaseError).not.toHaveBeenCalled()
+    expect(setup.shell.state).toBe('stopped')
+  })
+
+  it('keeps the lease and reports when release cannot prove the Host is gone', async () => {
+    const setup = fixture()
+    await setup.shell.start()
+    setup.lease.releaseError = new Error('the recorded host process is still running')
+    await setup.shell.stop()
+    expect(setup.onLeaseReleaseError).toHaveBeenCalledOnce()
     expect(setup.shell.state).toBe('stopped')
   })
 })

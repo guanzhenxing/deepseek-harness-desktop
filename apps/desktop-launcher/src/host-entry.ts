@@ -24,7 +24,16 @@ function isBootstrap(value: unknown): value is ElectronHostBootstrap {
 
 async function main(): Promise<void> {
   const parentPort = process.parentPort
-  if (parentPort === null) throw new Error('Host runner requires an Electron parent port')
+  if (parentPort === null) {
+    throw new Error('Host runner requires an Electron parent port')
+  }
+  // The launcher is gone: dispose quietly instead of lingering without a
+  // control channel (and therefore without anyone holding the lease). The
+  // ParentPort typings only list "message", but the port is an EventEmitter
+  // that also reports channel teardown.
+  ;(parentPort as NodeJS.EventEmitter).on('close', () => {
+    process.exit(0)
+  })
   const bootstrap = await new Promise<ElectronHostBootstrap>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Host bootstrap timed out')), 10_000)
     parentPort.once('message', (event) => {

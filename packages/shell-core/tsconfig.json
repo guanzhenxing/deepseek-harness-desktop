@@ -6,5 +6,15 @@
     "tsBuildInfoFile": "lib/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../desktop-contracts" }, { "path": "../host-supervisor" }]
+  "references": [
+    {
+      "path": "../desktop-contracts"
+    },
+    {
+      "path": "../home-lease"
+    },
+    {
+      "path": "../host-supervisor"
+    }
+  ]
 }

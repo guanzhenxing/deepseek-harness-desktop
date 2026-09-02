@@ -25,7 +25,8 @@
     "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.3",
     "@deepseek-ai/dsh-launch-environment": "0.1.2-alpha.3",
     "@deepseek-ai/dsh-web-app": "0.1.2-alpha.3",
-    "@dsh-desktop/desktop-contracts": "workspace:*"
+    "@dsh-desktop/desktop-contracts": "workspace:*",
+    "@dsh-desktop/home-lease": "workspace:*"
   },
   "devDependencies": {
     "@dsh-desktop/profile-manager": "workspace:*"

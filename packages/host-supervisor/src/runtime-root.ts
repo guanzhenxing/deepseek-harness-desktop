@@ -23,7 +23,7 @@ export async function createRuntimeRoot(home: string): Promise<RuntimeRoot> {
   const canonicalHome = await realpath(home)
   const canonicalProfiles = await realpath(profiles)
   if (canonicalProfiles !== path.join(canonicalHome, 'profiles')) {
-    throw new Error('Host runtime parent escaped the isolated home')
+    throw new Error('Host runtime parent escaped the shared home')
   }
   const dir = await mkdtemp(path.join(canonicalProfiles, '.dsh-desktop-run-'))
   const rootIdentity = await directoryIdentity(dir)

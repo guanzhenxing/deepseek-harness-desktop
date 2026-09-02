@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
+import type { HomeLease, ProcessProbe } from '@dsh-desktop/home-lease'
+
 import {
   HostControlError,
   LauncherProtocolSession,
@@ -17,9 +19,16 @@ export type HostBootstrap = Readonly<{
   leaseGeneration: string
 }>
 
+/**
+ * A Host child created without boot credentials. The supervisor persists the
+ * pending spawn, registers the child's operating-system identity on the home
+ * lease, and only then delivers the bootstrap message.
+ */
 export interface ManagedHostProcess {
   readonly pid: number
+  /** Private channel-handshake nonce; distinct from the OS lease identity. */
   readonly startIdentity: string
+  deliverBootstrap(bootstrap: HostBootstrap): void
   postMessage(message: unknown): void
   onMessage(listener: (message: unknown) => void): () => void
   onExit(listener: (exit: { code: number | null; signal: string | null }) => void): () => void
@@ -28,7 +37,7 @@ export interface ManagedHostProcess {
 }
 
 export interface HostProcessFactory {
-  spawn(bootstrap: HostBootstrap): Promise<ManagedHostProcess>
+  spawnWaiting(): Promise<ManagedHostProcess>
 }
 
 export type HostSupervisorState =
@@ -52,7 +61,8 @@ export type HostStartRequest = Readonly<{
   home: string
   profileName: string
   mode: 'normal' | 'safe'
-  leaseGeneration: string
+  lease: HomeLease
+  probe: ProcessProbe
 }>
 
 export type HostSupervisorOptions = Readonly<{
@@ -94,6 +104,9 @@ export class HostSupervisor {
   #stabilityTimer: ReturnType<typeof setTimeout> | undefined
   #terminateTimer: ReturnType<typeof setTimeout> | undefined
   #killTimer: ReturnType<typeof setTimeout> | undefined
+  #spawnPromise: Promise<void> | undefined
+  #request: HostStartRequest | undefined
+  #leaseTouched = false
   #started = false
   #healthy = false
   #exited = false
@@ -112,11 +125,8 @@ export class HostSupervisor {
     if (this.#started) return Promise.reject(new Error('HostSupervisor can start only once'))
     this.#started = true
     this.state = 'starting'
-    const bootstrap: HostBootstrap = Object.freeze({
-      ...request,
-      capability: randomBytes(32).toString('base64url'),
-    })
-    void this.#spawn(bootstrap)
+    this.#request = request
+    this.#spawnPromise = this.#spawn(request)
     return this.#ready.promise
   }
 
@@ -126,37 +136,65 @@ export class HostSupervisor {
   ): Promise<void> {
     if (this.#stop !== undefined) return this.#stop.promise
     this.#stop = deferred<void>()
-    if (this.#process === undefined || this.#exited) {
-      this.state = 'stopped'
-      this.#stop.resolve()
-      return this.#stop.promise
-    }
-    this.state = 'draining'
-    try {
-      this.#process.postMessage(this.#protocol?.dispose(reason, deadlineMs))
-    } catch {
-      this.#process.terminate()
-    }
-    this.#terminateTimer = setTimeout(() => {
-      if (this.#exited) return
-      this.#process?.terminate()
-      this.#killTimer = setTimeout(() => {
-        if (!this.#exited) this.#process?.kill()
-      }, this.#options.terminateGraceMs)
-    }, deadlineMs)
+    void (async () => {
+      // A stop racing an in-flight spawn must still wait for and reap the
+      // late child instead of leaking it.
+      if (this.#spawnPromise !== undefined) {
+        await this.#spawnPromise.catch(() => undefined)
+      }
+      if (this.#process === undefined || this.#exited) {
+        this.state = 'stopped'
+        await this.#confirmLeaseExit()
+        this.#stop?.resolve()
+        this.#emit({ kind: 'stopped' })
+        return
+      }
+      this.state = 'draining'
+      try {
+        this.#process.postMessage(this.#protocol?.dispose(reason, deadlineMs))
+      } catch {
+        this.#process.terminate()
+      }
+      this.#terminateTimer = setTimeout(() => {
+        if (this.#exited) return
+        this.#process?.terminate()
+        this.#killTimer = setTimeout(() => {
+          if (!this.#exited) this.#process?.kill()
+        }, this.#options.terminateGraceMs)
+      }, deadlineMs)
+    })()
     return this.#stop.promise
   }
 
-  async #spawn(bootstrap: HostBootstrap): Promise<void> {
+  async #spawn(request: HostStartRequest): Promise<void> {
     try {
-      const process = await this.#options.factory.spawn(bootstrap)
+      await request.lease.beforeSpawn(request.profileName)
+      this.#leaseTouched = true
+      const process = await this.#options.factory.spawnWaiting()
       this.#process = process
+      try {
+        const osIdentity = await request.probe.identify(process.pid)
+        await request.lease.attachHost(osIdentity)
+        const bootstrap: HostBootstrap = Object.freeze({
+          home: request.home,
+          profileName: request.profileName,
+          mode: request.mode,
+          capability: this.#capability,
+          leaseGeneration: request.lease.generation,
+        })
+        process.deliverBootstrap(bootstrap)
+      } catch (error) {
+        // The child never received boot credentials; reap it, clear the
+        // pending spawn registration, and report the failed attempt.
+        await this.#reapUnauthorizedChild(process)
+        throw error
+      }
       this.#protocol = new LauncherProtocolSession({
-        capability: bootstrap.capability,
-        leaseGeneration: bootstrap.leaseGeneration,
+        capability: this.#capability,
+        leaseGeneration: request.lease.generation,
         expectedHost: { pid: process.pid, startIdentity: process.startIdentity },
-        profileName: bootstrap.profileName,
-        mode: bootstrap.mode,
+        profileName: request.profileName,
+        mode: request.mode,
       })
       process.onMessage((message) => this.#onMessage(message))
       process.onExit(() => this.#onExit())
@@ -168,9 +206,46 @@ export class HostSupervisor {
       this.#failStart(
         error instanceof HostControlError
           ? error
-          : new HostControlError('BOOT_FAILED', 'Host process could not be created'),
+          : error instanceof Error
+            ? new HostControlError('BOOT_FAILED', `Host launch failed: ${error.message}`)
+            : new HostControlError('BOOT_FAILED', 'Host process could not be created'),
       )
     }
+  }
+
+  #capability = randomBytes(32).toString('base64url')
+
+  async #reapUnauthorizedChild(process: ManagedHostProcess): Promise<void> {
+    let exited = false
+    const exitedPromise = new Promise<void>((resolve) => {
+      process.onExit(() => {
+        exited = true
+        resolve()
+      })
+    })
+    try {
+      process.terminate()
+    } catch {
+      /* already gone */
+    }
+    await Promise.race([
+      exitedPromise,
+      new Promise<void>((resolve) => setTimeout(resolve, this.#options.terminateGraceMs)),
+    ])
+    if (!exited) {
+      try {
+        process.kill()
+      } catch {
+        /* already gone */
+      }
+      await Promise.race([exitedPromise, new Promise<void>((r) => setTimeout(r, 500))])
+    }
+    await this.#request?.lease.confirmHostExited().catch(() => undefined)
+  }
+
+  async #confirmLeaseExit(): Promise<void> {
+    if (this.#request === undefined || !this.#leaseTouched) return
+    await this.#request.lease.confirmHostExited().catch(() => undefined)
   }
 
   #onMessage(input: unknown): void {
@@ -241,19 +316,35 @@ export class HostSupervisor {
     this.#exited = true
     this.#clearTimers()
     if (this.#stop !== undefined) {
-      this.state = 'stopped'
-      this.#stop.resolve()
-      this.#emit({ kind: 'stopped' })
+      void this.#confirmLeaseExit().then(() => {
+        this.state = 'stopped'
+        if (!this.#healthy) {
+          // A stop that raced the spawn still has to settle the start
+          // promise: the child is gone and will never become ready.
+          this.#ready.reject(
+            new HostControlError('BOOT_FAILED', 'Host exited before becoming ready'),
+          )
+        }
+        this.#stop?.resolve()
+        this.#emit({ kind: 'stopped' })
+      })
       return
     }
-    if (this.state === 'failed') return
+    if (this.state === 'failed') {
+      void this.#confirmLeaseExit()
+      return
+    }
     if (!this.#healthy) {
-      this.#failStart(new HostControlError('BOOT_FAILED', 'Host exited before becoming ready'))
+      void this.#confirmLeaseExit().then(() => {
+        this.#failStart(new HostControlError('BOOT_FAILED', 'Host exited before becoming ready'))
+      })
       return
     }
-    const error = new HostControlError('HOST_CRASHED', 'Host exited after becoming ready')
-    this.state = 'failed'
-    this.#emit({ kind: 'crashed', error })
+    void this.#confirmLeaseExit().then(() => {
+      const error = new HostControlError('HOST_CRASHED', 'Host exited after becoming ready')
+      this.state = 'failed'
+      this.#emit({ kind: 'crashed', error })
+    })
   }
 
   #failStart(error: HostControlError): void {

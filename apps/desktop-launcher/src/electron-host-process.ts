@@ -26,6 +26,18 @@ class ElectronManagedHostProcess implements ManagedHostProcess {
     this.startIdentity = startIdentity
   }
 
+  deliverBootstrap(bootstrap: HostBootstrap): void {
+    if (bootstrap.mode !== 'normal') {
+      throw new Error('M1 Electron Host supports only normal mode')
+    }
+    const privateBootstrap: ElectronHostBootstrap = {
+      ...bootstrap,
+      mode: 'normal',
+      startIdentity: this.startIdentity,
+    }
+    this.#child.postMessage({ kind: 'dsh-desktop-bootstrap', bootstrap: privateBootstrap })
+  }
+
   postMessage(message: unknown): void {
     this.#child.postMessage(message)
   }
@@ -50,9 +62,14 @@ class ElectronManagedHostProcess implements ManagedHostProcess {
   }
 }
 
+/**
+ * Forks the Host utility process without boot credentials. The supervisor
+ * registers the child's OS identity on the home lease first and only then
+ * delivers the bootstrap message through `deliverBootstrap`.
+ */
 export function createElectronHostProcessFactory(hostEntry: string): HostProcessFactory {
   return {
-    async spawn(bootstrap) {
+    async spawnWaiting() {
       const startIdentity = randomUUID()
       const child = utilityProcess.fork(hostEntry, [], {
         env: sanitizeHostEnvironment(process.env),
@@ -64,13 +81,6 @@ export function createElectronHostProcessFactory(hostEntry: string): HostProcess
         child.once('error', reject)
       })
       if (child.pid === undefined) throw new Error('Electron utility process has no PID')
-      if (bootstrap.mode !== 'normal') throw new Error('M0 Electron Host supports only normal mode')
-      const privateBootstrap: ElectronHostBootstrap = {
-        ...bootstrap,
-        mode: 'normal',
-        startIdentity,
-      }
-      child.postMessage({ kind: 'dsh-desktop-bootstrap', bootstrap: privateBootstrap })
       return new ElectronManagedHostProcess(child, child.pid, startIdentity)
     },
   }

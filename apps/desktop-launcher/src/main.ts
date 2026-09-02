@@ -1,25 +1,27 @@
-import { randomUUID } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 
-import { HostSupervisor, type HostReady } from '@dsh-desktop/host-supervisor'
 import {
-  createIsolatedHomeAuthority,
-  createProfileRef,
-  reconcileDesktopProfile,
-} from '@dsh-desktop/profile-manager'
+  acquireHomeLease,
+  createNativeProcessProbe,
+  LeaseError,
+  resolveDesktopHome,
+  resolveLeaseHelperPath,
+} from '@dsh-desktop/home-lease'
+import { HostSupervisor, type HostReady } from '@dsh-desktop/host-supervisor'
+import { PRODUCT } from '@dsh-desktop/product-config'
+import { createProfileRef, reconcileDesktopProfile } from '@dsh-desktop/profile-manager'
 import {
   DesktopShellController,
   isAllowedMainFrameNavigation,
   type ShellWindowPort,
 } from '@dsh-desktop/shell-core'
-import { PRODUCT } from '@dsh-desktop/product-config'
 
 import { createElectronHostProcessFactory } from './electron-host-process.js'
+import { describeLeaseBlock, resolveSmokeHome } from './lease-diagnostics.js'
 import { resolveSmokeUserData } from './m0-paths.js'
 import { DESKTOP_WEB_PREFERENCES, denyWindowOpen } from './window-policy.js'
 
@@ -95,6 +97,20 @@ function smokeReport(payload: Record<string, unknown>): void {
   console.log(`DSH_DESKTOP_SMOKE ${JSON.stringify(payload)}`)
 }
 
+function reportLeaseFailure(error: unknown): void {
+  const view =
+    error instanceof LeaseError
+      ? describeLeaseBlock({ code: error.code, ownerSummary: error.ownerSummary })
+      : describeLeaseBlock({ code: 'LEASE_UNKNOWN' })
+  const detail = error instanceof Error ? error.message : String(error)
+  console.error(`${view.title}: ${detail}`)
+  smokeReport({ kind: 'lease-refused', code: error instanceof LeaseError ? error.code : 'UNKNOWN' })
+  if (smokeMode === undefined) {
+    dialog.showErrorBox(view.title, `${view.body.join('\n')}\n\n${view.doctorCommand}`)
+    app.exit(1)
+  }
+}
+
 async function waitForOfficialUi(window: BrowserWindow): Promise<void> {
   const deadline = Date.now() + 30_000
   let snapshot: unknown
@@ -134,12 +150,17 @@ let shutdownComplete = false
 let shutdownStarted = false
 
 async function startApplication(): Promise<void> {
-  const home = path.resolve(app.getPath('userData'), 'm0-dsh-home')
-  if (home === path.resolve(os.homedir(), '.dsh')) {
-    throw new Error('M0 refuses to use the default DSH home')
-  }
-  await mkdir(home, { recursive: true })
-  const ref = createProfileRef(home, 'desktop')
+  // Resolve the single shared home from the entry environment before any
+  // child environment is derived from it.
+  const home =
+    smokeMode !== undefined && userDataOverride !== undefined
+      ? resolveSmokeHome({ smokeMode, userData: userDataOverride, osHome: os.homedir() })
+      : resolveDesktopHome({ env: process.env, osHome: os.homedir(), cwd: process.cwd() })
+  const probe = createNativeProcessProbe({
+    helperPath: resolveLeaseHelperPath(process.env),
+    entryExecutables: [process.execPath],
+  })
+  const profileName = PRODUCT.defaultProfileName
   const windowPort = new ElectronWindowPort()
   let readyHost: HostReady | undefined
   const supervisor = new HostSupervisor({
@@ -161,22 +182,34 @@ async function startApplication(): Promise<void> {
     },
   })
   shell = new DesktopShellController({
-    prepareProfile: async () => {
-      await reconcileDesktopProfile(ref, createIsolatedHomeAuthority(home, app.getPath('userData')))
+    acquireLease: () =>
+      acquireHomeLease({
+        home,
+        entrypoint: 'desktop',
+        profile: profileName,
+        appVersion: app.getVersion(),
+        probe,
+      }),
+    reconcile: async (lease) => {
+      await reconcileDesktopProfile(createProfileRef(home, profileName), lease)
     },
-    host: {
-      async start() {
-        readyHost = await supervisor.start({
-          home,
-          profileName: 'desktop',
-          mode: 'normal',
-          leaseGeneration: randomUUID(),
-        })
-        return readyHost
+    createAttempt: (lease) => ({
+      start: () => {
+        const started = supervisor.start({ home, profileName, mode: 'normal', lease, probe })
+        void started
+          .then((ready) => {
+            readyHost = ready
+          })
+          .catch(() => undefined)
+        return started
       },
       stop: (reason, deadlineMs) => supervisor.stop(reason, deadlineMs),
-    },
+    }),
     window: windowPort,
+    onLeaseReleaseError: (error) => {
+      smokeReport({ kind: 'lease-release-refused' })
+      console.error('keeping the home lease:', error instanceof Error ? error.message : error)
+    },
   })
   await shell.start()
 
@@ -217,7 +250,9 @@ else {
   void app
     .whenReady()
     .then(startApplication)
-    .catch(() => {
+    .catch((error: unknown) => {
+      if (error instanceof LeaseError) reportLeaseFailure(error)
+      else console.error('startup failed:', error instanceof Error ? error.message : error)
       smokeReport({ kind: 'failed', stage: 'startup' })
       if (smokeMode !== undefined) {
         shutdownStarted = true

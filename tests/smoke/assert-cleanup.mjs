@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const launcherDir = path.join(root, 'apps', 'desktop-launcher')
-const smokePrefix = smokeDirectoryPrefix
 
 function isAlive(pid) {
   try {
@@ -79,7 +78,7 @@ export async function runLauncherSmoke(mode) {
     cwd: root,
     env: process.env,
   })
-  const userData = await mkdtemp(path.join(tmpdir(), smokePrefix))
+  const userData = await mkdtemp(path.join(tmpdir(), smokeDirectoryPrefix))
   const reports = []
   let child
   let timeout

@@ -107,6 +107,7 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
   let surfaceId: string | undefined
   let runtimeRoot: RuntimeRoot | undefined
   let originalDshHome = process.env.DSH_HOME
+  const originalCwd = process.cwd()
 
   const restoreEnvironment = (): void => {
     if (originalDshHome === undefined) delete process.env.DSH_HOME
@@ -119,6 +120,7 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
 
   const cleanupRuntimeRoot = async (): Promise<void> => {
     if (runtimeRoot === undefined) return
+    if (process.cwd() === runtimeRoot.dir) process.chdir(originalCwd)
     await runtimeRoot.remove()
     runtimeRoot = undefined
   }
@@ -217,6 +219,9 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
 
     const installAnchor = options.installAnchor ?? DSH_INSTALL_ANCHOR
     runtimeRoot = await createRuntimeRoot(options.home)
+    // Keep the Host cwd inside the neutral launch root so workspace/config
+    // discovery never walks up into the launcher's project directory.
+    process.chdir(runtimeRoot.dir)
     // Product composition belongs to the caller. These shared fallbacks only
     // mirror the two installed closures; neither writes the named profile.
     for (const anchor of new Set([installAnchor, options.productInstallAnchor])) {

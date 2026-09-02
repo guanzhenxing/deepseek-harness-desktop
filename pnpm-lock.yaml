@@ -38,6 +38,9 @@ importers:
       '@dsh-desktop/desktop-plugin':
         specifier: workspace:*
         version: link:../../packages/desktop-plugin
+      '@dsh-desktop/home-lease':
+        specifier: workspace:*
+        version: link:../../packages/home-lease
       '@dsh-desktop/host-supervisor':
         specifier: workspace:*
         version: link:../../packages/host-supervisor
@@ -112,6 +115,9 @@ importers:
       '@dsh-desktop/desktop-contracts':
         specifier: workspace:*
         version: link:../desktop-contracts
+      '@dsh-desktop/home-lease':
+        specifier: workspace:*
+        version: link:../home-lease
     devDependencies:
       '@dsh-desktop/profile-manager':
         specifier: workspace:*
@@ -119,13 +125,20 @@ importers:
 
   packages/product-config: {}
 
-  packages/profile-manager: {}
+  packages/profile-manager:
+    dependencies:
+      '@dsh-desktop/home-lease':
+        specifier: workspace:*
+        version: link:../home-lease
 
   packages/shell-core:
     dependencies:
       '@dsh-desktop/desktop-contracts':
         specifier: workspace:*
         version: link:../desktop-contracts
+      '@dsh-desktop/home-lease':
+        specifier: workspace:*
+        version: link:../home-lease
       '@dsh-desktop/host-supervisor':
         specifier: workspace:*
         version: link:../host-supervisor

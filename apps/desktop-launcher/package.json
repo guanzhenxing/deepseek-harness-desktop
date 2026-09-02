@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@dsh-desktop/desktop-plugin": "workspace:*",
+    "@dsh-desktop/home-lease": "workspace:*",
     "@dsh-desktop/host-supervisor": "workspace:*",
     "@dsh-desktop/product-config": "workspace:*",
     "@dsh-desktop/profile-manager": "workspace:*",

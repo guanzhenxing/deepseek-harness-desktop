@@ -23,6 +23,11 @@ import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
 } from '../../../tests/helpers/isolated-home.js'
+import {
+  acquireHomeLease,
+  createNativeProcessProbe,
+  resolveLeaseHelperPath,
+} from '@dsh-desktop/home-lease'
 import { runDshHost, type HostControlTransport } from '../src/host-runner.js'
 import { HostSupervisor, type HostBootstrap, type ManagedHostProcess } from '../src/supervisor.js'
 
@@ -86,6 +91,10 @@ class NodeManagedHostProcess implements ManagedHostProcess {
     this.#child = child
     this.pid = child.pid
     this.startIdentity = startIdentity
+  }
+
+  deliverBootstrap(bootstrap: HostBootstrap): void {
+    this.#child.send({ ...bootstrap, startIdentity: this.startIdentity })
   }
 
   postMessage(message: unknown): void {
@@ -342,20 +351,29 @@ describe('real DSH Host runner', () => {
       createProfileRef(home, 'desktop'),
       createIsolatedHomeAuthority(home, path.dirname(home)),
     )
+    const probe = createNativeProcessProbe({
+      helperPath: resolveLeaseHelperPath(process.env),
+      entryExecutables: [],
+    })
+    const lease = await acquireHomeLease({
+      home,
+      entrypoint: 'desktop',
+      profile: 'desktop',
+      appVersion: '0.0.0',
+      probe,
+    })
     let child: ChildProcess | undefined
     const supervisor = new HostSupervisor({
       stabilityMs: 0,
       startupTimeoutMs: 30_000,
       factory: {
-        async spawn(bootstrap: HostBootstrap): Promise<ManagedHostProcess> {
+        async spawnWaiting(): Promise<ManagedHostProcess> {
           const startIdentity = randomUUID()
           child = fork(fileURLToPath(new URL('./fixtures/node-host.mjs', import.meta.url)), [], {
             cwd: fileURLToPath(new URL('../../../apps/desktop-launcher', import.meta.url)),
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
           })
-          const managed = new NodeManagedHostProcess(child, startIdentity)
-          setImmediate(() => child?.send({ ...bootstrap, startIdentity }))
-          return managed
+          return new NodeManagedHostProcess(child, startIdentity)
         },
       },
     })
@@ -364,12 +382,14 @@ describe('real DSH Host runner', () => {
       home,
       profileName: 'desktop',
       mode: 'normal',
-      leaseGeneration: randomUUID(),
+      lease,
+      probe,
     })
     expect(ready.pid).not.toBe(process.pid)
     expectCompleteOfficialBootGraph(await readOfficialBootGraph(ready.surface.url))
 
     await supervisor.stop('quit', 5_000)
     await vi.waitFor(() => expect(child?.exitCode).toBe(0))
+    await lease.release()
   }, 60_000)
 })

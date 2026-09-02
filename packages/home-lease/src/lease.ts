@@ -32,6 +32,23 @@ export interface HomeLease {
   release(): Promise<void>
 }
 
+const homeLeaseBrand = Symbol('dsh-desktop-home-lease')
+
+/**
+ * Structural check for genuine `acquireHomeLease` results. Consumers that
+ * gate writes on "an active lease" must use this instead of trusting a plain
+ * `{ home, generation }` literal.
+ */
+export function isHomeLease(value: unknown): value is HomeLease {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[homeLeaseBrand] === true &&
+    typeof (value as HomeLease).home === 'string' &&
+    typeof (value as HomeLease).generation === 'string'
+  )
+}
+
 export type AcquireHomeLeaseInput = Readonly<{
   home: string
   entrypoint: LeaseEntrypoint
@@ -273,6 +290,7 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
   })
 
   return Object.freeze({
+    [homeLeaseBrand]: true as const,
     home,
     get generation(): string {
       return supervisorGeneration

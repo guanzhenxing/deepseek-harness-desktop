@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 
+import { isHomeLease, type HomeLease } from '@dsh-desktop/home-lease'
+
 import type { ProfileRef } from './profile-ref.js'
 
 export const DESKTOP_BUNDLE_PREFIX = [
@@ -35,6 +37,9 @@ export type IsolatedHomeAuthority = Readonly<{
   home: string
   [authorityBrand]: true
 }>
+
+/** Either the M0 isolated authority or a live whole-home lease. */
+export type ProfileWriteAuthority = IsolatedHomeAuthority | HomeLease
 
 export type ReconcileResult = Readonly<{
   ref: ProfileRef
@@ -102,7 +107,8 @@ async function syncDirectory(dirname: string): Promise<void> {
   }
 }
 
-async function initializeProfile(dir: string): Promise<void> {
+async function initializeProfile(dir: string, assertAuthority: () => Promise<void>): Promise<void> {
+  await assertAuthority()
   await writeInitialFile(
     path.join(dir, 'package.json'),
     `${JSON.stringify(
@@ -116,7 +122,9 @@ async function initializeProfile(dir: string): Promise<void> {
       2,
     )}\n`,
   )
+  await assertAuthority()
   await writeInitialFile(path.join(dir, 'cordis.patch.yml'), PROFILE_PATCH_TEMPLATE)
+  await assertAuthority()
   await writeInitialFile(path.join(dir, 'pnpm-workspace.yaml'), PROFILE_WORKSPACE)
 }
 
@@ -217,13 +225,21 @@ function reconciledManifest(manifest: ProfileManifest): ProfileManifest {
 
 export async function reconcileDesktopProfile(
   ref: ProfileRef,
-  authority: IsolatedHomeAuthority,
+  authority: ProfileWriteAuthority,
 ): Promise<ReconcileResult> {
-  if (
-    authority[authorityBrand] !== true ||
-    authority.kind !== 'm0-isolated-home' ||
-    authority.home !== ref.home
+  let assertAuthority: () => Promise<void>
+  if (isHomeLease(authority)) {
+    if (authority.home !== ref.home) {
+      throw new Error('profile write authority does not match ProfileRef home')
+    }
+    assertAuthority = () => authority.assertHeld()
+  } else if (
+    authority[authorityBrand] === true &&
+    authority.kind === 'm0-isolated-home' &&
+    authority.home === ref.home
   ) {
+    assertAuthority = () => Promise.resolve()
+  } else {
     throw new Error('profile write authority does not match ProfileRef home')
   }
   if (ref.name !== 'desktop')
@@ -244,11 +260,14 @@ export async function reconcileDesktopProfile(
   const beforeRaw =
     existed.get(manifestPath) === true ? await readFile(manifestPath, 'utf8') : undefined
 
-  await initializeProfile(ref.dir)
+  await initializeProfile(ref.dir, assertAuthority)
   const currentRaw = await readFile(manifestPath, 'utf8')
   const current = parseProfileManifest(currentRaw)
   const desiredRaw = `${JSON.stringify(reconciledManifest(current), undefined, 2)}\n`
-  if (desiredRaw !== currentRaw) await writeFileAtomic(manifestPath, desiredRaw)
+  if (desiredRaw !== currentRaw) {
+    await assertAuthority()
+    await writeFileAtomic(manifestPath, desiredRaw)
+  }
 
   const changedFiles = [manifestPath, patchPath, workspacePath].filter(
     (filename) =>
