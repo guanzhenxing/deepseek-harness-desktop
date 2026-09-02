@@ -10,7 +10,7 @@
 
 | 变量            | 解析规则                                                                                                                   |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `<home>`        | `resolveDshHome()`：`$DSH_HOME` 非空时使用其绝对路径，否则为 `~/.dsh`                                                      |
+| `<home>`        | `resolveDesktopHome()`（`packages/home-lease`）：`$DSH_HOME` trim 后非空时生效（支持 `~` 展开，相对路径相对进程 cwd），否则为 `~/.dsh`；解析结果不得为 filesystem root。语义与固定版上游 `resolveDshHome` 在隔离进程中对照测试 |
 | `<m0Home>`      | `<userData>/m0-dsh-home`；M0 launcher 单实例私有，不是共享 `<home>`                                                        |
 | `<profile>`     | v1 为 `<home>/profiles/desktop`                                                                                            |
 | `<safeProfile>` | M2 计划交付的恢复能力使用 `<home>/profiles/desktop-safe-mode`，同时作为 E3 前置                                         |
@@ -19,6 +19,8 @@
 | `<testHome>`    | 测试通过系统临时目录 API 单独创建的 DSH home，绝不能指向真实 `<home>`                                                      |
 
 所有可写路径先解析为绝对路径并验证预期父目录。写入逻辑不得跟随用户可植入的目标 symlink 覆盖其他位置。
+
+产品身份（产品名 `DeepSeek Harness Desktop`、CLI 名 `dsh-native`、设置 namespace `dsh-native-shell`、renderer partition、默认 profile 名）集中维护在 `packages/product-config`，该包不允许依赖 Electron 或任何 `@deepseek-ai/*` 包。
 
 ## 2. DSH home
 
@@ -127,8 +129,7 @@ DSH credential、settings、sessions 和 storages 不复制到 `<userData>`。
 
 所有涉及 profile、lease、恢复或迁移的自动化测试必须使用 `<testHome>`：
 
-- 测试开始时由系统临时目录 API 创建；
-- 创建后验证其不是 `~/.dsh`、`$DSH_HOME` 当前值、仓库根或 filesystem root；
+- 测试开始时由 `tests/helpers/isolated-home.ts` 的 `createIsolatedHomeFixture()` 在系统临时目录下创建；创建时拒绝环境 `DSH_HOME` 已设置、仓库目录、filesystem root 与真实 `~/.dsh`，清理前复核 realpath 与 dev/ino 身份；
 - fixture 可以从脱敏数据复制，不能链接到真实 home；
 - 失败时保留路径供诊断，清理命令只能针对已记录且验证过的临时目录；
 - 打包冒烟使用独立临时 macOS userData。

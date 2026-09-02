@@ -41,6 +41,9 @@ importers:
       '@dsh-desktop/host-supervisor':
         specifier: workspace:*
         version: link:../../packages/host-supervisor
+      '@dsh-desktop/product-config':
+        specifier: workspace:*
+        version: link:../../packages/product-config
       '@dsh-desktop/profile-manager':
         specifier: workspace:*
         version: link:../../packages/profile-manager
@@ -73,6 +76,12 @@ importers:
         specifier: workspace:*
         version: link:../desktop-contracts
 
+  packages/home-lease:
+    devDependencies:
+      '@deepseek-ai/dsh-home-paths':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
+
   packages/host-supervisor:
     dependencies:
       '@deepseek-ai/cordis':
@@ -103,6 +112,8 @@ importers:
       '@dsh-desktop/profile-manager':
         specifier: workspace:*
         version: link:../profile-manager
+
+  packages/product-config: {}
 
   packages/profile-manager: {}
 

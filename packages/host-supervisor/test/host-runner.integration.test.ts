@@ -1,17 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { fork, type ChildProcess } from 'node:child_process'
-import {
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -30,35 +19,23 @@ import {
   reconcileDesktopProfile,
 } from '@dsh-desktop/profile-manager'
 
+import {
+  createIsolatedHomeFixture,
+  type IsolatedHomeFixture,
+} from '../../../tests/helpers/isolated-home.js'
 import { runDshHost, type HostControlTransport } from '../src/host-runner.js'
 import { HostSupervisor, type HostBootstrap, type ManagedHostProcess } from '../src/supervisor.js'
 
-const homes: string[] = []
+const fixtures: IsolatedHomeFixture[] = []
 
-async function testHome(prefix = 'dsh-host-runner-'): Promise<string> {
-  const userData = await mkdtemp(path.join(tmpdir(), prefix))
-  homes.push(userData)
-  const home = path.join(userData, 'm0-dsh-home')
-  await mkdir(home)
-  return home
+async function testHome(): Promise<string> {
+  const fixture = await createIsolatedHomeFixture()
+  fixtures.push(fixture)
+  return fixture.home
 }
 
 afterEach(async () => {
-  for (const home of homes.splice(0)) {
-    const resolved = path.resolve(home)
-    const stat = await lstat(resolved)
-    if (
-      path.dirname(resolved) !== path.resolve(tmpdir()) ||
-      !['dsh-host-runner-', 'dsh-node-host-runner-'].some((prefix) =>
-        path.basename(resolved).startsWith(prefix),
-      ) ||
-      !stat.isDirectory() ||
-      stat.isSymbolicLink()
-    ) {
-      throw new Error(`refusing to clean an unsafe Host fixture: ${resolved}`)
-    }
-    await rm(resolved, { recursive: true })
-  }
+  for (const fixture of fixtures.splice(0)) await fixture.dispose()
 })
 
 class LoopbackTransport implements HostControlTransport {
@@ -360,7 +337,7 @@ describe('real DSH Host runner', () => {
   }, 60_000)
 
   it('boots the complete official Web graph from an independent Node Host process', async () => {
-    const home = await testHome('dsh-node-host-runner-')
+    const home = await testHome()
     await reconcileDesktopProfile(
       createProfileRef(home, 'desktop'),
       createIsolatedHomeAuthority(home, path.dirname(home)),

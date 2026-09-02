@@ -1,4 +1,6 @@
-export const DESKTOP_RENDERER_PARTITION = 'persist:dsh-desktop-renderer'
+import { PRODUCT } from '@dsh-desktop/product-config'
+
+export const DESKTOP_RENDERER_PARTITION = PRODUCT.rendererPartition
 
 export const DESKTOP_WEB_PREFERENCES = Object.freeze({
   contextIsolation: true,

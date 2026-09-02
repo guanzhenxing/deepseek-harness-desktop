@@ -1,0 +1,19 @@
+{
+  "name": "@dsh-desktop/home-lease",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-home-paths": "0.1.2-alpha.3"
+  }
+}

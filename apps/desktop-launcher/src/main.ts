@@ -17,18 +17,20 @@ import {
   isAllowedMainFrameNavigation,
   type ShellWindowPort,
 } from '@dsh-desktop/shell-core'
+import { PRODUCT } from '@dsh-desktop/product-config'
 
 import { createElectronHostProcessFactory } from './electron-host-process.js'
 import { resolveSmokeUserData } from './m0-paths.js'
 import { DESKTOP_WEB_PREFERENCES, denyWindowOpen } from './window-policy.js'
 
-const PRODUCT_NAME = 'DeepSeek Harness Desktop'
 const recoveryPath = fileURLToPath(new URL('../src/recovery.html', import.meta.url))
 const hostEntryPath = fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
 const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
 
 if (userDataOverride !== undefined) app.setPath('userData', path.resolve(userDataOverride))
+
+app.setName(PRODUCT.name)
 
 class ElectronWindowPort implements ShellWindowPort {
   readonly window: BrowserWindow
@@ -41,7 +43,7 @@ class ElectronWindowPort implements ShellWindowPort {
       minWidth: 900,
       minHeight: 600,
       show: false,
-      title: PRODUCT_NAME,
+      title: PRODUCT.name,
       webPreferences: DESKTOP_WEB_PREFERENCES,
     })
     this.window.webContents.session.setPermissionCheckHandler(() => false)
@@ -193,7 +195,6 @@ async function startApplication(): Promise<void> {
   }
 }
 
-app.setName(PRODUCT_NAME)
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) app.quit()
 else {

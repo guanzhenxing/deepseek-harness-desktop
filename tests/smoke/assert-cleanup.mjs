@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const launcherDir = path.join(root, 'apps', 'desktop-launcher')
-const smokePrefix = 'dsh-desktop-m0-smoke-'
+const smokePrefix = smokeDirectoryPrefix
 
 function isAlive(pid) {
   try {
@@ -29,11 +29,13 @@ async function waitUntilDead(pid, timeoutMs = 5_000) {
   throw new Error(`process ${pid} survived smoke shutdown`)
 }
 
-async function assertSafeCleanupTarget(target) {
+export const smokeDirectoryPrefix = 'dsh-desktop-m0-smoke-'
+
+async function assertSafeCleanupTarget(target, prefixes = [smokeDirectoryPrefix]) {
   const resolved = path.resolve(target)
   if (
     path.dirname(resolved) !== path.resolve(tmpdir()) ||
-    !path.basename(resolved).startsWith(smokePrefix)
+    !prefixes.some((prefix) => path.basename(resolved).startsWith(prefix))
   ) {
     throw new Error(`refusing to clean an unexpected smoke target: ${resolved}`)
   }

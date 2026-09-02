@@ -9,6 +9,7 @@
   "references": [
     { "path": "../../packages/desktop-plugin" },
     { "path": "../../packages/host-supervisor" },
+    { "path": "../../packages/product-config" },
     { "path": "../../packages/profile-manager" },
     { "path": "../../packages/shell-core" }
   ]

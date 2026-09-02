@@ -10,13 +10,16 @@
     "vitest.config.ts",
     "vitest.integration.config.ts",
     "packages/*/test/**/*.ts",
-    "apps/*/test/**/*.ts"
+    "apps/*/test/**/*.ts",
+    "tests/helpers/**/*.ts"
   ],
   "references": [
     { "path": "apps/desktop-launcher" },
     { "path": "packages/desktop-contracts" },
     { "path": "packages/desktop-plugin" },
+    { "path": "packages/home-lease" },
     { "path": "packages/host-supervisor" },
+    { "path": "packages/product-config" },
     { "path": "packages/profile-manager" },
     { "path": "packages/shell-core" }
   ]
