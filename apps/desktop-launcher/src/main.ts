@@ -306,15 +306,20 @@ async function startApplication(): Promise<void> {
     },
     loadSurface: async (ready) => {
       await windowPort.loadSurface(ready.surface, ready.origin)
-      // A mounted surface means a healthy session: the relaunch marker is
-      // spent and the launcher-owned recovery surface retires until a
-      // failure brings it back.
-      await marker.clear()
-      if (recoveryWindow !== undefined) {
-        recoveryWindow.destroy()
-        recoveryWindow = undefined
-      }
     },
+    onHealthy: () =>
+      // A healthy session spends the relaunch marker and retires the
+      // launcher-owned recovery window. Runs after the state flips, so a
+      // crash inside it is still a post-ready crash.
+      marker
+        .clear()
+        .then(() => {
+          if (recoveryWindow !== undefined) {
+            recoveryWindow.destroy()
+            recoveryWindow = undefined
+          }
+        })
+        .catch(() => undefined),
     window: {
       showRecoveryView: async (view) => {
         smokeReport({ kind: 'recovery-view', stage: view.failure.stage, code: view.failure.code })

@@ -2,6 +2,7 @@ import {
   commitProfileTransaction,
   createProfileRef,
   findAppliedTransactions,
+  planDesktopReconcile,
   prepareSafeProfile,
   ProfileReconcileError,
   reconcileDesktopProfile,
@@ -93,6 +94,15 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
           )
         }
         adopted = applied[0]!.id
+        // The desired profile must still equal the adopted candidate: a
+        // change would stack a second open journal. Detect it at PLAN time,
+        // before any file is touched.
+        const pending = await planDesktopReconcile(normalRef, lease).catch(() => undefined)
+        if (pending === undefined || pending.writes.length > 0) {
+          return needsReviewBlock(
+            'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — run dsh-native doctor',
+          )
+        }
       }
       let result: Awaited<ReturnType<typeof reconcileDesktopProfile>>
       try {
@@ -110,8 +120,9 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
         )
       }
       if (adopted !== undefined && result.transactionId !== undefined) {
-        // The desired profile changed since the interrupted transaction: two
-        // open applied journals can never both settle. Never stack them.
+        // Lost a race with an edit between the plan check and the apply:
+        // restore the fresh transaction's files, then block for review.
+        await rollbackProfileTransaction(result.transactionId, lease).catch(() => undefined)
         return needsReviewBlock(
           'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — run dsh-native doctor',
         )

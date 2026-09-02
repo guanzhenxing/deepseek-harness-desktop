@@ -61,6 +61,8 @@ export type RecoverySessionOptions = Readonly<{
   window: RecoveryWindowPort
   shutdownDeadlineMs?: number
   onSessionFailure?(failure: StartupFailure): void
+  /** Runs once per session that reached healthy, after the state flips. */
+  onHealthy?(): Promise<void> | void
   onLeaseReleaseError?(error: unknown): void
   /**
    * Marker store for the single automatic profile-recovery relaunch. A marker
@@ -105,6 +107,8 @@ export class RecoverySessionController implements RecoveryController {
   #mode: AttemptMode = 'normal'
   #autoRestartUsed = false
   #safeModeBlocked = false
+  #leaseReleased = false
+  #inFlightIsStart = false
 
   constructor(options: RecoverySessionOptions) {
     this.#options = options
@@ -120,7 +124,7 @@ export class RecoverySessionController implements RecoveryController {
     }
     // Startup actions exist only while the session still holds the lease:
     // a lease-less recovery view may offer diagnosis and quit, nothing else.
-    const leaseHeld = this.#lease !== undefined
+    const leaseHeld = this.#lease !== undefined && !this.#leaseReleased
     return Object.freeze({
       failure: this.#failure,
       retryAllowed:
@@ -137,15 +141,20 @@ export class RecoverySessionController implements RecoveryController {
   }
 
   async start(): Promise<void> {
+    if (this.#state !== 'idle') throw new Error('session can start only once')
     this.#state = 'starting'
     // Startup joins the in-flight chain so a quit arriving mid-acquisition
     // merges with it instead of exiting before the lease exists to release.
     const run = this.#startSession()
     this.#inFlight = run
+    this.#inFlightIsStart = true
     try {
       await run
     } finally {
-      if (this.#inFlight === run) this.#inFlight = undefined
+      if (this.#inFlight === run) {
+        this.#inFlight = undefined
+        this.#inFlightIsStart = false
+      }
     }
   }
 
@@ -180,7 +189,7 @@ export class RecoverySessionController implements RecoveryController {
    */
   async hostCrashed(failure?: StartupFailure): Promise<void> {
     if (this.#state !== 'healthy' && !this.#surfaceMounted) return
-    if (this.#state === 'stopped') return
+    if (this.#state === 'stopped' || this.#state === 'stopping') return
     this.#surfaceMounted = false
     this.#state = 'recovery'
     this.#failure = failure ?? {
@@ -200,11 +209,15 @@ export class RecoverySessionController implements RecoveryController {
     const inFlight = this.#inFlight
     if (inFlight !== undefined) {
       // Concurrent clicks merge into the in-flight action; quit upgrades it.
+      const wasStart = this.#inFlightIsStart
       await inFlight.catch(() => undefined)
       if (this.#quitRequest && this.#state !== 'stopped') {
         await this.#stopAndRelease().catch(() => undefined)
+        return
       }
-      return
+      // A click that merged into the settling startup tail now runs as its
+      // own action instead of being swallowed by the microtask window.
+      if (!wasStart || action === 'quit') return
     }
     if (this.#quitRequest) {
       await this.#stopAndRelease()
@@ -278,7 +291,9 @@ export class RecoverySessionController implements RecoveryController {
   }
 
   async #prepareAndRun(lease: HomeLease): Promise<void> {
+    if (this.#quitRequest) return
     const prepared = await this.#options.profile.prepare(lease)
+    if (this.#quitRequest) return
     if (prepared.kind === 'blocked') throw new StartupFailureError(prepared.failure)
     this.#pendingTransaction = prepared.transactionId
     this.#changed = prepared.changed
@@ -286,6 +301,7 @@ export class RecoverySessionController implements RecoveryController {
   }
 
   async #runAttempt(lease: HomeLease, mode: AttemptMode): Promise<void> {
+    if (this.#quitRequest) return
     const attempt = this.#options.createAttempt(lease, mode)
     this.#attempt = attempt
     this.#state = 'starting'
@@ -301,8 +317,21 @@ export class RecoverySessionController implements RecoveryController {
     }
     // A crash handled by hostCrashed() during the commit awaits already moved
     // the session to recovery; never overwrite that verdict with healthy.
-    if (this.#state === 'recovery') return
+    if (this.#isInRecovery()) return
     this.#state = 'healthy'
+    // Post-healthy work (relaunch marker clear, retiring the recovery
+    // window) runs while the session is already healthy, so a crash in it
+    // is still a post-ready crash.
+    await Promise.resolve(this.#options.onHealthy?.()).catch((error: unknown) => {
+      console.error(
+        'healthy-session hook failed:',
+        error instanceof Error ? error.message : error,
+      )
+    })
+  }
+
+  #isInRecovery(): boolean {
+    return this.#state === 'recovery'
   }
 
   /**
@@ -412,6 +441,7 @@ export class RecoverySessionController implements RecoveryController {
       if (this.#lease !== undefined) {
         try {
           await this.#lease.release()
+          this.#leaseReleased = true
         } catch (error) {
           this.#options.onLeaseReleaseError?.(error)
         }
