@@ -11,6 +11,10 @@
     "./host-runner": {
       "types": "./lib/host-runner.d.ts",
       "default": "./lib/host-runner.js"
+    },
+    "./boot-profile": {
+      "types": "./lib/boot-profile.d.ts",
+      "default": "./lib/boot-profile.js"
     }
   },
   "scripts": {

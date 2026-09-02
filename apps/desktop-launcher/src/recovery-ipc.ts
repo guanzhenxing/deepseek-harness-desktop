@@ -20,13 +20,16 @@ export const RECOVERY_DOCUMENT_PATH = 'recovery-view.html'
 
 /**
  * Pure sender validation for the privileged recovery IPC. Only the exact
- * recovery window's main frame, at the fixed document path, with the fixed
- * schema, while the session is in recovery, may pass.
+ * recovery window's main frame, at the exact loaded document URL, with the
+ * fixed schema, while the session is in recovery, may pass. A child frame of
+ * the same document — or any other window, path, or navigation — is rejected.
  */
 export function validateRecoveryIpc(
   input: Readonly<{
     senderId: number | undefined
     frameUrl: string | undefined
+    frameIsMainFrame: boolean | undefined
+    expectedFrameUrl: string
     expectedSenderIds: ReadonlySet<number>
     inRecovery: boolean
     channel: string
@@ -41,19 +44,11 @@ export function validateRecoveryIpc(
     return { ok: false, reason: `unknown channel ${JSON.stringify(input.channel)}` }
   }
   if (input.frameUrl === undefined) return { ok: false, reason: 'missing frame url' }
-  let parsed: URL
-  try {
-    parsed = new URL(input.frameUrl)
-  } catch {
-    return { ok: false, reason: 'invalid frame url' }
+  if (input.frameUrl !== input.expectedFrameUrl) {
+    return { ok: false, reason: 'unexpected document url' }
   }
-  if (parsed.protocol !== 'file:') return { ok: false, reason: 'non-file frame' }
-  const expectedSuffix = `/${RECOVERY_DOCUMENT_PATH}`
-  if (!parsed.pathname.endsWith(expectedSuffix)) {
-    return { ok: false, reason: 'unexpected document path' }
-  }
-  if (parsed.hash !== '' || parsed.search !== '') {
-    return { ok: false, reason: 'unexpected query or fragment' }
+  if (input.frameIsMainFrame !== true) {
+    return { ok: false, reason: 'sender is not the main frame' }
   }
   if (typeof input.payload !== 'object' || input.payload === null) {
     return { ok: false, reason: 'payload must be an object' }

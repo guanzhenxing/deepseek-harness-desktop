@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { BrowserWindow, ipcMain } from 'electron'
 
@@ -43,11 +43,17 @@ export function createRecoveryWindow(options: {
   })
   window.webContents.session.setPermissionCheckHandler(() => false)
   window.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   const guardNavigation = (event: Electron.Event): void => {
     event.preventDefault()
   }
   window.webContents.on('will-navigate', guardNavigation)
   window.webContents.on('will-redirect', guardNavigation)
+
+  // The one document URL senders may speak from; compared exactly, so any
+  // navigation, query, or fragment retires the window's IPC privileges.
+  const documentPath = path.join(documentRoot, RECOVERY_DOCUMENT_PATH)
+  const expectedFrameUrl = pathToFileURL(documentPath).href
 
   // Capture the webContents id once: after destroy() the 'closed' handler
   // must never touch the torn-down webContents object.
@@ -64,6 +70,8 @@ export function createRecoveryWindow(options: {
     const verdict = validateRecoveryIpc({
       senderId: event.sender.id,
       frameUrl: event.senderFrame?.url,
+      frameIsMainFrame: event.senderFrame != null && event.senderFrame.parent == null,
+      expectedFrameUrl,
       expectedSenderIds: senderIds,
       inRecovery: options.isInRecovery(),
       channel: 'recovery:action',
@@ -81,7 +89,7 @@ export function createRecoveryWindow(options: {
     senderIds,
     async showRecoveryView(view) {
       if (window.isDestroyed()) return
-      await window.loadFile(path.join(documentRoot, RECOVERY_DOCUMENT_PATH))
+      await window.loadFile(documentPath)
       if (window.isDestroyed()) return
       window.webContents.send('recovery:view', toIpcView(view))
       window.show()

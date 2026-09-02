@@ -84,8 +84,10 @@ describe('categorizeFailure', () => {
     expect(categorizeFailure({ stage: 'resolve-runtime', code: 'RUNTIME_UNAVAILABLE' })).toBe(
       'runtime',
     )
-    expect(categorizeFailure({ stage: 'load-surface', code: 'SURFACE_FAILED' })).toBe('renderer')
-    expect(categorizeFailure({ stage: 'native-ui', code: 'MENU_FAILED' })).toBe('native-ui')
+    expect(categorizeFailure({ stage: 'publish-surface', code: 'SURFACE_MISSING' })).toBe(
+      'renderer',
+    )
+    expect(categorizeFailure({ stage: 'host-control', code: 'INVALID_ENVELOPE' })).toBe('runtime')
   })
 
   it('maps recognized boot codes and stays unknown otherwise', () => {

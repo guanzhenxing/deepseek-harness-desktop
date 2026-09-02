@@ -169,6 +169,9 @@ importers:
       '@dsh-desktop/host-supervisor':
         specifier: workspace:*
         version: link:../host-supervisor
+      '@dsh-desktop/profile-manager':
+        specifier: workspace:*
+        version: link:../profile-manager
 
 packages:
 

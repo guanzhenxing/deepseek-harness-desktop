@@ -23,6 +23,14 @@ const failure: StartupFailure = {
   retryable: true,
 }
 
+const profileWriteFailure: StartupFailure = {
+  stage: 'resolve-profile',
+  code: 'PROFILE_INVALID',
+  category: 'profile-composition',
+  summary: 'composed profile is invalid',
+  retryable: false,
+}
+
 class RecordingLease implements HomeLease {
   readonly home = '/tmp/recovery-home'
   readonly generation = 'gen-1'
@@ -41,25 +49,83 @@ class RecordingLease implements HomeLease {
   async confirmHostExited(): Promise<void> {
     this.calls.push('confirmHostExited')
   }
+  async switchProfile(nextProfile: string): Promise<void> {
+    this.calls.push(`switchProfile:${nextProfile}`)
+  }
   async release(): Promise<void> {
     this.calls.push('release')
     if (this.releaseError !== undefined) throw this.releaseError
   }
 }
 
+type ProfilePortCalls = {
+  committed: string[]
+  rolledBack: string[]
+  retained: { id: string; category: string; code: string }[]
+  enteredSafeMode: number[]
+  exitedSafeMode: number[]
+  markers: { transactionId: string; attempt: number }[]
+}
+
 function fixture(options: { attemptStart?: () => Promise<HostReady> } = {}) {
   const lease = new RecordingLease()
-  const attempts: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] = []
+  const attempts: {
+    start: ReturnType<typeof vi.fn>
+    stop: ReturnType<typeof vi.fn>
+    mode: string
+  }[] = []
   const views: unknown[] = []
   const onSessionFailure = vi.fn()
+  const portCalls: ProfilePortCalls = {
+    committed: [],
+    rolledBack: [],
+    retained: [],
+    enteredSafeMode: [],
+    exitedSafeMode: [],
+    markers: [],
+  }
+  let marker: { transactionId: string; attempt: number } | undefined
   const clock = { now: 0 }
+  let nextTransaction = 0
   const controller = new RecoverySessionController({
     acquireLease: async () => lease,
-    reconcile: async () => undefined,
-    createAttempt: () => {
+    profile: {
+      prepare: async () => {
+        nextTransaction += 1
+        return { kind: 'ready', transactionId: `tx-${nextTransaction}`, changed: true }
+      },
+      settleCommitted: async (transactionId) => {
+        portCalls.committed.push(transactionId)
+      },
+      rollback: async (transactionId) => {
+        portCalls.rolledBack.push(transactionId)
+        return 'restored'
+      },
+      retain: async (transactionId, leaseForRetain, failureForRetain) => {
+        void leaseForRetain
+        portCalls.retained.push({
+          id: transactionId,
+          category: failureForRetain.category,
+          code: failureForRetain.code,
+        })
+      },
+      enterSafeMode: async () => {
+        portCalls.enteredSafeMode.push(clock.now)
+        return 'prepared'
+      },
+      exitSafeMode: async () => {
+        portCalls.exitedSafeMode.push(clock.now)
+      },
+    },
+    readRecoveryMarker: async () => marker,
+    writeRecoveryMarker: async (entry) => {
+      marker = entry
+      portCalls.markers.push(entry)
+    },
+    createAttempt: (_lease, mode) => {
       const start = vi.fn(options.attemptStart ?? (async () => ready))
       const stop = vi.fn(async () => undefined)
-      attempts.push({ start, stop })
+      attempts.push({ start, stop, mode })
       return { start, stop } as unknown as HostAttempt
     },
     loadSurface: async () => undefined,
@@ -72,16 +138,26 @@ function fixture(options: { attemptStart?: () => Promise<HostReady> } = {}) {
     onSessionFailure,
     now: () => clock.now,
   })
-  return { attempts, clock, controller, lease, onSessionFailure, views }
+  return {
+    attempts,
+    clock,
+    controller,
+    lease,
+    onSessionFailure,
+    portCalls,
+    views,
+    setMarker: (value: { transactionId: string; attempt: number } | undefined) => (marker = value),
+  }
 }
 
 describe('RecoverySessionController', () => {
-  it('starts healthy without a recovery view', async () => {
+  it('starts healthy, commits the transaction, and shows no recovery view', async () => {
     const setup = fixture()
     await setup.controller.start()
     expect(setup.controller.state).toBe('healthy')
     expect(setup.views).toHaveLength(0)
     expect(setup.attempts).toHaveLength(1)
+    expect(setup.portCalls.committed).toEqual(['tx-1'])
   })
 
   it('classifies startup failures and shows the bounded recovery view', async () => {
@@ -93,8 +169,108 @@ describe('RecoverySessionController', () => {
     expect(setup.views).toHaveLength(1)
     const view = setup.views[0] as { retryAllowed: boolean; safeModeAllowed: boolean }
     expect(view.retryAllowed).toBe(true)
-    expect(view.safeModeAllowed).toBe(false)
+    expect(view.safeModeAllowed).toBe(true)
     expect(setup.attempts[0]?.stop).toHaveBeenCalledWith('quit', 5_000)
+    // runtime failures are not attributable to the profile: retained, not rolled back
+    expect(setup.portCalls.rolledBack).toHaveLength(0)
+    expect(setup.portCalls.retained).toEqual([
+      { id: 'tx-1', category: 'runtime', code: 'BOOT_FAILED' },
+    ])
+  })
+
+  it('rolls back on an attributed failure and auto-restarts exactly once', async () => {
+    let boot = 0
+    const setup = fixture({
+      attemptStart: () => {
+        boot += 1
+        return boot <= 3
+          ? Promise.reject(new StartupFailureError(profileWriteFailure))
+          : Promise.resolve(ready)
+      },
+    })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    // first failure: rollback tx-1, one automatic relaunch, which failed again
+    // (tx-2 rolled back), and the relaunch budget is spent.
+    expect(setup.portCalls.rolledBack).toEqual(['tx-1', 'tx-2'])
+    expect(setup.portCalls.markers).toEqual([{ transactionId: 'tx-1', attempt: 1 }])
+    expect(setup.attempts).toHaveLength(2)
+    expect(setup.views).toHaveLength(1)
+    expect(setup.controller.state).toBe('recovery')
+    // A manual retry that fails again must not earn another auto-restart.
+    await setup.controller.act('retry')
+    expect(setup.attempts).toHaveLength(3)
+    expect(setup.portCalls.rolledBack).toEqual(['tx-1', 'tx-2', 'tx-3'])
+    expect(setup.views).toHaveLength(2)
+  })
+
+  it('recovers to healthy without a recovery view when the relaunch succeeds', async () => {
+    let boot = 0
+    const setup = fixture({
+      attemptStart: () => {
+        boot += 1
+        return boot === 1
+          ? Promise.reject(new StartupFailureError(profileWriteFailure))
+          : Promise.resolve(ready)
+      },
+    })
+    await setup.controller.start()
+    expect(setup.controller.state).toBe('healthy')
+    expect(setup.views).toHaveLength(0)
+    expect(setup.portCalls.rolledBack).toEqual(['tx-1'])
+    expect(setup.portCalls.committed).toEqual(['tx-2'])
+    expect(setup.attempts).toHaveLength(2)
+  })
+
+  it('a persisted marker for the pending transaction spends the relaunch budget', async () => {
+    const setup = fixture({
+      attemptStart: () => Promise.reject(new StartupFailureError(profileWriteFailure)),
+    })
+    setup.setMarker({ transactionId: 'tx-1', attempt: 1 })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    expect(setup.portCalls.rolledBack).toEqual(['tx-1'])
+    expect(setup.portCalls.markers).toHaveLength(0)
+    expect(setup.attempts).toHaveLength(1)
+    expect(setup.views).toHaveLength(1)
+  })
+
+  it('a rollback conflict keeps the journal and shows the recovery view', async () => {
+    const lease = new RecordingLease()
+    const views: unknown[] = []
+    let nextTransaction = 0
+    const rolledBack: string[] = []
+    const controller = new RecoverySessionController({
+      acquireLease: async () => lease,
+      profile: {
+        prepare: async () => {
+          nextTransaction += 1
+          return { kind: 'ready', transactionId: `tx-${nextTransaction}`, changed: true }
+        },
+        settleCommitted: async () => undefined,
+        rollback: async (transactionId) => {
+          rolledBack.push(transactionId)
+          return 'conflict'
+        },
+        retain: async () => undefined,
+        enterSafeMode: async () => 'prepared',
+        exitSafeMode: async () => undefined,
+      },
+      createAttempt: () =>
+        ({
+          start: () => Promise.reject(new StartupFailureError(profileWriteFailure)),
+          stop: async () => undefined,
+        }) as unknown as HostAttempt,
+      loadSurface: async () => undefined,
+      window: {
+        showRecoveryView: async (view) => {
+          views.push(view)
+        },
+        destroySurface: () => undefined,
+      },
+    })
+    await expect(controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    expect(rolledBack).toEqual(['tx-1'])
+    expect(controller.state).toBe('recovery')
+    expect(views).toHaveLength(1)
   })
 
   it('merges concurrent retries into exactly one attempt', async () => {
@@ -143,15 +319,19 @@ describe('RecoverySessionController', () => {
     const reported: unknown[] = []
     const controller = new RecoverySessionController({
       acquireLease: async () => setup.lease,
-      reconcile: async () => undefined,
+      profile: {
+        prepare: async () => ({ kind: 'ready', changed: false }),
+        settleCommitted: async () => undefined,
+        rollback: async () => 'restored',
+        retain: async () => undefined,
+        enterSafeMode: async () => 'prepared',
+        exitSafeMode: async () => undefined,
+      },
       createAttempt: () => {
-        const attempt = setup.attempts[0]
-        if (attempt !== undefined) return attempt as unknown as HostAttempt
         const stub = {
           start: vi.fn(async () => Promise.reject(new StartupFailureError(failure))),
           stop: vi.fn(async () => undefined),
         }
-        setup.attempts.push(stub)
         return stub as unknown as HostAttempt
       },
       loadSurface: async () => undefined,
@@ -175,5 +355,58 @@ describe('RecoverySessionController', () => {
     expect(view.failure.category).toBe('unknown')
     expect(view.failure.stage).toBe('unknown')
     expect(view.failure.summary).toContain('boom')
+  })
+
+  it('enters safe mode from recovery and exits it before a normal retry', async () => {
+    let boot = 0
+    const setup = fixture({
+      attemptStart: () => {
+        boot += 1
+        return boot === 1
+          ? Promise.reject(new StartupFailureError(failure))
+          : Promise.resolve(ready)
+      },
+    })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    await setup.controller.act('safe-mode')
+    expect(setup.controller.state).toBe('healthy')
+    expect(setup.attempts.at(-1)?.mode).toBe('safe')
+    expect(setup.portCalls.enteredSafeMode).toHaveLength(1)
+    // Safe mode became healthy: its boot carries no profile transaction.
+    expect(setup.portCalls.committed).toHaveLength(0)
+  })
+
+  it('withdraws the safe-mode entry when the safe profile conflicts', async () => {
+    const lease = new RecordingLease()
+    const views: unknown[] = []
+    const controller = new RecoverySessionController({
+      acquireLease: async () => lease,
+      profile: {
+        prepare: async () => ({ kind: 'ready', changed: false }),
+        settleCommitted: async () => undefined,
+        rollback: async () => 'restored',
+        retain: async () => undefined,
+        enterSafeMode: async () => 'conflict',
+        exitSafeMode: async () => undefined,
+      },
+      createAttempt: () =>
+        ({
+          start: () => Promise.reject(new StartupFailureError(failure)),
+          stop: async () => undefined,
+        }) as unknown as HostAttempt,
+      loadSurface: async () => undefined,
+      window: {
+        showRecoveryView: async (view) => {
+          views.push(view)
+        },
+        destroySurface: () => undefined,
+      },
+    })
+    await expect(controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    await controller.act('safe-mode')
+    expect(controller.state).toBe('recovery')
+    const view = controller.getView() as { safeModeAllowed: boolean }
+    expect(view.safeModeAllowed).toBe(false)
+    expect(views).toHaveLength(2)
   })
 })

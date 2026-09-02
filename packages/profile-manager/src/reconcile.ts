@@ -244,14 +244,39 @@ export async function reconcileDesktopProfile(
   return legacyIsolatedReconcile(ref, () => Promise.resolve())
 }
 
+/** Reconcile failure tagged with where it happened, for launcher-side attribution. */
+export class ProfileReconcileError extends Error {
+  constructor(
+    readonly phase: 'plan' | 'apply',
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'ProfileReconcileError'
+  }
+}
+
 /** Shared-home reconcile: plan, apply as a journaled revision transaction. */
 async function reconcileUnderLease(ref: ProfileRef, lease: HomeLease): Promise<ReconcileResult> {
-  await ensureContainedProfileDirectory(ref)
-  const plan = await planDesktopReconcile(ref, lease)
+  try {
+    await ensureContainedProfileDirectory(ref)
+  } catch (cause) {
+    throw new ProfileReconcileError('plan', cause)
+  }
+  let plan
+  try {
+    plan = await planDesktopReconcile(ref, lease)
+  } catch (cause) {
+    throw new ProfileReconcileError('plan', cause)
+  }
   const manifestWrite = plan.writes.find((write) => write.path === 'package.json')
   let transactionId: string | undefined
   if (plan.writes.length > 0) {
-    const tx = await applyProfileTransaction(plan, lease)
+    let tx
+    try {
+      tx = await applyProfileTransaction(plan, lease)
+    } catch (cause) {
+      throw new ProfileReconcileError('apply', cause)
+    }
     transactionId = tx.id
   }
   const manifestPath = path.join(ref.dir, 'package.json')

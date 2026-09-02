@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@dsh-desktop/desktop-contracts": "workspace:*",
+    "@dsh-desktop/home-lease": "workspace:*",
     "@dsh-desktop/host-supervisor": "workspace:*",
-    "@dsh-desktop/home-lease": "workspace:*"
+    "@dsh-desktop/profile-manager": "workspace:*"
   }
 }

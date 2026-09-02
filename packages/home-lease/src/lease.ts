@@ -31,6 +31,12 @@ export interface HomeLease {
   beforeSpawn(profile: string): Promise<void>
   attachHost(identity: ProcessIdentity): Promise<void>
   confirmHostExited(): Promise<void>
+  /**
+   * Move this lease to a different profile (e.g. entering Safe Mode). The
+   * owner record is updated atomically under the guard; requires that no host
+   * spawn is pending or registered.
+   */
+  switchProfile(nextProfile: string): Promise<void>
   release(): Promise<void>
 }
 
@@ -84,7 +90,7 @@ function validateProfile(profile: string): string {
  */
 export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<HomeLease> {
   const home = validateHome(input.home)
-  const profile = validateProfile(input.profile)
+  let profile = validateProfile(input.profile)
   const paths = leasePaths(home)
   await ensureHomeLayout(paths)
   const probe = input.probe
@@ -268,6 +274,21 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
           host: null,
           pendingSpawn: false,
         })
+      }),
+    switchProfile: (nextProfile: string) =>
+      withGuard(async () => {
+        if (released) throw new LeaseError('LEASE_NOT_HELD', 'home lease was already released')
+        const validated = validateProfile(nextProfile)
+        const owner = await readOurs()
+        if (owner.pendingSpawn || owner.host !== null) {
+          throw new LeaseError(
+            'LEASE_STATE',
+            'the lease profile can only change while no host is registered',
+          )
+        }
+        if (validated === owner.profile) return
+        await writeOwnerWithDurability(paths.ownerPath, { ...owner, profile: validated })
+        profile = validated
       }),
     release: () =>
       withGuard(async () => {

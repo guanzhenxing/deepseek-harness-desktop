@@ -111,6 +111,10 @@ class RecordingLease implements HomeLease {
     this.calls.push('confirmHostExited')
     this.events.push('confirmHostExited')
   }
+  async switchProfile(nextProfile: string): Promise<void> {
+    this.calls.push(`switchProfile:${nextProfile}`)
+    this.events.push(`switchProfile:${nextProfile}`)
+  }
 
   async release(): Promise<void> {
     this.calls.push('release')

@@ -24,14 +24,20 @@ export type StartupFailure = Readonly<{
   retryable: boolean
 }>
 
+// Stage names are the ones the capture sites actually emit: host-runner
+// stages (`resolve-runtime`, `resolve-profile`, `load-home-patch`, `boot`,
+// `publish-surface`, `host-control`) plus the launcher-side
+// `reconcile-profile` (profile-manager apply under lease). `recover-transactions`
+// and other recovery-orchestration stages stay deliberately unmapped: their
+// failures must never justify automatic profile rollback.
 const STAGE_CATEGORIES: Readonly<Record<string, FailureCategory>> = {
   lease: 'lease',
   'reconcile-profile': 'profile-write',
   'resolve-profile': 'profile-composition',
   'load-home-patch': 'home-config',
   'resolve-runtime': 'runtime',
-  'load-surface': 'renderer',
-  'native-ui': 'native-ui',
+  'publish-surface': 'renderer',
+  'host-control': 'runtime',
 }
 
 /** Codes inside the Host's broad `boot` stage that carry a real attribution. */

@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { HomeLease } from '@dsh-desktop/home-lease'
 
 import type { ProfileRef } from './profile-ref.js'
+import { writeAtomicDurable } from './durable-fs.js'
 
 export const SAFE_PROFILE_NAME = 'desktop-safe-mode'
 
@@ -15,8 +16,9 @@ export const SAFE_BUNDLE_PREFIX = [
 
 /**
  * Prepare (or verify) the Safe Mode profile: exactly the three first-party
- * bundles. A safe profile containing unknown user content is never
- * overwritten — the caller keeps the local recovery page instead.
+ * bundles. A safe profile containing unknown user content — including an
+ * unreadable or unparsable manifest — is never overwritten; the caller keeps
+ * the local recovery page instead.
  */
 export async function prepareSafeProfile(
   ref: ProfileRef,
@@ -30,10 +32,24 @@ export async function prepareSafeProfile(
   }
   await lease.assertHeld()
   const manifestPath = path.join(ref.dir, 'package.json')
-  const existing = await readFile(manifestPath, 'utf8').catch(() => undefined)
+  let existing: string | undefined
+  try {
+    const identity = await lstat(manifestPath)
+    if (identity.isSymbolicLink()) return 'conflict'
+    if (!identity.isFile()) return 'conflict'
+    existing = await readFile(manifestPath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
   if (existing !== undefined) {
-    const manifest = JSON.parse(existing) as { dsh?: { profile?: { bundles?: string[] } } }
-    const bundles = manifest.dsh?.profile?.bundles
+    let bundles: unknown
+    try {
+      const manifest = JSON.parse(existing) as { dsh?: { profile?: { bundles?: unknown } } }
+      bundles = manifest.dsh?.profile?.bundles
+    } catch {
+      // An unparsable manifest is unknown user content, not an empty profile.
+      return 'conflict'
+    }
     if (JSON.stringify(bundles) !== JSON.stringify([...SAFE_BUNDLE_PREFIX])) {
       return 'conflict'
     }
@@ -50,6 +66,6 @@ export async function prepareSafeProfile(
     undefined,
     2,
   )}\n`
-  await writeFile(manifestPath, manifest, { mode: 0o600 })
+  await writeAtomicDurable(manifestPath, new TextEncoder().encode(manifest))
   return 'prepared'
 }

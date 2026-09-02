@@ -9,6 +9,8 @@ function base(overrides: Record<string, unknown> = {}) {
   return {
     senderId: 77,
     frameUrl: documentUrl,
+    frameIsMainFrame: true,
+    expectedFrameUrl: documentUrl,
     expectedSenderIds: senders,
     inRecovery: true,
     channel: 'recovery:action',
@@ -18,11 +20,16 @@ function base(overrides: Record<string, unknown> = {}) {
 }
 
 describe('validateRecoveryIpc', () => {
-  it('accepts the exact recovery window, frame, channel, and schema', () => {
+  it('accepts the exact recovery window, main frame, channel, and schema', () => {
     expect(validateRecoveryIpc(base())).toEqual({ ok: true, action: 'retry' })
     expect(
       validateRecoveryIpc(base({ payload: { kind: 'recovery-action', action: 'quit' } })),
     ).toEqual({ ok: true, action: 'quit' })
+  })
+
+  it('rejects child frames even when they carry the exact document url', () => {
+    expect(validateRecoveryIpc(base({ frameIsMainFrame: false })).ok).toBe(false)
+    expect(validateRecoveryIpc(base({ frameIsMainFrame: undefined })).ok).toBe(false)
   })
 
   it('rejects foreign senders and non-file origins', () => {
@@ -45,12 +52,16 @@ describe('validateRecoveryIpc', () => {
     expect(validateRecoveryIpc(base({ payload: null })).ok).toBe(false)
   })
 
-  it('rejects navigated or query-carrying documents and foreign paths', () => {
+  it('rejects navigated, query-carrying, and look-alike documents against the exact url', () => {
     expect(validateRecoveryIpc(base({ frameUrl: `${documentUrl}?x=1` })).ok).toBe(false)
     expect(validateRecoveryIpc(base({ frameUrl: `${documentUrl}#frag` })).ok).toBe(false)
     expect(validateRecoveryIpc(base({ frameUrl: 'file:///app/resources/other.html' })).ok).toBe(
       false,
     )
+    // A same-named document under a different directory is not the recovery document.
+    expect(
+      validateRecoveryIpc(base({ frameUrl: `file:///app/elsewhere/${RECOVERY_DOCUMENT_PATH}` })).ok,
+    ).toBe(false)
   })
 })
 

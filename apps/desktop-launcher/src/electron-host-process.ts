@@ -7,11 +7,12 @@ import type {
   HostProcessFactory,
   ManagedHostProcess,
 } from '@dsh-desktop/host-supervisor'
+import { assertBootProfile } from '@dsh-desktop/host-supervisor/boot-profile'
 
 import { sanitizeHostEnvironment } from './host-environment.js'
 
 type ElectronHostBootstrap = Omit<HostBootstrap, 'mode'> & {
-  mode: 'normal'
+  mode: HostBootstrap['mode']
   startIdentity: string
 }
 
@@ -27,12 +28,14 @@ class ElectronManagedHostProcess implements ManagedHostProcess {
   }
 
   deliverBootstrap(bootstrap: HostBootstrap): void {
-    if (bootstrap.mode !== 'normal') {
-      throw new Error('M1 Electron Host supports only normal mode')
-    }
+    const profile = assertBootProfile({
+      mode: bootstrap.mode,
+      profileName: bootstrap.profileName,
+    })
+    if (!profile.ok) throw new Error(`Electron Host bootstrap invalid: ${profile.reason}`)
     const privateBootstrap: ElectronHostBootstrap = {
       ...bootstrap,
-      mode: 'normal',
+      mode: bootstrap.mode,
       startIdentity: this.startIdentity,
     }
     this.#child.postMessage({ kind: 'dsh-desktop-bootstrap', bootstrap: privateBootstrap })

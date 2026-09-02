@@ -150,19 +150,34 @@ describe('quarantineProjectionCache', () => {
     const lease = await leaseOf(dir)
     const first = await quarantineProjectionCache({ home: dir, lease, thresholdBytes: 1024 })
     if (first.kind !== 'quarantined') throw new Error('first quarantine failed')
-    // Rewind the journal to 'renamed' to simulate a crash before done.
+    // A successful quarantine cleans its journal up; rebuild the crash window
+    // by hand: a journal stuck at 'renamed' with the backup already moved.
     const journalFile = path.join(dir, 'run', 'projection-cache-quarantine.json')
-    const raw = JSON.parse(await readFile(journalFile, 'utf8'))
-    raw.phase = 'renamed'
-    await writeFile(journalFile, `${JSON.stringify(raw, null, 2)}\n`)
+    await writeFile(
+      journalFile,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          id: 'interrupted-quarantine',
+          sourceRelative: 'storages/session_projcache/sessions',
+          backupRelative: first.relativeBackupPath,
+          bytes: first.bytes,
+          createdAt: new Date().toISOString(),
+          phase: 'renamed',
+        },
+        null,
+        2,
+      )}\n`,
+    )
     const second = await quarantineProjectionCache({ home: dir, lease, thresholdBytes: 1024 })
     expect(second).toEqual({
       kind: 'quarantined',
       relativeBackupPath: first.relativeBackupPath,
       bytes: first.bytes,
     })
-    // The backup was not moved a second time.
+    // The backup was not moved a second time and the settled journal is gone.
     expect(await stat(path.join(dir, first.relativeBackupPath))).toBeTruthy()
+    await expect(readFile(journalFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     await lease.release()
   })
 })

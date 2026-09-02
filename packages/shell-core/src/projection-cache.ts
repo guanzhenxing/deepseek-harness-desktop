@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { lstat, open, readFile, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { HomeLease } from '@dsh-desktop/home-lease'
@@ -100,34 +100,24 @@ export async function quarantineProjectionCache(
   const previous = await readJournal(input.home)
   if (previous !== undefined && previous.phase !== 'done') {
     const backupDir = path.join(input.home, previous.backupRelative)
-    const sourceDir = path.join(input.home, previous.sourceRelative)
     const backupExists = await stat(backupDir).then(
       () => true,
       () => false,
     )
-    const sourceExists = await stat(sourceDir).then(
-      () => true,
-      () => false,
-    )
-    if (backupExists && sourceExists) {
-      // The source was rebuilt after the crash: finish the journal.
+    if (backupExists) {
+      // The rename either landed or never happened; the backup is intact
+      // either way. The journal has served its purpose.
       await writeJournalDurable(input.home, { ...previous, phase: 'done' })
+      await cleanupQuarantineJournal(input.home)
       return {
         kind: 'quarantined',
         relativeBackupPath: previous.backupRelative,
         bytes: previous.bytes,
       }
     }
-    if (backupExists && !sourceExists) {
-      // Rename may or may not have happened; the backup is intact either way.
-      await writeJournalDurable(input.home, { ...previous, phase: 'done' })
-      return {
-        kind: 'quarantined',
-        relativeBackupPath: previous.backupRelative,
-        bytes: previous.bytes,
-      }
-    }
-    // Neither exists: treat as a stale journal and continue with a fresh scan.
+    // No backup: treat as a stale journal and continue with a fresh scan.
+  } else if (previous !== undefined) {
+    await cleanupQuarantineJournal(input.home)
   }
 
   const sourceRelative = CACHE_RELATIVE
@@ -147,10 +137,18 @@ export async function quarantineProjectionCache(
   }
   const bytes = await directorySize(sourceDir)
   if (bytes < input.thresholdBytes) return { kind: 'unchanged' }
+  // The size scan walked the tree; refuse to move anything if the directory
+  // identity moved underneath us between the scan and the rename.
+  const rescanned = await lstat(sourceDir).catch(() => undefined)
+  if (
+    rescanned === undefined ||
+    rescanned.dev !== sourceIdentity.dev ||
+    rescanned.ino !== sourceIdentity.ino
+  ) {
+    return { kind: 'unknown-layout' }
+  }
 
   const id = randomUUID()
-  const backupRelative = `${CACHE_ROOT_RELATIVE.replace(/\//gu, '-')}/${QUARANTINE_PREFIX}${id}`
-  void backupRelative
   const backupRelativePath = path.join(input.home, 'storages', `${QUARANTINE_PREFIX}${id}`)
   const backupRelativeForJournal = `storages/${QUARANTINE_PREFIX}${id}`
 
@@ -184,6 +182,9 @@ export async function quarantineProjectionCache(
     phase: 'done',
   })
   await syncDirectory(path.dirname(backupRelativePath))
+  // The journal only spans the crash window around the rename; once the move
+  // is durably done it has no diagnostic value the backup itself lacks.
+  await cleanupQuarantineJournal(input.home)
   return {
     kind: 'quarantined',
     relativeBackupPath: backupRelativeForJournal,
@@ -191,13 +192,6 @@ export async function quarantineProjectionCache(
   }
 }
 
-export const PROJECTION_CACHE_LAYOUT = {
-  cacheRelative: CACHE_RELATIVE,
-  quarantinePrefix: QUARANTINE_PREFIX,
-  hashOf: (content: string): string => createHash('sha256').update(content).digest('hex'),
-} as const
-
 export async function cleanupQuarantineJournal(home: string): Promise<void> {
   await rm(path.join(home, JOURNAL_RELATIVE), { force: true }).catch(() => undefined)
-  void mkdir
 }

@@ -1,13 +1,13 @@
 import type { HomeLease } from '@dsh-desktop/home-lease'
+import path from 'node:path'
 
 import type { ProfileRef } from './profile-ref.js'
 import {
+  currentSha,
   readJournal,
   readdirTransactionIds,
   rollbackProfileTransaction,
-  transactionDir,
 } from './revision-transaction.js'
-import { rm } from 'node:fs/promises'
 
 export type RecoveryOutcome = 'clean' | 'restored' | 'conflict' | 'needs-review'
 
@@ -16,6 +16,8 @@ export type RecoveryOutcome = 'clean' | 'restored' | 'conflict' | 'needs-review'
  * boot. Writes that never reached `applied` are rolled back idempotently from
  * disk facts; a journal that reached `applied` without a recorded outcome has
  * no attribution and is surfaced as needs-review instead of being guessed at.
+ * Rolled-back journals are terminal state and stay within the normal
+ * retention window — they are never deleted here.
  */
 export async function recoverInterruptedTransactions(
   ref: ProfileRef,
@@ -55,10 +57,33 @@ export async function recoverInterruptedTransactions(
     // restore idempotently. A rolled-back-by-someone-else journal is fine.
     const result = await rollbackProfileTransaction(id, lease)
     if (result === 'conflict') return outcome('conflict')
-    await rm(transactionDir(lease.home, id), { recursive: true, force: true }).catch(
-      () => undefined,
-    )
     sawRestored = true
   }
   return sawRestored ? 'restored' : 'clean'
+}
+
+/**
+ * Inspect the `applied` journal that made `recoverInterruptedTransactions`
+ * return needs-review. `atCandidate` is true only when every managed file is
+ * still exactly at the recorded candidate digest — the precondition for the
+ * launcher to adopt the transaction and settle it as committed on evidence of
+ * a healthy boot, without ever guessing that the profile was at fault.
+ */
+export async function findAppliedTransaction(
+  ref: ProfileRef,
+): Promise<Readonly<{ id: string; atCandidate: boolean }> | undefined> {
+  for (const id of await readdirTransactionIds(ref.home)) {
+    const journal = await readJournal(ref.home, id)
+    if (journal === 'missing' || journal === 'corrupt' || journal.state !== 'applied') continue
+    let atCandidate = true
+    for (const write of journal.writes) {
+      const { sha } = await currentSha(path.join(ref.dir, write.path))
+      if (sha !== write.candidateSha256) {
+        atCandidate = false
+        break
+      }
+    }
+    return { id, atCandidate }
+  }
+  return undefined
 }

@@ -207,6 +207,41 @@ describe('revision transactions', () => {
     await lease.release()
   })
 
+  it('keeps rolled-back journals as terminal records within retention', async () => {
+    const { ref, lease } = await leasedHome()
+    const plan = await planDesktopReconcile(ref, lease)
+    const tx = await applyProfileTransaction(plan, lease)
+    await expect(rollbackProfileTransaction(tx.id, lease)).resolves.toBe('restored')
+    // Terminal journals are retained for diagnosis, never deleted by recovery.
+    const journal = await readJournal(ref.home, tx.id)
+    expect(journal === 'corrupt' || journal === 'missing' ? journal : journal.state).toBe(
+      'rolled-back',
+    )
+    await expect(stat(transactionDir(ref.home, tx.id))).resolves.toBeTruthy()
+    await lease.release()
+  })
+
+  it('completes a crash-interrupted rollback idempotently from the rolling-back state', async () => {
+    const { ref, lease } = await leasedHome()
+    await applyFullInitial(ref, lease)
+    const original = JSON.parse(await readFile(path.join(ref.dir, 'package.json'), 'utf8'))
+    original.dsh.profile.bundles = ['@fixture/x', ...original.dsh.profile.bundles]
+    const userEdited = `${JSON.stringify(original, null, 2)}\n`
+    await writeFile(path.join(ref.dir, 'package.json'), userEdited)
+    const plan = await planDesktopReconcile(ref, lease)
+    const tx = await applyProfileTransaction(plan, lease)
+    // Crash right after the rolling-back journal write: phase-2 re-verification
+    // must still recognize the untouched candidate and restore it.
+    const journalFile = path.join(transactionDir(ref.home, tx.id), 'transaction.json')
+    const journal = JSON.parse(await readFile(journalFile, 'utf8')) as { state: string }
+    journal.state = 'rolling-back'
+    await writeFile(journalFile, `${JSON.stringify(journal, null, 2)}\n`)
+    await expect(rollbackProfileTransaction(tx.id, lease)).resolves.toBe('restored')
+    // The pre-transaction bytes (the user's own edit) come back byte-exact.
+    expect(await readFile(path.join(ref.dir, 'package.json'), 'utf8')).toBe(userEdited)
+    await lease.release()
+  })
+
   it('keeps journal snapshots private and stores only whitelisted relative paths', async () => {
     const { ref, lease } = await leasedHome()
     const plan = await planDesktopReconcile(ref, lease)

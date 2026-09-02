@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, readFile, rename, rm, stat, unlink } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, rm, stat, unlink } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { HomeLease } from '@dsh-desktop/home-lease'
@@ -7,6 +7,7 @@ import type { HomeLease } from '@dsh-desktop/home-lease'
 import type { ProfileRef } from './profile-ref.js'
 import { sha256Of } from './reconcile-plan.js'
 import type { FileRevision, ManagedProfilePath, ProfileReconcilePlan } from './reconcile-plan.js'
+import { syncDirectory, writeAtomicDurable } from './durable-fs.js'
 
 export type RevisionTransactionState =
   | 'prepared'
@@ -55,43 +56,11 @@ function journalPath(home: string, id: string): string {
   return path.join(transactionDir(home, id), 'transaction.json')
 }
 
-async function syncDirectory(dirname: string): Promise<void> {
-  const handle = await open(dirname, 'r')
-  try {
-    await handle.sync()
-  } finally {
-    await handle.close()
-  }
-}
-
 async function writeJournalDurable(home: string, record: JournalRecord): Promise<void> {
   await writeAtomicDurable(
     journalPath(home, record.id),
-    encoder.encode(`${JSON.stringify(record, null, 2)}\n`),
+    new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`),
   )
-}
-
-const encoder = new TextEncoder()
-
-/** fsync'd temp file + atomic rename; readers see old or new, never partial. */
-async function writeAtomicDurable(filename: string, bytes: Uint8Array): Promise<void> {
-  const temporary = `${filename}.${randomUUID()}.tmp`
-  const handle = await open(temporary, 'wx', 0o600)
-  try {
-    await handle.writeFile(bytes)
-    await handle.sync()
-  } finally {
-    await handle.close()
-  }
-  await rename(temporary, filename)
-  const written = await open(filename, 'r')
-  try {
-    await written.sync()
-  } finally {
-    await written.close()
-  }
-  await unlink(temporary).catch(() => undefined)
-  await syncDirectory(path.dirname(filename))
 }
 
 export async function readJournal(
@@ -183,6 +152,8 @@ async function currentSha(
   }
 }
 
+export { currentSha }
+
 function assertLeaseMatches(lease: HomeLease, ref: ProfileRef): void {
   if (lease.home !== ref.home) {
     throw new Error('profile transaction requires a lease bound to the transaction home')
@@ -270,7 +241,7 @@ export async function applyProfileTransaction(
 }
 
 async function mkdirProfileDirectory(ref: ProfileRef): Promise<void> {
-  await mkdir(ref.dir, { recursive: true, mode: 0o700 }).catch(() => undefined)
+  await mkdir(ref.dir, { recursive: true, mode: 0o700 })
 }
 
 export async function commitProfileTransaction(id: string, lease: HomeLease): Promise<void> {
@@ -327,25 +298,38 @@ export async function rollbackProfileTransaction(
   }
 
   const ref = journal.ref as ProfileRef
-  // Phase 1: verify every affected file is exactly at before or candidate.
-  const checked: { write: JournalWrite; sha: string | null }[] = []
+  // Phase 1: verify every affected file is exactly at before or candidate,
+  // recording the inode each verification saw.
+  const checked: {
+    write: JournalWrite
+    sha: string | null
+    inode: { dev: number; ino: number } | null
+  }[] = []
   for (const write of journal.writes) {
     const filename = path.join(ref.dir, write.path)
-    const { sha } = await currentSha(filename)
+    const current = await currentSha(filename)
     const allowed: (string | null)[] = [write.candidateSha256, write.before.sha256]
     if (write.before.exists === false) allowed.push(null)
-    if (!allowed.includes(sha)) {
+    if (!allowed.includes(current.sha)) {
       await writeJournalDurable(lease.home, { ...journal, state: 'conflict' })
       return 'conflict'
     }
-    checked.push({ write, sha })
+    checked.push({ write, sha: current.sha, inode: current.inode })
   }
 
   await writeJournalDurable(lease.home, { ...journal, state: 'rolling-back' })
 
-  // Phase 2: idempotently move each file back to before.
-  for (const { write, sha } of checked) {
+  // Phase 2: idempotently move each file back to before, re-verifying the
+  // path/inode/digest immediately before every write so drift between the
+  // two phases is never clobbered.
+  for (const { write, inode } of checked) {
     const filename = path.join(ref.dir, write.path)
+    const current = await currentSha(filename)
+    if (!sameInode(current.inode, inode)) {
+      await writeJournalDurable(lease.home, { ...journal, state: 'conflict' })
+      return 'conflict'
+    }
+    const sha = current.sha
     if (write.before.exists === false) {
       if (sha === null) continue
       if (sha === write.candidateSha256) {
@@ -378,6 +362,14 @@ export async function rollbackProfileTransaction(
   await writeJournalDurable(lease.home, { ...journal, state: 'rolled-back' })
   await pruneRetainedTransactions(lease.home)
   return 'restored'
+}
+
+function sameInode(
+  left: { dev: number; ino: number } | null,
+  right: { dev: number; ino: number } | null,
+): boolean {
+  if (left === null || right === null) return left === right
+  return left.dev === right.dev && left.ino === right.ino
 }
 
 /** Drop terminal transaction directories beyond the retention window. */

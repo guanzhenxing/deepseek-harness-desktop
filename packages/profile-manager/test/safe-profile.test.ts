@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -91,6 +91,26 @@ describe('prepareSafeProfile', () => {
     await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
     const after = JSON.parse(await readFile(manifestPath, 'utf8'))
     expect(after.dsh.profile.bundles).toContain('@fixture/third-party')
+    await lease.release()
+  })
+
+  it('treats an unparsable manifest as unknown user content, not an empty profile', async () => {
+    const { ref, lease } = await leasedHome()
+    await mkdir(ref.dir, { recursive: true, mode: 0o700 })
+    await writeFile(path.join(ref.dir, 'package.json'), 'not json at all', { mode: 0o600 })
+    await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
+    expect(await readFile(path.join(ref.dir, 'package.json'), 'utf8')).toBe('not json at all')
+    await lease.release()
+  })
+
+  it('refuses to follow a symlinked safe-profile manifest', async () => {
+    const { ref, lease } = await leasedHome()
+    const outside = path.join(ref.home, '..', 'safe-manifest-outside.json')
+    await writeFile(outside, '{}\n', { mode: 0o600 })
+    await mkdir(ref.dir, { recursive: true, mode: 0o700 })
+    await symlink(outside, path.join(ref.dir, 'package.json'), 'file')
+    await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
+    await expect(readFile(outside, 'utf8')).resolves.toBe('{}\n')
     await lease.release()
   })
 })

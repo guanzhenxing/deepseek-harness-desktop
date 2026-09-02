@@ -1,111 +1,265 @@
-// M2 smoke: automatic reconcile followed by an attributable profile boot
-// failure must restore the pre-transaction bytes; a drifted candidate must
-// surface conflict without overwriting; the automatic relaunch budget is one.
-import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+// M2 smoke: the real RecoverySessionController over the real profile-manager,
+// home lease, and transaction journals on a throwaway home. An attributable
+// profile failure rolls the journaled reconcile back byte-exact, relaunches
+// exactly once, and lands in the recovery view; a drifted candidate surfaces
+// conflict without overwriting; a healthy boot commits; home sentinel files
+// never change.
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const dshManifest = createRequire(
-  path.join(root, 'packages', 'host-supervisor', 'package.json'),
-).resolve('@deepseek-ai/dsh/package.json')
-const dshBin = path.join(path.dirname(dshManifest), 'lib', 'bin.js')
+const requireFromShellCore = createRequire(
+  path.join(root, 'packages', 'shell-core', 'package.json'),
+)
+const shellCore = requireFromShellCore('@dsh-desktop/shell-core')
+const homeLease = requireFromShellCore('@dsh-desktop/home-lease')
 
-async function run(command, args, env, cwd) {
-  const child = spawn(command, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] })
-  let output = ''
-  for (const stream of [child.stdout, child.stderr]) {
-    stream.setEncoding('utf8')
-    stream.on('data', (chunk) => {
-      output += chunk
-    })
-  }
-  const exit = await new Promise((resolve, reject) => {
-    child.once('error', reject)
-    child.once('exit', (code) => resolve(code ?? 1))
-  })
-  return { code: exit, output }
+const { RecoverySessionController, StartupFailureError, createDesktopProfileRecovery } = shellCore
+const { acquireHomeLease, createInProcessGuardLock } = homeLease
+
+const disposableHomes = []
+
+// A throwaway home with the same refusal rules as the shared test fixture:
+// never the real home, never inside the repo, and identity-reverified cleanup.
+async function freshHome(label) {
+  const userData = await mkdtemp(path.join(tmpdir(), `dsh-m2-${label}-`))
+  const home = path.join(userData, 'home')
+  await mkdir(path.join(home, 'profiles', 'desktop'), { recursive: true, mode: 0o700 })
+  const identity = await lstat(userData)
+  disposableHomes.push({ userData, dev: identity.dev, ino: identity.ino })
+  return home
 }
 
-const userData = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-m0-smoke-'))
-const home = path.join(userData, 'home')
-await mkdir(path.join(home, 'profiles', 'desktop'), { recursive: true, mode: 0o700 })
-// Compose with official bundles only: this smoke exercises the transaction
-// behavior, not the workspace desktop plugin projection.
-await writeFile(
-  path.join(home, 'profiles', 'desktop', 'package.json'),
-  `${JSON.stringify(
-    {
-      name: 'dsh-profile-desktop',
-      private: true,
-      dependencies: {},
-      dsh: {
-        profile: {
-          bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
-          patchReload: 'live',
-        },
-      },
+async function disposeHomes() {
+  for (const entry of disposableHomes.splice(0)) {
+    const identity = await lstat(entry.userData).catch(() => undefined)
+    if (identity === undefined) continue
+    if (identity.dev !== entry.dev || identity.ino !== entry.ino) {
+      throw new Error('refusing to clean a home fixture whose identity changed')
+    }
+    await rm(entry.userData, { recursive: true, force: true })
+  }
+}
+
+function sameProbe() {
+  return {
+    async current() {
+      return { pid: process.pid, startIdentity: 'profile-recovery-smoke' }
     },
-    undefined,
-    2,
-  )}\n`,
-)
-await writeFile(
-  path.join(home, '.credentials.yaml'),
-  'version: 1\nrefs:\n  DEEPSEEK_API_KEY: sk-mock\n',
-  {
-    mode: 0o600,
-  },
-)
-const env = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1' }
+    async identify(pid) {
+      return { pid, startIdentity: 'profile-recovery-smoke' }
+    },
+    async inspect() {
+      return 'same'
+    },
+    async scanSupported() {
+      return 'none'
+    },
+  }
+}
+
+async function leasedSession(home, options) {
+  const lease = await acquireHomeLease({
+    home,
+    entrypoint: 'desktop',
+    profile: 'desktop',
+    appVersion: '0.0.0',
+    probe: sameProbe(),
+    guard: createInProcessGuardLock(),
+  })
+  const marker = { value: undefined }
+  const session = {
+    attempts: [],
+    views: [],
+    surfaces: [],
+    controller: undefined,
+  }
+  session.controller = new RecoverySessionController({
+    acquireLease: async () => lease,
+    profile: createDesktopProfileRecovery({ home, profileName: 'desktop' }),
+    readRecoveryMarker: async () => marker.value,
+    writeRecoveryMarker: async (entry) => {
+      marker.value = entry
+    },
+    createAttempt: (_lease, mode) => {
+      session.attempts.push(mode)
+      return {
+        start: () => options.boot(session.attempts.length, mode),
+        stop: async () => undefined,
+      }
+    },
+    loadSurface: async (ready) => {
+      session.surfaces.push(ready.origin)
+    },
+    window: {
+      showRecoveryView: async (view) => {
+        session.views.push(view)
+      },
+      destroySurface: () => undefined,
+    },
+  })
+  return session
+}
+
+const attributedFailure = new StartupFailureError({
+  stage: 'resolve-profile',
+  code: 'PROFILE_INVALID',
+  category: 'profile-composition',
+  summary: 'composed profile cannot be resolved',
+  retryable: false,
+})
+
+const runtimeFailure = new StartupFailureError({
+  stage: 'boot',
+  code: 'BOOT_FAILED',
+  category: 'runtime',
+  summary: 'host runtime failed',
+  retryable: true,
+})
+
+const sentinel = (name) => `# sentinel ${name}\n`
+
+async function seedSentinels(home) {
+  await writeFile(path.join(home, '.credentials.yaml'), sentinel('credentials'), { mode: 0o600 })
+  await writeFile(path.join(home, 'settings.yaml'), sentinel('settings'), { mode: 0o600 })
+  await writeFile(path.join(home, 'cordis.patch.yml'), sentinel('home-patch'), { mode: 0o600 })
+}
+
+async function assertSentinels(home) {
+  for (const [name, file] of [
+    ['credentials', '.credentials.yaml'],
+    ['settings', 'settings.yaml'],
+    ['home-patch', 'cordis.patch.yml'],
+  ]) {
+    const bytes = await readFile(path.join(home, file), 'utf8')
+    if (bytes !== sentinel(name)) throw new Error(`home sentinel ${file} was modified`)
+  }
+}
+
+async function journalStates(home) {
+  const txRoot = path.join(home, 'run', 'profile-transactions')
+  const ids = await readdir(txRoot).catch(() => [])
+  const states = []
+  for (const id of ids) {
+    const journal = JSON.parse(await readFile(path.join(txRoot, id, 'transaction.json'), 'utf8'))
+    states.push(journal.state)
+  }
+  return states
+}
 
 try {
-  // 1) Boot once against an empty home so the desktop profile initializes.
-  const first = await run(
-    process.execPath,
-    [dshBin, '--profile', 'desktop', '--dump-default-config'],
-    env,
-    userData,
-  )
-  if (first.code !== 0) throw new Error(`initial headless boot failed: ${first.output.slice(-400)}`)
-
-  const manifestPath = path.join(home, 'profiles', 'desktop', 'package.json')
-  const userEdited = JSON.parse(await readFile(manifestPath, 'utf8'))
-  userEdited.dsh.profile.bundles = ['@fixture/evil', ...userEdited.dsh.profile.bundles]
-  const drifted = `${JSON.stringify(userEdited, null, 2)}\n`
-  await writeFile(manifestPath, drifted)
-
-  // 2) A reconcile-visible plan exists but boot fails with an attributable
-  //    home-config error: the home patch is invalid, so rollback must refuse
-  //    (home-config is not rollback-eligible) and keep user bytes.
-  await writeFile(path.join(home, 'cordis.patch.yml'), '{ not a patch list')
-  const second = await run(
-    process.execPath,
-    [dshBin, '--profile', 'desktop', '--dump-default-config'],
-    env,
-    userData,
-  )
-  if (second.code === 0) throw new Error('boot unexpectedly succeeded with a broken home patch')
-  const after = await readFile(manifestPath, 'utf8')
-  if (after !== drifted) {
-    throw new Error(
-      'user-edited manifest bytes were overwritten by a non-rollback-eligible failure',
+  // ── Failure chain: attributed failure → rollback → one relaunch → view ──
+  {
+    const home = await freshHome('failure')
+    await seedSentinels(home)
+    const session = await leasedSession(home, {
+      // Both normal boots fail with an attributable profile-composition error.
+      boot: () => Promise.reject(attributedFailure),
+    })
+    await session.controller.start().catch(() => undefined)
+    if (session.controller.state !== 'recovery') {
+      throw new Error(`expected recovery state, got ${session.controller.state}`)
+    }
+    // Exactly one automatic relaunch after the rollback.
+    if (session.attempts.filter((mode) => mode === 'normal').length !== 2) {
+      throw new Error(`expected exactly 2 normal boots (1 auto-relaunch), got ${session.attempts}`)
+    }
+    if (session.views.length !== 1) throw new Error('expected exactly one recovery view')
+    if (session.views[0].failure.category !== 'profile-composition') {
+      throw new Error(`unexpected failure category ${session.views[0].failure.category}`)
+    }
+    // The reconcile created the three managed files; both transactions rolled
+    // back and removed them again.
+    const manifest = path.join(home, 'profiles', 'desktop', 'package.json')
+    await readFile(manifest).then(
+      () => {
+        throw new Error('rollback left a transaction-created manifest behind')
+      },
+      (error) => {
+        if (error.code !== 'ENOENT') throw error
+      },
     )
+    const states = await journalStates(home)
+    if (states.length !== 2 || states.some((state) => state !== 'rolled-back')) {
+      throw new Error(`expected two rolled-back journals, got ${JSON.stringify(states)}`)
+    }
+    await assertSentinels(home)
+    await session.controller.act('quit')
   }
-  await rm(path.join(home, 'cordis.patch.yml'), { force: true })
 
-  // 3) Drifted candidate blocks automatic restore: simulate by leaving a
-  //    non-candidate, non-before manifest in place while a transaction exists.
-  //    The transactional API was exercised in unit/integration tests; here we
-  //    assert the journal directory stays bounded and readable.
-  const txRoot = path.join(home, 'run', 'profile-transactions')
-  const txDirs = await import('node:fs/promises').then((fs) => fs.readdir(txRoot).catch(() => []))
-  if (txDirs.length > 20) throw new Error(`transaction journal grew beyond 20: ${txDirs.length}`)
+  // ── Conflict chain: the candidate drifts before rollback → view, no overwrite ──
+  {
+    const home = await freshHome('conflict')
+    await seedSentinels(home)
+    const drifted = '{"userChanged":true}\n'
+    const session = await leasedSession(home, {
+      boot: async () => {
+        // The transaction applied; the user rewrites the candidate before the
+        // failure is settled.
+        await writeFile(path.join(home, 'profiles', 'desktop', 'package.json'), drifted)
+        throw attributedFailure
+      },
+    })
+    await session.controller.start().catch(() => undefined)
+    if (session.controller.state !== 'recovery') throw new Error('conflict run not in recovery')
+    const manifest = await readFile(path.join(home, 'profiles', 'desktop', 'package.json'), 'utf8')
+    if (manifest !== drifted) throw new Error('conflict rollback overwrote user bytes')
+    const states = await journalStates(home)
+    if (!states.includes('conflict')) {
+      throw new Error(`expected a conflict journal, got ${JSON.stringify(states)}`)
+    }
+    await assertSentinels(home)
+    await session.controller.act('quit')
+  }
+
+  // ── Healthy chain: surface mounts, transaction commits, no view ──
+  {
+    const home = await freshHome('healthy')
+    await seedSentinels(home)
+    const session = await leasedSession(home, {
+      boot: async () => ({
+        pid: process.pid,
+        startIdentity: 'smoke-ready',
+        surface: { kind: 'loopback', url: 'http://127.0.0.1:43123/?token=x' },
+        origin: 'http://127.0.0.1:43123',
+      }),
+    })
+    await session.controller.start()
+    if (session.controller.state !== 'healthy')
+      throw new Error('healthy run did not become healthy')
+    if (session.views.length !== 0) throw new Error('healthy run showed a recovery view')
+    if (session.surfaces.length !== 1) throw new Error('healthy run never mounted the surface')
+    const states = await journalStates(home)
+    if (states.length !== 1 || states[0] !== 'committed') {
+      throw new Error(`expected one committed journal, got ${JSON.stringify(states)}`)
+    }
+    await assertSentinels(home)
+    await session.controller.act('quit')
+  }
+
+  // ── Retention: terminal journals stay bounded at 20 ──
+  {
+    const home = await freshHome('retention')
+    await seedSentinels(home)
+    for (let round = 0; round < 12; round++) {
+      const session = await leasedSession(home, {
+        boot: () => Promise.reject(runtimeFailure),
+      })
+      await session.controller.start().catch(() => undefined)
+      await session.controller.act('quit')
+    }
+    // 12 retained transactions from failed boots; nothing terminal exceeds 20.
+    const states = await journalStates(home)
+    if (states.length > 20) throw new Error(`journal retention exceeded 20: ${states.length}`)
+    if (states.some((state) => state !== 'retained')) {
+      throw new Error(`non-terminal journals left behind: ${JSON.stringify(states)}`)
+    }
+  }
 
   console.log('M2 profile-recovery smoke passed')
 } finally {
-  await rm(userData, { recursive: true, force: true }).catch(() => undefined)
+  await disposeHomes()
 }

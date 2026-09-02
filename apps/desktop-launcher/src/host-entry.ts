@@ -2,24 +2,28 @@ import { fileURLToPath } from 'node:url'
 
 import type { HostBootstrap } from '@dsh-desktop/host-supervisor'
 import { runDshHost, type HostControlTransport } from '@dsh-desktop/host-supervisor/host-runner'
+import { assertBootProfile, type BootMode } from '@dsh-desktop/host-supervisor/boot-profile'
 
 type ElectronHostBootstrap = Omit<HostBootstrap, 'mode'> & {
-  mode: 'normal'
+  mode: BootMode
   startIdentity: string
 }
 
 function isBootstrap(value: unknown): value is ElectronHostBootstrap {
   if (typeof value !== 'object' || value === null) return false
   const input = value as Record<string, unknown>
-  return (
-    typeof input.home === 'string' &&
-    typeof input.profileName === 'string' &&
-    input.mode === 'normal' &&
-    typeof input.capability === 'string' &&
-    input.capability.length >= 32 &&
-    typeof input.leaseGeneration === 'string' &&
-    typeof input.startIdentity === 'string'
-  )
+  if (
+    typeof input.home !== 'string' ||
+    typeof input.profileName !== 'string' ||
+    (input.mode !== 'normal' && input.mode !== 'safe') ||
+    typeof input.capability !== 'string' ||
+    input.capability.length < 32 ||
+    typeof input.leaseGeneration !== 'string' ||
+    typeof input.startIdentity !== 'string'
+  ) {
+    return false
+  }
+  return assertBootProfile({ mode: input.mode, profileName: input.profileName }).ok
 }
 
 async function main(): Promise<void> {

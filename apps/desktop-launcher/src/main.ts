@@ -1,6 +1,8 @@
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 
 import { app, BrowserWindow, dialog } from 'electron'
 
@@ -13,10 +15,10 @@ import {
 } from '@dsh-desktop/home-lease'
 import { HostSupervisor, type HostFatalDetail, type HostReady } from '@dsh-desktop/host-supervisor'
 import { PRODUCT } from '@dsh-desktop/product-config'
-import { createProfileRef, reconcileDesktopProfile } from '@dsh-desktop/profile-manager'
+import { SAFE_PROFILE_NAME } from '@dsh-desktop/profile-manager'
 import {
+  createDesktopProfileRecovery,
   isAllowedMainFrameNavigation,
-  quarantineProjectionCache,
   RecoverySessionController,
   StartupFailureError,
   toStartupFailure,
@@ -155,6 +157,34 @@ let recoveryWindow: RecoveryWindowHandle | undefined
 let shutdownComplete = false
 let shutdownStarted = false
 
+/** Marker store for the single automatic profile-recovery relaunch. */
+function createRecoveryMarkerStore(userData: string, home: string) {
+  const digest = createHash('sha256').update(home).digest('hex').slice(0, 16)
+  const directory = path.join(userData, 'recovery')
+  const file = path.join(directory, `${digest}.json`)
+  return {
+    async read(): Promise<unknown> {
+      try {
+        return JSON.parse(await readFile(file, 'utf8')) as unknown
+      } catch {
+        return undefined
+      }
+    },
+    async write(marker: Readonly<{ transactionId: string; attempt: number }>): Promise<void> {
+      await mkdir(directory, { recursive: true, mode: 0o700 })
+      const temporary = `${file}.${randomUUID()}.tmp`
+      await writeFile(temporary, `${JSON.stringify(marker, null, 2)}\n`, {
+        mode: 0o600,
+        encoding: 'utf8',
+      })
+      await rename(temporary, file)
+    },
+    async clear(): Promise<void> {
+      await rm(file, { force: true }).catch(() => undefined)
+    },
+  }
+}
+
 async function startApplication(): Promise<void> {
   // Resolve the single shared home from the entry environment before any
   // child environment is derived from it.
@@ -167,6 +197,7 @@ async function startApplication(): Promise<void> {
     entryExecutables: [process.execPath],
   })
   const profileName = PRODUCT.defaultProfileName
+  const marker = createRecoveryMarkerStore(app.getPath('userData'), home)
   const windowPort = new ElectronWindowPort()
   let readyHost: HostReady | undefined
   let lastFatal: HostFatalDetail | undefined
@@ -191,20 +222,10 @@ async function startApplication(): Promise<void> {
         appVersion: app.getVersion(),
         probe,
       }),
-    reconcile: async (lease) => {
-      // Rebuildable projection cache over 512 MiB is quarantined while we
-      // hold the lease and no Host is running (M2 Task 4).
-      const cache = await quarantineProjectionCache({
-        home,
-        lease,
-        thresholdBytes: 512 * 1024 * 1024,
-      })
-      if (cache.kind === 'unknown-layout') {
-        console.error('projection cache layout unrecognized; leaving it untouched')
-      }
-      await reconcileDesktopProfile(createProfileRef(home, profileName), lease)
-    },
-    createAttempt: (lease) => {
+    profile: createDesktopProfileRecovery({ home, profileName }),
+    readRecoveryMarker: () => marker.read(),
+    writeRecoveryMarker: (entry) => marker.write(entry),
+    createAttempt: (lease, mode) => {
       const attemptSupervisor = new HostSupervisor({
         factory: createElectronHostProcessFactory(hostEntryPath),
         stabilityMs: smokeMode === undefined ? 1_000 : 100,
@@ -239,8 +260,8 @@ async function startApplication(): Promise<void> {
           try {
             const ready = await attemptSupervisor.start({
               home,
-              profileName,
-              mode: 'normal',
+              profileName: mode === 'safe' ? SAFE_PROFILE_NAME : profileName,
+              mode,
               lease,
               probe,
             })
@@ -265,6 +286,14 @@ async function startApplication(): Promise<void> {
     },
     loadSurface: async (ready) => {
       await windowPort.loadSurface(ready.surface, ready.origin)
+      // A mounted surface means a healthy session: the relaunch marker is
+      // spent and the launcher-owned recovery surface retires until a
+      // failure brings it back.
+      await marker.clear()
+      if (recoveryWindow !== undefined) {
+        recoveryWindow.destroy()
+        recoveryWindow = undefined
+      }
     },
     window: {
       showRecoveryView: async (view) => {
@@ -274,7 +303,12 @@ async function startApplication(): Promise<void> {
       destroySurface: () => windowPort.destroySurface(),
     },
     onSessionFailure: (failure) => {
-      void failure
+      smokeReport({
+        kind: 'session-failure',
+        stage: failure.stage,
+        code: failure.code,
+        category: failure.category,
+      })
     },
     onLeaseReleaseError: (error) => {
       smokeReport({ kind: 'lease-release-refused' })

@@ -238,6 +238,31 @@ describe('home lease lifecycle', () => {
     await lease.release()
   })
 
+  it('switches the owner profile under guard and refuses while a host is registered', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    await lease.switchProfile('desktop-safe-mode')
+    await expect(lease.beforeSpawn('desktop-safe-mode')).resolves.toBeUndefined()
+    await expect(lease.beforeSpawn('desktop')).rejects.toMatchObject({
+      code: 'LEASE_PROFILE_MISMATCH',
+    })
+    const owner = JSON.parse(await readFile(await ownerPathOf(home), 'utf8')) as {
+      profile: string
+    }
+    expect(owner.profile).toBe('desktop-safe-mode')
+    await lease.attachHost({ pid: 9999, startIdentity: 'host-1' })
+    await expect(lease.switchProfile('desktop')).rejects.toMatchObject({ code: 'LEASE_STATE' })
+    await lease.confirmHostExited()
+    await lease.switchProfile('desktop')
+    await expect(lease.beforeSpawn('desktop')).resolves.toBeUndefined()
+    await lease.confirmHostExited()
+    await expect(lease.switchProfile('../escape')).rejects.toMatchObject({
+      code: 'LEASE_PROFILE_MISMATCH',
+    })
+    await lease.release()
+  })
+
   it('guards beforeSpawn against profile drift and asserts continued ownership', async () => {
     const home = await isolatedHome()
     const probe = new FakeProbe()
