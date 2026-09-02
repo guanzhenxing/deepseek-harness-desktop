@@ -204,7 +204,7 @@ Electron launcher 在 Host 启动前已经存在，并且不加载 DSH 或第三
 
 v1 的 launcher-owned 恢复面只提供启动日志摘要、重试、退出和 lease 诊断，不在 Electron Main 中复制 DSH 设置、会话或市场业务。
 
-引入插件市场前必须增加非破坏性的 Safe Mode：停止正常 Host 后，以独立的 `desktop-safe-mode` profile 启动 `@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app` 与本项目最小第一方 bundle `desktop-recovery-bridge`。该 profile 不读取正常 `desktop` profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，但仍复用同一 home 中的凭据、会话和用户数据。
+M2 计划交付非破坏性的 Safe Mode，它同时是后续插件市场的前置条件：停止正常 Host 后，以独立的 `desktop-safe-mode` profile 启动 `@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app` 与本项目最小第一方 bundle `desktop-recovery-bridge`。该 profile 不读取正常 `desktop` profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，但仍复用同一 home 中的凭据、会话和用户数据。
 
 `desktop-recovery-bridge` 只等待官方 `connection` 服务，并通过与正常 Desktop 相同的 Host-control surface 契约发布 authenticated recovery URL。它不包含市场 catalog、产品 settings、profile 变更、窗口逻辑或更新策略。即使 Safe Mode Host 或该 bridge 失败，launcher-owned 的日志摘要、lease 诊断、重试和退出仍然可用。
 
@@ -220,7 +220,7 @@ deepseek-harness-desktop/
 │   └── desktop-launcher/        # Electron 自举入口、应用身份、素材与打包配置
 ├── packages/
 │   ├── desktop-plugin/          # DSH bundle 插件，Desktop 产品集成主体
-│   ├── desktop-recovery-bridge/ # E3 前置的最小第一方 Safe Mode surface bridge
+│   ├── desktop-recovery-bridge/ # M2 计划交付，也是 E3 前置的 Safe Mode surface bridge
 │   ├── desktop-contracts/       # 按能力分入口、独立版本的可序列化窄控制契约
 │   ├── host-supervisor/         # 独立 Host 进程、握手、就绪探测、重启与有界关停
 │   ├── profile-manager/         # ProfileRef、reconcile、修订恢复与未来 generation 事务
@@ -324,7 +324,7 @@ Host 控制通道的 capability 只认证 launcher 所启动的 Host 进程，�
 
 `desktop-launcher` 与 `desktop-plugin` 共享一份只含产品差异的配置：
 
-- `productName = DeepSeek Harness`；
+- `productName = DeepSeek Harness Desktop`；
 - `binName = dsh-desktop`；
 - `defaultProfileName = desktop`；
 - `settingsNamespace = dsh-native-shell`；
@@ -588,6 +588,8 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ## 10. 实施里程碑
 
+M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。这些计划以 M0 验收提交 `2f84e04` 为起点，编写计划不代表对应阶段已实现。
+
 ### M0：独立最小闭环（2026-09-02 完成源码级验收）
 
 - 建立 workspace、`apps/desktop-launcher`、`packages/desktop-plugin`、`packages/desktop-contracts`、`packages/host-supervisor`、`packages/profile-manager` 与 `packages/shell-core`。`desktop-recovery-bridge` 是 E3 前置交付，不在 M0 实现。
@@ -600,7 +602,9 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 完成证据：63 项单元测试、7 项依赖边界测试、6 项真实 DSH 集成测试，以及官方 UI 与 Host crash 两条 Electron smoke 全部通过；Standards 与 Spec 审查阻塞已关闭。详细记录见 [M0 实施计划](superpowers/plans/2026-09-01-m0-independent-minimal-loop.md#验收记录2026-09-02)。M0 未包含 home lease、Safe Mode、安装包或发布能力。
 
-### M1：共享 home 与单 Host（1–1.5 天）
+### M1：共享 home 与单 Host
+
+执行文档：[M1 Implementation Plan](superpowers/plans/2026-09-02-m1-shared-home-single-host.md)。
 
 - 实现独立的长生命周期 home lease，使用原子 `mkdir` 取得所有权，并用 `writeFileAtomic` 写 owner 元数据。
 - owner 元数据记录 supervisor 与 Host 子进程身份，Desktop 内部 Host 重启不释放 lease。
@@ -611,24 +615,33 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 验收：数据可顺序互通，受支持入口不能并发 boot。
 
-### M2：非破坏性恢复（1–1.5 天）
+### M2：非破坏性恢复
 
-- 把五件套 checkpoint 改为 profile 白名单与 SHA 修订校验。
+执行文档：[M2 Implementation Plan](superpowers/plans/2026-09-02-m2-nondestructive-recovery.md)。
+
+- 在 M0 现有 reconcile 上增加逐文件白名单、持久修订事务与 SHA 校验；当前仓库没有五件套 checkpoint 需要迁移。
 - 按失败阶段分类，不回滚 home 数据。
 - 把 projection cache 隔离放到 lease 之后。
 - 增加不依赖 Host 的最小恢复面，展示结构化失败阶段、重试、退出和安全解锁指引。
+- 交付独立 `desktop-safe-mode` profile 与最小 `desktop-recovery-bridge`，不实现插件市场或 generation ledger。
 
 验收：模拟所有启动失败时，`settings.yaml`、home patch、会话和 storages 均不会被旧快照覆盖；Host 失败不退出 Electron 壳，恢复面可以安全重试。
 
-### M3：打包与完整冒烟（1–2 天）
+### M3：打包与完整冒烟
 
+执行文档：[M3 Implementation Plan](superpowers/plans/2026-09-02-m3-packaged-desktop.md)。
+
+- 补齐托盘、Dock、菜单、关窗隐藏、窗口状态和受控外链行为。
 - 补 electron-builder 配置和素材。
+- 打包完整 Host 运行时、配套 CLI Node/pnpm 与 lease helper；先植入最小 home 兼容性拒绝门，为 M4 保留可验证的旧候选制品。
 - 对打包产物执行 lifecycle/host-crash/auth/navigation/conversation 冒烟。
 - 生成 DMG 和校验清单。
 
 验收：全新本机目录安装后可独立启动、退出和再次恢复会话。
 
-### M4：版本闭包与升级演练（1–2 天）
+### M4：版本闭包与升级演练
+
+执行文档：[M4 Implementation Plan](superpowers/plans/2026-09-02-m4-release-compatibility.md)。
 
 - 生成并校验 Desktop、DSH、profile/plugin API 与持久化格式的兼容性清单。
 - 若实现期间出现新的上游 tag，则在独立候选分支演练升级；没有新 tag 时不制造无意义的版本跳转。
@@ -637,7 +650,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 验收：发行制品可追溯到单一 DSH 基线，升级差异不混入壳结构重构；旧 DMG 只在兼容性清单允许时打开升级后的 home。
 
-总估时为 7–12 个专注工作日。4–6 天可以得到可运行版本，但不把它定义为通过进程监督、共享 home、恢复安全和版本闭包验收的日用版本。
+原方案的阶段天数是粗略估计，不作为执行承诺。按 M1 → M2 → M3 → M4 的验收门槛推进；获得可运行版本不等于通过进程监督、共享 home、恢复安全和版本闭包验收的日用版本。
 
 ## 11. v1 完成定义
 

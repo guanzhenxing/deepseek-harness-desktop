@@ -13,7 +13,7 @@
 | `<home>`        | `resolveDshHome()`：`$DSH_HOME` 非空时使用其绝对路径，否则为 `~/.dsh`                                                      |
 | `<m0Home>`      | `<userData>/m0-dsh-home`；M0 launcher 单实例私有，不是共享 `<home>`                                                        |
 | `<profile>`     | v1 为 `<home>/profiles/desktop`                                                                                            |
-| `<safeProfile>` | E3 前置能力使用 `<home>/profiles/desktop-safe-mode`                                                                        |
+| `<safeProfile>` | M2 计划交付的恢复能力使用 `<home>/profiles/desktop-safe-mode`，同时作为 E3 前置                                         |
 | `<userData>`    | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下的 DeepSeek Harness 专属目录 |
 | `<launchRoot>`  | M0 为 `<m0Home>/profiles/.dsh-desktop-run-*` 临时目录；M1 起可迁移到 `<userData>/runtime/launch-root`                      |
 | `<testHome>`    | 测试通过系统临时目录 API 单独创建的 DSH home，绝不能指向真实 `<home>`                                                      |

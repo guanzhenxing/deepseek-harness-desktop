@@ -28,7 +28,7 @@ Electron desktop-launcher
     └── Host runner → DSH + desktop-plugin → official Web UI
 ```
 
-v1 目标路径在 M1 增加 `home-lease` 与共享 `~/.dsh`，在 M2 增加恢复投影，在 M3 增加安装制品：
+v1 目标路径在 M1 增加 `home-lease` 与共享 `~/.dsh`，在 M2 增加修订恢复与 Safe Mode，在 M3 增加安装制品；逐任务安排见 [M1–M4 执行路线](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：
 
 ```text
 macOS
@@ -41,7 +41,7 @@ macOS
         └── Node-capable DSH Host runner
             ├── DSH runtime and official Web UI
             ├── desktop-plugin                  # normal mode
-            ├── desktop-recovery-bridge         # Safe Mode, E3 prerequisite
+            ├── desktop-recovery-bridge         # planned M2 Safe Mode, E3 prerequisite
             └── future product plugins
                 ├── plugin-market
                 ├── remote-access
@@ -172,7 +172,7 @@ Host-control `ready` 只说明 Host 和 surface publisher 已完成协议侧就�
 
 ## 6. Safe Mode 启动
 
-Safe Mode 是 E3 的前置能力，不在 M0 实现：
+Safe Mode 计划在 M2 交付，也是 E3 的前置能力，不在 M0 实现：
 
 ```text
 launcher keeps the same home lease
@@ -181,10 +181,11 @@ launcher keeps the same home lease
 → Host boots dsh-base + dsh-web-app + desktop-recovery-bridge
 → recovery bridge publishes recovery surface
 → launcher loads the recovery Web UI
-→ user explicitly selects a targeted profile transaction
+→ local recovery controls remain available
+→ E3 later adds explicit targeted profile transactions
 ```
 
-Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，也不自动修改正常 profile。即使 Safe Mode 失败，launcher-owned 最低恢复面仍可显示诊断、重试、更新入口和退出。
+Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，也不自动修改正常 profile。即使 Safe Mode 失败，launcher-owned 最低恢复面仍可显示诊断、重试和退出；更新入口在 E2 再增加。
 
 ## 7. 状态权威
 

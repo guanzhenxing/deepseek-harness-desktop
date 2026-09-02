@@ -9,6 +9,8 @@
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 
+M1–M4 的逐任务执行文档与 zcode 首轮交接指令见[执行路线](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。计划中的新增脚本须在对应任务实施后才能使用，不属于当前已交付命令。
+
 ## 2. 开发环境
 
 要求：
