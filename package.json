@@ -14,6 +14,7 @@
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit && pnpm run check:docs",
     "check:boundaries": "node scripts/verify-boundaries.mjs",
     "check:docs": "node scripts/verify-docs.mjs",
+    "dsh-native": "node scripts/dsh-native.mjs",
     "format:check": "prettier --check eslint.config.js vitest.config.ts vitest.integration.config.ts docs/compatibility.json scripts/*.mjs tests/smoke/*.mjs \"{apps,packages}/**/*.{ts,json}\" --ignore-unknown --no-error-on-unmatched-pattern",
     "lint": "eslint . && pnpm run check:boundaries",
     "smoke:dsh-ui": "node tests/smoke/dsh-ui.mjs",

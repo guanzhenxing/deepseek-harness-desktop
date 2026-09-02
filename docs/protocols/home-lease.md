@@ -63,9 +63,29 @@ release:   generation 不匹配 → LEASE_CHANGED
 
 所有 owner 读改写都发生在 guard 短临界区内，方法之间按进程内串行队列执行。`HOME_BUSY`/`HOME_STALE`/`LEASE_UNKNOWN` 的错误对象携带脱敏 ownerSummary（entrypoint、profile、PID、时间），供对话框与 stderr 使用。
 
-## 5. 调用方义务
+## 5. `dsh-native` 包装进程与调用方义务
 
-- launcher/CLI 在 lease 获取成功前不得写 home；启动失败也必须先 stop/确认 Host 退出再释放 lease，不在 `finally` 无条件清锁；
-- 无法证明 Host 已死时保留 lease 并报告；
-- doctor（`dsh-native doctor --unlock`，M1 Task 4）在 guard 内重读 owner 后按同样的身份规则清理；`--unlock` 本身就是用户明确的清理请求，不提供 `--force`；
-- 其他裸 `dsh` CLI 不经过本协议，本项目不拦截；使用前必须完全退出受支持入口。
+`dsh-native` 是唯一遵守本协议的受支持 CLI 入口；裸 `dsh` 不受本项目拦截，使用前必须完全退出受支持入口。
+
+launcher/CLI 在 lease 获取成功前不得写 home；启动失败也必须先 stop/确认 Host 退出再释放 lease，不在 `finally` 无条件清锁；无法证明 Host 已死时保留 lease 并报告。
+
+包装进程行为：
+
+1. 只拦截精确的 `doctor --unlock`，其余 argv 原样转发给固定版官方 `@deepseek-ai/dsh` 入口（按 package `bin.dsh` 解析，不依赖内部 hash 文件名）；
+2. 按上游语义解析目标 profile（根命令 `--profile` 必填、`web` 是别名、`plugin` 必须带 `--profile`），owner 记录已解析的 profile；解析不出 profile 的调用只可能是上游的帮助/版本/报错路径，不取 lease 直接转发；
+3. 取得整 home lease（supervisor = 包装进程）→ `beforeSpawn` → fork 等待授权的子进程 → 在 lease 上登记子进程 OS 身份（`attachHost`）→ 才发送 boot 授权（子进程随即设置 `process.argv` 并 import 官方 bin）；
+4. 交互 stdio 直通，SIGINT/SIGTERM/SIGHUP 转发，子进程退出码透传（信号按 128+signo 映射）；
+5. 子进程退出并 `confirmHostExited` 后释放 lease；释放失败时保留 lease 并在 stderr 报告。
+
+退出码：`0` 成功/unlocked/already-unlocked；官方 CLI 自身退出码透传；`2` doctor 拒绝（ACTIVE_OWNER / IDENTITY_UNKNOWN / LEASE_CHANGED）；`3` lease 获取被拒（HOME_BUSY / HOME_STALE / LEASE_UNKNOWN 等，stderr 给出 owner 摘要与 doctor 指引，不打印完整 home 路径）。
+
+## 6. doctor（`doctor --unlock`）
+
+doctor 在同一 guard 短临界区内完成"重读 owner → 探测身份 → 扫描受支持入口 → 删除"：
+
+- owner 可读且 supervisor/Host 身份仍 `same` → ACTIVE_OWNER 拒绝；
+- 任一身份 `unknown`，或 `pendingSpawn` 未确认 → IDENTITY_UNKNOWN 拒绝（可能存在从未收到 boot 授权的子进程）；
+- owner 缺失/损坏 → 先 `scanSupported` 扫描受支持入口可执行文件（开发期为 Electron 二进制；排除 doctor 自身与只读 helper；无法判定返回 unknown）；
+- 只有所有身份 `absent/different` 且无未确认 writer 才删除 owner 与 `host.lock/`；
+- 删除前复核 lock 目录 dev/ino；`ENOTEMPTY` 视为 IDENTITY_UNKNOWN；
+- `--unlock` 本身就是用户明确的清理请求，不提供 `--force` 绕过。

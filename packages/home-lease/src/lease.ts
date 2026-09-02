@@ -1,15 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import type { Stats } from 'node:fs'
-import { lstat, mkdir, open, readFile, rm, rmdir } from 'node:fs/promises'
-import path from 'node:path'
-
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { mkdir, rm, rmdir } from 'node:fs/promises'
 
 import {
   describeLeaseOwner,
   LeaseError,
-  parseLeaseOwner,
-  serializeLeaseOwner,
   type LeaseEntrypoint,
   type LeaseOwner,
   type ProcessIdentity,
@@ -21,6 +15,14 @@ import {
   type GuardLock,
   type GuardSession,
 } from './native-helper.js'
+import {
+  directoryIdentity,
+  ensureHomeLayout,
+  leasePaths,
+  readOwner,
+  validateHome,
+  writeOwnerWithDurability,
+} from './lease-fs.js'
 
 export interface HomeLease {
   readonly home: string
@@ -58,40 +60,6 @@ export type AcquireHomeLeaseInput = Readonly<{
   guard?: GuardLock
 }>
 
-const RUN_DIRNAME = 'run'
-const LOCK_DIRNAME = 'host.lock'
-const GUARD_FILENAME = 'host-lease.guard'
-const OWNER_FILENAME = 'owner.json'
-
-type LeasePaths = Readonly<{
-  run: string
-  lockDir: string
-  guardPath: string
-  ownerPath: string
-}>
-
-function leasePaths(home: string): LeasePaths {
-  const run = path.join(home, RUN_DIRNAME)
-  const lockDir = path.join(run, LOCK_DIRNAME)
-  return {
-    run,
-    lockDir,
-    guardPath: path.join(run, GUARD_FILENAME),
-    ownerPath: path.join(lockDir, OWNER_FILENAME),
-  }
-}
-
-function validateHome(home: string): string {
-  if (typeof home !== 'string' || home.trim() === '') {
-    throw new LeaseError('LEASE_UNKNOWN', 'home lease requires an explicit home')
-  }
-  const resolved = path.resolve(home)
-  if (resolved === path.parse(resolved).root) {
-    throw new LeaseError('LEASE_UNKNOWN', 'home lease must not use the filesystem root')
-  }
-  return resolved
-}
-
 function validateProfile(profile: string): string {
   if (
     profile === '' ||
@@ -106,67 +74,6 @@ function validateProfile(profile: string): string {
     )
   }
   return profile
-}
-
-async function directoryIdentity(dirname: string, label: string): Promise<Stats> {
-  const identity = await lstat(dirname)
-  if (identity.isSymbolicLink())
-    throw new LeaseError('LEASE_UNKNOWN', `${label} must not be a symlink`)
-  if (!identity.isDirectory()) throw new LeaseError('LEASE_UNKNOWN', `${label} must be a directory`)
-  return identity
-}
-
-async function syncDirectory(dirname: string): Promise<void> {
-  const handle = await open(dirname, 'r')
-  try {
-    await handle.sync()
-  } finally {
-    await handle.close()
-  }
-}
-
-async function ensureHomeLayout(paths: LeasePaths): Promise<void> {
-  await mkdir(path.dirname(paths.run), { recursive: true, mode: 0o700 })
-  await directoryIdentity(path.dirname(paths.run), 'DSH home')
-  try {
-    await mkdir(paths.run, { mode: 0o700 })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-  }
-  await directoryIdentity(paths.run, 'DSH home run directory')
-}
-
-async function writeOwnerWithDurability(ownerPath: string, owner: LeaseOwner): Promise<void> {
-  await writeFileAtomic(ownerPath, serializeLeaseOwner(owner), {
-    mode: 0o600,
-    dirMode: 0o700,
-  })
-  // The upstream atomic writer does not promise crash durability, so fsync the
-  // committed owner file and both parent directories here.
-  const handle = await open(ownerPath, 'r')
-  try {
-    await handle.sync()
-  } finally {
-    await handle.close()
-  }
-  await syncDirectory(path.dirname(ownerPath))
-  await syncDirectory(path.dirname(path.dirname(ownerPath)))
-}
-
-type ReadOwnerResult = Readonly<
-  { kind: 'ok'; owner: LeaseOwner } | { kind: 'missing' } | { kind: 'corrupt' }
->
-
-async function readOwner(ownerPath: string): Promise<ReadOwnerResult> {
-  let identity: Stats
-  try {
-    identity = await lstat(ownerPath)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' }
-    throw error
-  }
-  if (identity.isSymbolicLink() || !identity.isFile()) return { kind: 'corrupt' }
-  return parseLeaseOwner(await readFile(ownerPath, 'utf8'))
 }
 
 /**

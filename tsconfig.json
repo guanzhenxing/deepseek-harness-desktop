@@ -14,6 +14,7 @@
     "tests/helpers/**/*.ts"
   ],
   "references": [
+    { "path": "apps/bundled-cli" },
     { "path": "apps/desktop-launcher" },
     { "path": "packages/desktop-contracts" },
     { "path": "packages/desktop-plugin" },

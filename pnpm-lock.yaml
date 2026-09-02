@@ -33,6 +33,18 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.11.1)(vite@8.2.2(@types/node@24.11.1)(yaml@2.9.0))
 
+  apps/bundled-cli:
+    dependencies:
+      '@deepseek-ai/dsh':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(9efc4fb6547f4e05db8c2afa0e0ba9b3)
+      '@dsh-desktop/home-lease':
+        specifier: workspace:*
+        version: link:../../packages/home-lease
+      '@dsh-desktop/product-config':
+        specifier: workspace:*
+        version: link:../../packages/product-config
+
   apps/desktop-launcher:
     dependencies:
       '@dsh-desktop/desktop-plugin':
