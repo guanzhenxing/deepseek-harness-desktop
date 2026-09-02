@@ -1,7 +1,7 @@
 # M1–M4：zcode 执行路线与交接
 
 - 日期：2026-09-02
-- 状态：计划已编写，M1–M4 均未实施或验收
+- 状态：M1 已实施、审查与验收完成（2026-09-02 合并 `main` @ `6d7a19e`，验收记录见 [M1 验收](../../validation/m1-acceptance.md)）；M2–M4 未实施
 - 代码基线：`main`，`2f84e04`（M0 验收记录）；本次只修改文档
 - 需求权威：[实施方案](../../native-dsh-desktop-plan.md)、[架构](../../architecture.md)、[数据布局](../../data-layout.md)、[安全策略](../../../SECURITY.md)
 
