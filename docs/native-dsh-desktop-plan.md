@@ -588,7 +588,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ## 10. 实施里程碑
 
-M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。这些计划以 M0 验收提交 `2f84e04` 为起点；M1 已实施并通过验收并合并 `main`（`6d7a19e`），M2–M4 尚未实施。
+M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。这些计划以 M0 验收提交 `2f84e04` 为起点；M1、M2、M3 已实施并通过验收并合并（见 [M3 验收记录](validation/m3-acceptance.md)），M4 尚未实施。
 
 ### M0：独立最小闭环（2026-09-02 完成源码级验收）
 
@@ -627,7 +627,7 @@ M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接
 
 验收：模拟所有启动失败时，`settings.yaml`、home patch、会话和 storages 均不会被旧快照覆盖；Host 失败不退出 Electron 壳，恢复面可以安全重试。
 
-### M3：打包与完整冒烟
+### M3：打包与完整冒烟（已完成制品级验收，见 [M3 验收记录](validation/m3-acceptance.md)）
 
 执行文档：[M3 Implementation Plan](superpowers/plans/2026-09-02-m3-packaged-desktop.md)。
 

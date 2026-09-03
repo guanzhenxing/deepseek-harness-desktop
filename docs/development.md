@@ -1,11 +1,11 @@
 # 开发指南
 
-- 状态：M2 已完成源码级验收（非破坏性恢复、Safe Mode；M1 共享 home/lease/dsh-native 已合并）
+- 状态：M3 已完成制品级验收（打包候选 DMG + 安装级冒烟；M1/M2 已合并）
 - 日期：2026-09-02
 
 ## 1. 当前阶段
 
-仓库已完成 M0、M1（共享 home + lease + dsh-native）与 M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）验收。安装包与发布流程属于 M3–M4。
+仓库已完成 M0、M1（共享 home + lease + dsh-native）、M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）与 M3（托盘/菜单/窗口生命周期、外链策略、home 兼容性准入门、打包候选 DMG 与安装级冒烟）验收。版本闭包与升级演练属于 M4。
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 

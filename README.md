@@ -6,7 +6,7 @@ DeepSeek Harness Desktop 是面向 macOS 个人本机使用的原生 DSH 桌面�
 
 M1 共享 home 已完成源码级验收：Desktop 与配套 CLI `dsh-native` 顺序共享同一 DSH home，任何 Host boot、profile 写入前都必须先取得整 home lease（原子 `mkdir` 锁 + OS 进程启动身份 + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）。CLI 子进程在 lease 上登记 OS 身份并等待授权后才 import 官方 `@deepseek-ai/dsh` 入口；`dsh-native doctor --unlock` 在确认没有活跃 owner 后清理残留锁，不提供 force 绕过。双向会话接续（CLI 创建→Desktop 继续、Desktop 创建→CLI 继续）有真实官方 DSH 图 + mock LLM 的集成与冒烟证据。
 
-Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M2 非破坏性恢复已完成源码级验收：启动失败按 10 类分类（ADR-0006/[协议](docs/protocols/startup-recovery.md)），profile 修改走逐文件修订事务（before 快照 + SHA 校验 + journal，只有可归因失败才自动回滚并最多自动重启一次——relaunch-once 预算由 userData marker 跨进程持久化），恢复窗口为懒创建的独立沙箱窗口（ADR-0007，窄 IPC：精确 URL + 主 frame + 逐消息校验），手动重试有 60 秒 3 次预算且非可重试失败不提供，超大 projection cache 持 lease 隔离，Safe Mode 由用户在恢复窗口显式选择、以 `desktop-safe-mode` 三 bundle 独立启动（ADR-0002）。验收细节见 [M2 验收记录](docs/validation/m2-acceptance.md)。当前仍是源码阶段：`.app`/DMG 打包属于 M3，版本闭包与升级演练属于 M4。
+Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M3 打包候选已完成制品级验收：托盘/菜单/窗口生命周期、受控外链、home 兼容性准入门（ADR-0009）、自含 Host/CLI 运行时候选 DMG（ad-hoc 签名、未公证）与 14 场景安装级冒烟；M2 非破坏性恢复（10 类失败分类、修订事务、恢复窗口、Safe Mode）与 M1 共享 home/lease 见 [验收记录](docs/validation/)。验收详情：[M3 验收](docs/validation/m3-acceptance.md)。
 
 v1 目标：
 
@@ -65,12 +65,16 @@ corepack pnpm@11.7.0 smoke:host-crash
 corepack pnpm@11.7.0 smoke:shared-home
 corepack pnpm@11.7.0 smoke:profile-recovery   # M2：修订恢复不变量
 corepack pnpm@11.7.0 smoke:safe-mode          # M2：Safe Mode 隔离
+  corepack pnpm@11.7.0 package:dir              # M3：staging 校验 + 未打包 .app
+  corepack pnpm@11.7.0 package:dmg              # M3：候选 DMG + 制品清单
+  corepack pnpm@11.7.0 verify:artifacts         # M3：DMG SHA 与内嵌清单校验
+  corepack pnpm@11.7.0 smoke:package            # M3：安装级 14 场景验收
 corepack pnpm@11.7.0 dsh-native -- --profile headless "..."   # 开发入口（持 lease）
 ```
 
 ## 文档
 
-- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1、M2 已验收合并 `main`，M3–M4 待执行；
+- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1、M2、M3 已验收合并 `main`，M3–M4 待执行；
 - [实施方案](docs/native-dsh-desktop-plan.md)：v1 范围、里程碑、测试和扩展路线；
 - [架构](docs/architecture.md)：组件、进程、信任边界和依赖方向；
 - [Host-control 1.0](docs/protocols/host-control.md)：launcher/Host normative 协议；

@@ -1,6 +1,6 @@
 # M3 验收记录：打包可安装的 macOS Desktop 候选包
 
-- **状态：见 §6 门禁结果表**（本记录随最终门禁轮次生成；`release/package-smoke.json` 为制品级证据文件）
+- **状态：完成，全部门禁与 14/14 制品级场景通过**（证据：`release/package-smoke.json`、`release/artifacts.json`、`release/SHA256SUMS`；本分支合并后即视为 M3 验收）
 - 日期：2026-09-03
 - 基线：`main` @ `32e9c3e`（M2 验收合并后）
 - 结果分支：`codex/m3-packaged-desktop`
@@ -16,12 +16,12 @@
 
 ## 2. 制品与架构
 
-| 项 | 值 |
-| --- | --- |
-| 候选 DMG | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64） |
-| releaseId | `m3-0.0.0-darwin-arm64-d4068ad`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 关联） |
-| DMG SHA256 | 见 `release/SHA256SUMS` / `release/artifacts.json`（外置记录，不自嵌避免自引用哈希） |
-| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵 |
+| 项         | 值                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| 候选 DMG   | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64）                           |
+| releaseId  | `m3-0.0.0-darwin-arm64-d4068ad`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 关联） |
+| DMG SHA256 | 见 `release/SHA256SUMS` / `release/artifacts.json`（外置记录，不自嵌避免自引用哈希）              |
+| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵                                                        |
 
 `.app` 布局（全部来自 staging 闭包，经 `hdiutil attach -readonly -nobrowse` → `ditto` 安装到临时目录验证）：
 
@@ -42,7 +42,9 @@
 
 安装方式：`hdiutil attach -readonly -nobrowse` → `ditto` 复制 `.app` 到临时目录 → detach → 启动副本；应用以 `env` 清理环境（`PATH=/usr/bin:/bin`、无 `NODE_PATH/NODE_OPTIONS`、继承 TMPDIR、空临时 cwd）运行；profile-recovery/safe-mode/admission 经安装闭包内的 controller driver（staged Node）执行。结果文件：`release/package-smoke.json`。
 
-（§6 门禁表记录最终一轮的逐场景结果。）
+最终一轮（对最终 DMG 制品）14/14 通过，全部场景均在临时安装目录与显式临时 home 上执行：
+
+`dsh-ui`、`host-crash`、`navigation`（记录型 openExternal adapter）、`lifecycle`（关窗隐藏/托盘与 Dock 唤出/重复启动聚焦/renderer 崩溃恰一次重载后进恢复页/退出释放 lease）、`auth`（无凭据拒绝、握手 cookie 授权、重启轮换后旧凭据拒绝）、`conversation`（一轮对话→完全退出→重启续接同一 session，两轮落盘）、`shared-home`（安装版 desktop 与安装版 CLI 续接同一会话）、`cli-version`、`cli-busy`（desktop 持锁时 CLI exit 3 + doctor 拒清活锁）、`cli-doctor`（空闲 home 清理报告）、`cli-plugin`（本地 fixture bundle 经内置 Node/pnpm 安装并登记进 profile bundles）、`controller-recovery`（M2 失败链不变量在安装闭包上复验）、`controller-admission`（epoch 2 marker fail-closed、零 Host 尝试、marker 字节不变）、`controller-safemode`（Safe Mode 准备三 bundle first-party 集并 healthy，不改正常 profile）。
 
 ## 5. 执行偏差与处置
 
@@ -50,9 +52,20 @@
 2. 调试期间多次在你的桌面产生崩溃弹窗，根因为（a）`fs.cp` 复制破坏 .app 内相对符号链接（dyld SIGABRT）与（b）DMG 内封的是 fuse 后未重签的副本（内核 SIGKILL）；两处已修复（`ditto` 安装、`hdiutil` 封装已签名 .app），harness 增加无条件收尾（信号处理 + 进程组/临时目录/挂载清理）。
 3. `--prepackaged` 路径与 afterPack 资源复制不兼容（DMG 内 .app 缺资源），已弃用该路径。
 
-## 6. 门禁结果
+## 6. 门禁结果（最终轮次，2026-09-03，全部退出码 0）
 
-（由最终门禁轮次填写。）
+| 命令                                    | 退出码 | 摘要                                                                                              |
+| --------------------------------------- | ------ | ------------------------------------------------------------------------------------------------- |
+| `corepack pnpm@11.7.0 check`            | 0      | 格式/lint/边界/类型/单测 270（29 文件）+ verify-runtime-tree 单测 5 + docs 校验（33 文件）        |
+| `corepack pnpm@11.7.0 test:integration` | 0      | 33 集成（8 文件）                                                                                 |
+| `corepack pnpm@11.7.0 test:shared-home` | 0      | 4 场景                                                                                            |
+| `corepack pnpm@11.7.0 package:dir`      | 0      | icons→staging→runtime-tree 校验（4 host + 5 cli 原生插件 ABI）→未打包 .app（ad-hoc 签名校验通过） |
+| `corepack pnpm@11.7.0 package:dmg`      | 0      | 候选 DMG（`hdiutil` 封装已签名 .app）+ artifacts.json/SHA256SUMS                                  |
+| `corepack pnpm@11.7.0 smoke:package`    | 0      | 安装级 14/14 场景（§4）                                                                           |
+| `corepack pnpm@11.7.0 verify:artifacts` | 0      | DMG SHA + 内嵌清单 SHA/releaseId 关联校验（挂载只读）                                             |
+| `git diff --check`                      | 0      | 无空白错误                                                                                        |
+
+人工观察项（本机桌面）：Dock/托盘图标与模板渲染、标准菜单、输入与复制粘贴、多显示器窗口恢复、恢复页文案——由本机人工启动候选包观察（开发态同一 UI 链已由 smoke 驱动）；系统外链的真实 `shell.openExternal` 未在自动测试中执行（自动测试使用记录型 adapter），留待人工使用周期确认。
 
 ## 7. 未验证项与剩余风险
 
