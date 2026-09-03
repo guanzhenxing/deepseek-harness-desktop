@@ -62,26 +62,27 @@
 4. `cli-version` 场景从"输出非空"加强为"输出含 compatibility.json 钉住的 DSH 版本号"；
 5. `verify-artifacts` 的 hdiutil detach 失败改为显式告警（不再静默留挂载）。
 
-修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（14/14）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（270+5 单测）。
+修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（14/14）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（273+5 单测）。
 
 ## 6. 门禁结果（最终轮次，2026-09-03，全部退出码 0）
 
-| 命令                                    | 退出码 | 摘要                                                                                              |
-| --------------------------------------- | ------ | ------------------------------------------------------------------------------------------------- |
-| `corepack pnpm@11.7.0 check`            | 0      | 格式/lint/边界/类型/单测 270（29 文件）+ verify-runtime-tree 单测 5 + docs 校验（33 文件）        |
-| `corepack pnpm@11.7.0 test:integration` | 0      | 33 集成（8 文件）                                                                                 |
-| `corepack pnpm@11.7.0 test:shared-home` | 0      | 4 场景                                                                                            |
-| `corepack pnpm@11.7.0 package:dir`      | 0      | icons→staging→runtime-tree 校验（4 host + 5 cli 原生插件 ABI）→未打包 .app（ad-hoc 签名校验通过） |
-| `corepack pnpm@11.7.0 package:dmg`      | 0      | 候选 DMG（`hdiutil` 封装已签名 .app）+ artifacts.json/SHA256SUMS                                  |
-| `corepack pnpm@11.7.0 smoke:package`    | 0      | 安装级 14/14 场景（§4）                                                                           |
-| `corepack pnpm@11.7.0 verify:artifacts` | 0      | DMG SHA + 内嵌清单 SHA/releaseId 关联校验（挂载只读）                                             |
-| `git diff --check`                      | 0      | 无空白错误                                                                                        |
+| 命令                                    | 退出码 | 摘要                                                                                                                        |
+| --------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `corepack pnpm@11.7.0 check`            | 0      | 格式/lint/边界/类型/单测 273（29 文件，含自查轮新增 3 条打包解析器测试）+ verify-runtime-tree 单测 5 + docs 校验（33 文件） |
+| `corepack pnpm@11.7.0 test:integration` | 0      | 33 集成（8 文件）                                                                                                           |
+| `corepack pnpm@11.7.0 test:shared-home` | 0      | 4 场景                                                                                                                      |
+| `corepack pnpm@11.7.0 package:dir`      | 0      | icons→staging→runtime-tree 校验（4 host + 5 cli 原生插件 ABI）→未打包 .app（ad-hoc 签名校验通过）                           |
+| `corepack pnpm@11.7.0 package:dmg`      | 0      | 候选 DMG（`hdiutil` 封装已签名 .app）+ artifacts.json/SHA256SUMS                                                            |
+| `corepack pnpm@11.7.0 smoke:package`    | 0      | 安装级 14/14 场景（§4）                                                                                                     |
+| `corepack pnpm@11.7.0 verify:artifacts` | 0      | DMG SHA + 内嵌清单 SHA/releaseId 关联校验（挂载只读）                                                                       |
+| `git diff --check`                      | 0      | 无空白错误                                                                                                                  |
 
 人工观察项（本机桌面）：Dock/托盘图标与模板渲染、标准菜单、输入与复制粘贴、多显示器窗口恢复、恢复页文案——由本机人工启动候选包观察（开发态同一 UI 链已由 smoke 驱动）；系统外链的真实 `shell.openExternal` 未在自动测试中执行（自动测试使用记录型 adapter），留待人工使用周期确认。
 
 ## 7. 未验证项与剩余风险
 
 - darwin-x64 未构建未运行；CI 的 macOS job（含 macos-package）未在 GitHub Actions 实际执行。
+- 已知限制（二轮审查记录，不阻塞验收）：`verify-runtime-tree` 的原生插件平台过滤是 fail-open（路径含异平台 token 字样时跳过而非报错，现实误杀概率低）；`smoke:package` 在 `release/artifacts.json` 缺失时只报 ENOENT 未提示先跑 `package:dmg`；`package-smoke.json` 未记录各场景耗时（只有 startedAt）；pnpm 11 对带构建脚本的第三方插件默认警告并跳过构建（不阻塞安装）。
 - Safe Mode 的制品级链为安装闭包 controller 级 + 桩 boot；Electron 会话级 Safe Mode 由 dev `smoke:safe-mode` 覆盖（源码级）。
 - 升级/降级演练、marker writer、完整格式预检、updater、公证与公开发布属 M4，本记录不宣称。
 - 本机自用候选：DMG 未做 Developer ID 签名/公证，首启右键打开或 `xattr -d com.apple.quarantine`（如经传输产生隔离属性）由用户自行处理——测试链路未修改任何 Gatekeeper 设置。
