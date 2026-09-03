@@ -150,6 +150,18 @@ describe('toStartupFailure', () => {
     expect(failure.summary).not.toContain('eyJhbGciOi')
   })
 
+  it('keeps credential summaries within the limit including the guidance', () => {
+    const failure = toStartupFailure({
+      stage: 'boot',
+      code: 'MISSING_CREDENTIAL',
+      summary: 'x'.repeat(4_000),
+      retryable: false,
+    })
+    expect(failure.summary.length).toBeLessThanOrEqual(1_024)
+    // The guidance is the actionable part: it must survive the truncation.
+    expect(failure.summary).toContain('official DSH settings')
+  })
+
   it('falls back to a safe summary when none is usable', () => {
     const failure = toStartupFailure({
       stage: 'boot',

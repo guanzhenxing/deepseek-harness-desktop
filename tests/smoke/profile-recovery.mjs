@@ -18,7 +18,12 @@ const requireFromShellCore = createRequire(
 const shellCore = requireFromShellCore('@dsh-desktop/shell-core')
 const homeLease = requireFromShellCore('@dsh-desktop/home-lease')
 
-const { RecoverySessionController, StartupFailureError, createDesktopProfileRecovery } = shellCore
+const {
+  RecoverySessionController,
+  StartupFailureError,
+  createDesktopProfileRecovery,
+  createRecoveryMarkerStore,
+} = shellCore
 const { acquireHomeLease, createInProcessGuardLock } = homeLease
 
 const disposableHomes = []
@@ -71,7 +76,15 @@ async function leasedSession(home, options) {
     probe: sameProbe(),
     guard: createInProcessGuardLock(),
   })
-  const marker = { value: undefined }
+  const inMemoryMarker = { value: undefined }
+  const marker = options.markerStore ?? {
+    async read() {
+      return inMemoryMarker.value
+    },
+    async write(entry) {
+      inMemoryMarker.value = entry
+    },
+  }
   const session = {
     attempts: [],
     views: [],
@@ -82,10 +95,9 @@ async function leasedSession(home, options) {
   session.controller = new RecoverySessionController({
     acquireLease: async () => lease,
     profile: createDesktopProfileRecovery({ home, profileName: 'desktop' }),
-    readRecoveryMarker: async () => marker.value,
-    writeRecoveryMarker: async (entry) => {
-      marker.value = entry
-    },
+    readRecoveryMarker: async () => marker.read(),
+    writeRecoveryMarker: async (entry) => marker.write(entry),
+    onHealthy: () => marker.clear?.(),
     createAttempt: (_lease, mode) => {
       session.attempts.push(mode)
       return {
@@ -187,7 +199,7 @@ try {
       rollbackGranted: true,
       beforeSha,
       afterSha: await manifestSha(home),
-      hostPid: process.pid,
+      sessionPid: process.pid,
       leaseGeneration: session.lease.generation,
     })
     if (session.controller.state !== 'recovery') {
@@ -241,7 +253,7 @@ try {
       rollbackGranted: false,
       outcome: 'conflict',
       afterSha: await manifestSha(home),
-      hostPid: process.pid,
+      sessionPid: process.pid,
       leaseGeneration: session.lease.generation,
     })
     if (session.controller.state !== 'recovery') throw new Error('conflict run not in recovery')
@@ -309,7 +321,7 @@ try {
       committed: true,
       beforeSha,
       afterSha: await manifestSha(home),
-      hostPid: process.pid,
+      sessionPid: process.pid,
       leaseGeneration: session.lease.generation,
     })
     if (session.views.length !== 0) throw new Error('healthy run showed a recovery view')
@@ -356,7 +368,7 @@ try {
       rollbackGranted: false,
       outcome: 'retained',
       journalCount: 24,
-      hostPid: process.pid,
+      sessionPid: process.pid,
       leaseGeneration: lastGeneration,
     })
     const states = await journalStates(home)
@@ -365,6 +377,65 @@ try {
     }
     if (states.some((state) => state !== 'retained')) {
       throw new Error(`non-terminal journals left behind: ${JSON.stringify(states)}`)
+    }
+  }
+
+  // ── Cross-process relaunch budget: a persisted marker survives a "restart" ──
+  {
+    const home = await freshHome('cross-process')
+    await seedSentinels(home)
+    // A real file-backed marker store — exactly what the launcher persists
+    // under userData — shared by two sequentially created sessions to model
+    // a process restart between them.
+    const markerRoot = await mkdtemp(path.join(tmpdir(), 'dsh-m2-marker-'))
+    const markerStore = createRecoveryMarkerStore(markerRoot, home)
+    try {
+      // Process A: attributed failure → rollback → marker persisted → one
+      // automatic relaunch → fails again → recovery view → quit (no healthy
+      // session, so the marker must still be on disk).
+      const first = await leasedSession(home, {
+        boot: () => Promise.reject(attributedFailure),
+        markerStore,
+      })
+      await first.controller.start().catch(() => undefined)
+      if (first.attempts.filter((mode) => mode === 'normal').length !== 2) {
+        throw new Error('first process did not use its single automatic relaunch')
+      }
+      await first.controller.act('quit')
+      if ((await markerStore.read()) === undefined) {
+        throw new Error('marker was not persisted across the simulated restart')
+      }
+      // Process B (fresh controller, same home and marker store): the
+      // rollback still happens, but the persisted marker denies the
+      // automatic relaunch — exactly one boot, straight to the view.
+      const second = await leasedSession(home, {
+        boot: () => Promise.reject(attributedFailure),
+        markerStore,
+      })
+      await second.controller.start().catch(() => undefined)
+      if (second.attempts.filter((mode) => mode === 'normal').length !== 1) {
+        throw new Error('a restarted process minted a fresh relaunch budget')
+      }
+      if (second.views.length !== 1) throw new Error('restarted process showed no recovery view')
+      await second.controller.act('quit')
+      // A later healthy session clears the marker, restoring the budget for
+      // a future, unrelated recovery.
+      const healthy = await leasedSession(home, {
+        boot: async () => ({
+          pid: process.pid,
+          startIdentity: 'healthy-after-budget',
+          surface: { kind: 'loopback', url: 'http://127.0.0.1:43126/?token=x' },
+          origin: 'http://127.0.0.1:43126',
+        }),
+        markerStore,
+      })
+      await healthy.controller.start()
+      if ((await markerStore.read()) !== undefined) {
+        throw new Error('a healthy session did not clear the spent marker')
+      }
+      await healthy.controller.act('quit')
+    } finally {
+      await rm(markerRoot, { recursive: true, force: true })
     }
   }
 

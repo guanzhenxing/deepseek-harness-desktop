@@ -38,7 +38,10 @@
     <h1>启动失败</h1>
     <p>阶段 <code id="failure-stage"></code>，错误 <code id="failure-code"></code>：</p>
     <pre id="failure-summary"></pre>
-    <p class="muted">你的数据没有被本次启动修改；恢复操作只影响本次会话。</p>
+    <p class="muted">
+      你的 DSH 权威数据（凭据、设置、会话与存储）不会被启动恢复修改。若本次启动更新了 profile
+      候选文件，其修改前的内容已保存在修订 journal 中，可诊断或恢复。
+    </p>
     <p id="doctor-command" style="display: none">
       锁残留时可在完全退出后运行：<code id="doctor-command-text"></code>
     </p>

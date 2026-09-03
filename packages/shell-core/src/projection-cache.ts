@@ -48,28 +48,38 @@ async function writeJournalDurable(home: string, journal: QuarantineJournal): Pr
   await syncDirectory(path.dirname(file))
 }
 
-async function readJournal(home: string): Promise<QuarantineJournal | undefined> {
+type JournalRead =
+  { state: 'present'; journal: QuarantineJournal } | { state: 'absent' } | { state: 'foreign' }
+
+async function readJournal(home: string): Promise<JournalRead> {
+  let raw: string
   try {
-    const raw = await readFile(path.join(home, JOURNAL_RELATIVE), 'utf8')
-    const value: unknown = JSON.parse(raw)
-    if (typeof value !== 'object' || value === null) return undefined
-    const record = value as Record<string, unknown>
-    if (record.schemaVersion !== 1) return undefined
-    if (typeof record.backupRelative !== 'string') return undefined
-    // The journal is untrusted input: only the exact backup naming this
-    // module writes is ever resolved against the home.
-    if (
-      typeof record.sourceRelative !== 'string' ||
-      record.sourceRelative !== CACHE_RELATIVE ||
-      !record.backupRelative.startsWith(`${QUARANTINE_RELATIVE_PREFIX}${QUARANTINE_PREFIX}`) ||
-      record.backupRelative.includes('..')
-    ) {
-      return undefined
-    }
-    return record as unknown as QuarantineJournal
-  } catch {
-    return undefined
+    raw = await readFile(path.join(home, JOURNAL_RELATIVE), 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'absent' }
+    throw error
   }
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    return { state: 'foreign' }
+  }
+  if (typeof value !== 'object' || value === null) return { state: 'foreign' }
+  const record = value as Record<string, unknown>
+  if (record.schemaVersion !== 1) return { state: 'foreign' }
+  if (typeof record.backupRelative !== 'string') return { state: 'foreign' }
+  // The journal is untrusted input: only the exact backup naming this
+  // module writes is ever resolved against the home.
+  if (
+    typeof record.sourceRelative !== 'string' ||
+    record.sourceRelative !== CACHE_RELATIVE ||
+    !record.backupRelative.startsWith(`${QUARANTINE_RELATIVE_PREFIX}${QUARANTINE_PREFIX}`) ||
+    record.backupRelative.includes('..')
+  ) {
+    return { state: 'foreign' }
+  }
+  return { state: 'present', journal: record as unknown as QuarantineJournal }
 }
 
 async function directorySize(root: string): Promise<number> {
@@ -107,28 +117,37 @@ export async function quarantineProjectionCache(
   await input.lease.assertHeld()
 
   // Resolve the previous run's journal first: a crash after rename but before
-  // the done marker must never move the backup a second time.
+  // the done marker must never move the backup a second time. A journal this
+  // module cannot recognize — corrupt bytes or a foreign schema — is unknown
+  // data: nothing is moved and, crucially, the journal itself is neither
+  // rewritten nor deleted.
   const previous = await readJournal(input.home)
-  if (previous !== undefined && previous.phase !== 'done') {
-    const backupDir = path.join(input.home, previous.backupRelative)
-    const backupExists = await stat(backupDir).then(
-      () => true,
-      () => false,
-    )
-    if (backupExists) {
-      // The rename either landed or never happened; the backup is intact
-      // either way. The journal has served its purpose.
-      await writeJournalDurable(input.home, { ...previous, phase: 'done' })
-      await cleanupQuarantineJournal(input.home)
-      return {
-        kind: 'quarantined',
-        relativeBackupPath: previous.backupRelative,
-        bytes: previous.bytes,
+  if (previous.state === 'foreign') {
+    return { kind: 'unknown-layout' }
+  }
+  if (previous.state === 'present') {
+    const journal = previous.journal
+    if (journal.phase !== 'done') {
+      const backupDir = path.join(input.home, journal.backupRelative)
+      const backupExists = await stat(backupDir).then(
+        () => true,
+        () => false,
+      )
+      if (backupExists) {
+        // The rename either landed or never happened; the backup is intact
+        // either way. The journal has served its purpose.
+        await writeJournalDurable(input.home, { ...journal, phase: 'done' })
+        await cleanupQuarantineJournal(input.home)
+        return {
+          kind: 'quarantined',
+          relativeBackupPath: journal.backupRelative,
+          bytes: journal.bytes,
+        }
       }
+      // No backup: treat as a stale journal and continue with a fresh scan.
+    } else {
+      await cleanupQuarantineJournal(input.home)
     }
-    // No backup: treat as a stale journal and continue with a fresh scan.
-  } else if (previous !== undefined) {
-    await cleanupQuarantineJournal(input.home)
   }
 
   const sourceRelative = CACHE_RELATIVE

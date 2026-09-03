@@ -189,4 +189,54 @@ describe('quarantineProjectionCache', () => {
     await expect(readFile(journalFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     await lease.release()
   })
+
+  it('refuses to touch anything when the quarantine journal is corrupt', async () => {
+    const dir = await home()
+    await writeCache(dir, 2048)
+    const lease = await leaseOf(dir)
+    const journalFile = path.join(dir, 'run', 'projection-cache-quarantine.json')
+    await mkdir(path.dirname(journalFile), { recursive: true, mode: 0o700 })
+    await writeFile(journalFile, '{corrupt', { mode: 0o600 })
+    // Unknown journal data is never overwritten: report unknown-layout with
+    // the cache and the journal byte-identical to before.
+    expect(await quarantineProjectionCache({ home: dir, lease, thresholdBytes: 1 })).toEqual({
+      kind: 'unknown-layout',
+    })
+    expect(await readFile(journalFile, 'utf8')).toBe('{corrupt')
+    expect(await stat(await cacheDir(dir))).toBeTruthy()
+    await lease.release()
+  })
+
+  it('treats a journal without its backup as stale and rescans', async () => {
+    const dir = await home()
+    await writeCache(dir, 2048)
+    const lease = await leaseOf(dir)
+    const journalFile = path.join(dir, 'run', 'projection-cache-quarantine.json')
+    await mkdir(path.dirname(journalFile), { recursive: true, mode: 0o700 })
+    await writeFile(
+      journalFile,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          id: 'stale',
+          sourceRelative: 'storages/session_projcache/sessions',
+          backupRelative: 'storages/session_projcache.quarantine-stale',
+          bytes: 2048,
+          createdAt: new Date().toISOString(),
+          phase: 'intent',
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    const result = await quarantineProjectionCache({
+      home: dir,
+      lease,
+      thresholdBytes: 1024,
+    })
+    // No backup ever landed: the journal is stale, the fresh scan quarantined
+    // the cache under a new id.
+    expect(result.kind).toBe('quarantined')
+    await lease.release()
+  })
 })

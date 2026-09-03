@@ -1,7 +1,7 @@
 import { LeaseError, type HomeLease } from '@dsh-desktop/home-lease'
 import type { HostReady } from '@dsh-desktop/host-supervisor'
 
-import { shouldRollbackProfile, type StartupFailure } from './failure-policy.js'
+import { shouldRollbackProfile, toStartupFailure, type StartupFailure } from './failure-policy.js'
 import type { HostAttempt } from './lifecycle.js'
 
 export type RecoveryAction = 'retry' | 'safe-mode' | 'quit'
@@ -343,7 +343,10 @@ export class RecoverySessionController implements RecoveryController {
    */
   async #failAndRecover(error: unknown): Promise<void> {
     for (;;) {
-      const failure = error instanceof StartupFailureError ? error.failure : fallbackFailure(error)
+      const failure =
+        error instanceof StartupFailureError
+          ? error.failure
+          : fallbackFailure(error, this.#lease?.home)
       await this.#stopAttemptSafely()
       this.#surfaceMounted = false
       this.#state = 'recovery'
@@ -369,16 +372,28 @@ export class RecoverySessionController implements RecoveryController {
           if (outcome === 'restored') {
             this.#pendingTransaction = undefined
             if (!this.#quitRequest && (await this.#mayAutoRestart())) {
-              this.#autoRestartUsed = true
-              await this.#options
-                .writeRecoveryMarker?.({ transactionId, attempt: 1 })
-                .catch(() => undefined)
+              // The marker write is part of spending the budget: if it cannot
+              // be persisted, the relaunch must not happen — a process
+              // restart would otherwise reset the home-scoped budget.
+              let markerPersisted = true
               try {
-                await this.#prepareAndRun(this.#lease)
-                return // healthy again: no recovery view needed
-              } catch (restartError) {
-                error = restartError
-                continue // settle the restarted run; the budget is spent
+                await this.#options.writeRecoveryMarker?.({ transactionId, attempt: 1 })
+              } catch (markerError) {
+                markerPersisted = false
+                console.error(
+                  'recovery marker could not be persisted; skipping the automatic relaunch:',
+                  markerError instanceof Error ? markerError.message : markerError,
+                )
+              }
+              if (markerPersisted) {
+                this.#autoRestartUsed = true
+                try {
+                  await this.#prepareAndRun(this.#lease)
+                  return // healthy again: no recovery view needed
+                } catch (restartError) {
+                  error = restartError
+                  continue // settle the restarted run; the budget is spent
+                }
               }
             }
             break
@@ -413,8 +428,19 @@ export class RecoverySessionController implements RecoveryController {
     // The relaunch budget is home-scoped, not transaction-scoped: a marker
     // left by any earlier recovery (this process or a previous one) means
     // the one automatic relaunch was already spent and never crowned by a
-    // healthy session. Fresh transaction ids must not reset it.
-    const marker = await this.#options.readRecoveryMarker?.()
+    // healthy session. Fresh transaction ids must not reset it. A marker
+    // store that cannot be read at all is treated the same way — the
+    // conservative reading never grants a second relaunch on I/O doubt.
+    let marker: unknown
+    try {
+      marker = await this.#options.readRecoveryMarker?.()
+    } catch (markerError) {
+      console.error(
+        'recovery marker could not be read; skipping the automatic relaunch:',
+        markerError instanceof Error ? markerError.message : markerError,
+      )
+      return false
+    }
     if (marker !== undefined && marker !== null && typeof marker === 'object') return false
     return true
   }
@@ -473,13 +499,15 @@ export class StartupFailureError extends Error {
   }
 }
 
-function fallbackFailure(error: unknown): StartupFailure {
-  const summary = error instanceof Error ? error.message : String(error)
-  return Object.freeze({
+function fallbackFailure(error: unknown, home: string | undefined): StartupFailure {
+  // Every failure that reaches the recovery view — including plain
+  // exceptions from loadSurface, commit, or the profile port — goes through
+  // the same redaction/classification pipeline as Host failures.
+  return toStartupFailure({
     stage: 'unknown',
     code: 'UNKNOWN',
-    category: 'unknown',
-    summary: summary.slice(0, 1_024) || 'startup failed',
+    summary: error instanceof Error ? error.message : String(error),
     retryable: true,
+    home,
   })
 }

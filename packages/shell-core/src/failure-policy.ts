@@ -100,7 +100,11 @@ export function toStartupFailure(input: {
   let summary = sanitizeSummary(input.summary, input.home)
   if (summary === '') summary = `${input.stage} failed (${input.code})`
   if (category === 'credentials') {
-    summary = `${summary}\n${CREDENTIAL_GUIDANCE}`
+    // The guidance is part of the rendered summary, so it shares the length
+    // budget: truncate the payload, never the guidance, never the cap.
+    const room = SUMMARY_LIMIT - CREDENTIAL_GUIDANCE.length - 1
+    summary = `${summary.slice(0, Math.max(0, room))}\n${CREDENTIAL_GUIDANCE}`
+    summary = summary.slice(0, SUMMARY_LIMIT)
   }
   return Object.freeze({
     stage: input.stage,

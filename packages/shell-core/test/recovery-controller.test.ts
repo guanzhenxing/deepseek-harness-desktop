@@ -266,6 +266,131 @@ describe('RecoverySessionController', () => {
     expect(setup.attempts).toHaveLength(1)
   })
 
+  it('skips the automatic relaunch when the marker cannot be persisted', async () => {
+    const lease = new RecordingLease()
+    let nextTransaction = 0
+    const rolledBack: string[] = []
+    const views: unknown[] = []
+    const controller = new RecoverySessionController({
+      acquireLease: async () => lease,
+      profile: {
+        prepare: async () => {
+          nextTransaction += 1
+          return { kind: 'ready', transactionId: `tx-${nextTransaction}`, changed: true }
+        },
+        settleCommitted: async () => undefined,
+        rollback: async (transactionId) => {
+          rolledBack.push(transactionId)
+          return 'restored'
+        },
+        retain: async () => undefined,
+        enterSafeMode: async () => 'prepared',
+        exitSafeMode: async () => undefined,
+      },
+      writeRecoveryMarker: async () => {
+        throw new Error('disk full')
+      },
+      createAttempt: () =>
+        ({
+          start: () => Promise.reject(new StartupFailureError(profileWriteFailure)),
+          stop: async () => undefined,
+        }) as unknown as HostAttempt,
+      loadSurface: async () => undefined,
+      window: {
+        showRecoveryView: async (view) => {
+          views.push(view)
+        },
+        destroySurface: () => undefined,
+      },
+    })
+    await expect(controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    // The rollback happened, but an unpersistable marker means no relaunch:
+    // a restart would otherwise reset the home-scoped budget.
+    expect(rolledBack).toEqual(['tx-1'])
+    expect(controller.state).toBe('recovery')
+    expect(views).toHaveLength(1)
+  })
+
+  it('skips the automatic relaunch when the marker cannot be read', async () => {
+    const lease = new RecordingLease()
+    let nextTransaction = 0
+    const rolledBack: string[] = []
+    const controller = new RecoverySessionController({
+      acquireLease: async () => lease,
+      profile: {
+        prepare: async () => {
+          nextTransaction += 1
+          return { kind: 'ready', transactionId: `tx-${nextTransaction}`, changed: true }
+        },
+        settleCommitted: async () => undefined,
+        rollback: async (transactionId) => {
+          rolledBack.push(transactionId)
+          return 'restored'
+        },
+        retain: async () => undefined,
+        enterSafeMode: async () => 'prepared',
+        exitSafeMode: async () => undefined,
+      },
+      readRecoveryMarker: async () => {
+        throw new Error('EACCES')
+      },
+      createAttempt: () =>
+        ({
+          start: () => Promise.reject(new StartupFailureError(profileWriteFailure)),
+          stop: async () => undefined,
+        }) as unknown as HostAttempt,
+      loadSurface: async () => undefined,
+      window: {
+        showRecoveryView: async () => undefined,
+        destroySurface: () => undefined,
+      },
+    })
+    await expect(controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    // Unreadable marker state is conservative: rollback happened, no
+    // relaunch, and the recovery view still rendered.
+    expect(rolledBack).toEqual(['tx-1'])
+    expect(controller.state).toBe('recovery')
+  })
+
+  it('sanitizes summaries of plain exceptions through the fallback classifier', async () => {
+    const lease = new RecordingLease()
+    const views: unknown[] = []
+    const controller = new RecoverySessionController({
+      acquireLease: async () => lease,
+      profile: {
+        prepare: async () => ({ kind: 'ready', changed: false }),
+        settleCommitted: async () => undefined,
+        rollback: async () => 'restored',
+        retain: async () => undefined,
+        enterSafeMode: async () => 'prepared',
+        exitSafeMode: async () => undefined,
+      },
+      createAttempt: () =>
+        ({
+          start: async () => ready,
+          stop: async () => undefined,
+        }) as unknown as HostAttempt,
+      // A plain exception carrying secrets and the home path — the renderer
+      // path failing must not leak either into the recovery view.
+      loadSurface: async () => {
+        throw new Error(
+          `failed to load ${lease.home}/profiles/desktop with token=super-secret-value`,
+        )
+      },
+      window: {
+        showRecoveryView: async (view) => {
+          views.push(view)
+        },
+        destroySurface: () => undefined,
+      },
+    })
+    await expect(controller.start()).rejects.toThrow(/failed to load/u)
+    const view = controller.getView()
+    expect(view.failure.summary).not.toContain('super-secret-value')
+    expect(view.failure.summary).not.toContain(lease.home)
+    expect(view.failure.summary).toContain('token=<redacted>')
+  })
+
   it('a rollback conflict keeps the journal, blocks retry, and never poisons safe mode', async () => {
     const lease = new RecordingLease()
     const views: unknown[] = []
