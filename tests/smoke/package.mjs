@@ -200,12 +200,15 @@ function navigationScenario(install) {
           const external = reports
             .filter((report) => report.kind === 'external-opened')
             .map((report) => report.url)
-          const expected = [
-            'https://example.com/popup-approved',
-            'https://example.com/main-frame-approved',
-          ]
+          // Only the window-open path (user-gesture target=_blank links) may
+          // hand a URL to the system browser; in-frame navigation is blocked
+          // without external handoff.
+          const expected = ['https://example.com/popup-approved']
           if (JSON.stringify(external) !== JSON.stringify(expected)) {
             throw new Error(`external handoff mismatch: ${JSON.stringify(external)}`)
+          }
+          if (external.some((url) => url.includes('main-frame-blocked'))) {
+            throw new Error('script-driven navigation reached the system browser')
           }
           if (!done.currentUrl.startsWith('http://127.0.0.1:')) {
             throw new Error(`main frame left the surface: ${done.currentUrl}`)
