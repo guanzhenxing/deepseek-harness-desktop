@@ -131,7 +131,7 @@ export async function runLifecycleSequence(context: SmokeSequenceContext): Promi
 export async function runRecoverySequence(context: SmokeSequenceContext): Promise<void> {
   await Promise.race([
     context.waitForRecoveryView(),
-    sleep(120_000).then(() => {
+    sleep(360_000).then(() => {
       throw new Error('the poisoned profile never reached the recovery view')
     }),
   ])

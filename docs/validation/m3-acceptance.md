@@ -48,7 +48,7 @@
 
 ## 5. 执行偏差与处置
 
-1. 一次诊断命令未设 `DSH_HOME`，在真实 `~/.dsh` 上初始化了 `profiles/desktop`（上游 `dsh plugin --help` 的 init 行为）；credentials/settings/会话未触碰，已在后续命令全部改用显式隔离 home。
+1. **不符合项（Standards）**：一次诊断命令未设 `DSH_HOME`，在真实 `~/.dsh` 上触发了上游 `plugin` 命令的 profile 初始化。现场核查：`~/.dsh/profiles/desktop/` 存在 `package.json`（上游默认 init 形态：仅 `dsh-base` bundle、空依赖）、`pnpm-workspace.yaml`、`cordis.patch.yml` 三个文件；credentials/settings/sessions/storages 未被触碰。由于该目录早于本失误可能被旧桌面版使用过，三个文件无法完全归因；未做删除（可能是用户旧数据）。防再发：此后所有诊断/驱动命令一律显式 `DSH_HOME`，制品级与开发态 smoke 均由 fixture 强制隔离 home。该失误不改变制品行为，但本轮 Standards 结论据此不列为无条件通过。
 2. 调试期间多次在你的桌面产生崩溃弹窗，根因为（a）`fs.cp` 复制破坏 .app 内相对符号链接（dyld SIGABRT）与（b）DMG 内封的是 fuse 后未重签的副本（内核 SIGKILL）；两处已修复（`ditto` 安装、`hdiutil` 封装已签名 .app），harness 增加无条件收尾（信号处理 + 进程组/临时目录/挂载清理）。
 3. `--prepackaged` 路径与 afterPack 资源复制不兼容（DMG 内 .app 缺资源），已弃用该路径。
 
@@ -63,6 +63,28 @@
 5. `verify-artifacts` 的 hdiutil detach 失败改为显式告警（不再静默留挂载）。
 
 修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（14/14）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（273+5 单测）。
+
+## 5.7 codex 复审轮（9 项发现，全部处置）
+
+| #   | 级别 | 发现                                                                    | 处置                                                                                                                                                                                                                                                |
+| --- | ---- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P1   | 诊断命令触碰真实 home（Standards 违规）                                 | §5 第 1 条升级为不符合项并核查现场                                                                                                                                                                                                                  |
+| 2   | P1   | `<home>/run/compatibility.json` 未进 data-layout                        | 已补所有者/写入/备份迁移行                                                                                                                                                                                                                          |
+| 3   | P1   | 验收缺三轴结论；README"已验收合并"与"待执行"矛盾；主方案清单状态过时    | 本节下方三轴结论；README/主方案已改                                                                                                                                                                                                                 |
+| 4   | P1   | CLI 无 profile 透传绕过 admission（`plugin --help` 实测 spawn）         | 透传路径一律先 admission（只读、不取 lease），拒绝 exit 5；doctor 保持豁免；新增单测 + 协议更新                                                                                                                                                     |
+| 5   | P1   | 制品级 recovery/Safe Mode 为 controller 桩 boot，非安装应用场景         | 新增 `installed-recovery` 场景：安装应用上毒 profile patch → 真实 Host boot 失败 → 真实恢复页 → Safe Mode 真实 utilityProcess Host boot 至 healthy；毒 patch 字节不变、恰一次 relaunch、lease 释放全部断言（controller 级场景保留为深层不变量测试） |
+| 6   | P1   | 非用户触发的主 frame/重定向可打开系统浏览器（`location.assign` 可触发） | 主 frame 导航（含重定向）一律只拦不开；external 仅经 window-open（用户手势 target=_blank）；smoke 断言改为"脚本导航不得进入 external 路径"                                                                                                          |
+| 7   | P2   | 固定 minWidth 900 与"屏幕不足限制到 workArea"矛盾                       | `minWindowSizeFor` 纯函数 + 单测：恢复态小于标准最小值时 BrowserWindow 最小值随之放松                                                                                                                                                               |
+| 8   | P2   | 内嵌清单缺闭包摘要                                                      | staging 写入 `closureDigest`（watched singleton 精确版本 + 虚拟 store 条目 SHA-256），供 M4 预检比对                                                                                                                                                |
+| 9   | P2   | 人工系统外链未做                                                        | 事实项，保留为人工使用周期待办（见 §7）                                                                                                                                                                                                             |
+
+修复后按门禁顺序对最终制品重建重验（见 §6）。外链语义变化已在协议外链行为处同步：普通无 target 外链点击会被静默拦截（不做浏览器转发），受控转发仅 target=_blank 链接——记录该取舍。
+
+## 5.8 三轴结论
+
+- **Standards**：修复后有条件通过——架构/ADR/协议/文档链一致，data-layout 已同步；条件项为 §5 第 1 条的真实 home 触碰失误（现场已核查、防再发措施就位，无法追溯消除）。
+- **Spec**：通过——M3 计划逐 Task 核对无缺漏；CLI 无绕过面；制品级 15 场景含真实 Electron 恢复/Safe Mode 链；未完成项（CI 实测、人工观察、x64）均如实记录且不宣称。
+- **安全**：通过（本机自用范围内）——admission fail-closed、外链仅 window-open 受控转发、popup 一律拒绝、fuses 硬化（runAsNode/NODE_OPTIONS/inspect 关闭、onlyLoadAppFromAsar）、IPC 窄通道维持 M2 语义；无 Developer ID/notarization，公开发行需另立 ADR（未做，不宣称）。
 
 ## 6. 门禁结果（最终轮次，2026-09-03，全部退出码 0）
 

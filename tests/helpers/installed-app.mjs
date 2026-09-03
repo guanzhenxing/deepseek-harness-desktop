@@ -61,7 +61,7 @@ export async function installFromDmg(dmgPath, productName) {
     execFileSync('/usr/bin/ditto', [appBundle, path.join(installDirectory, `${productName}.app`)])
   } catch (error) {
     execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
-    await rm(installDirectory, { recursive: true, force: true })
+    await rm(installDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     throw error
   }
   execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
@@ -84,7 +84,7 @@ export async function installFromDmg(dmgPath, productName) {
       ) {
         throw new Error(`refusing to clean an unexpected install directory: ${installDirectory}`)
       }
-      await rm(installDirectory, { recursive: true, force: true })
+      await rm(installDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     },
   }
 }

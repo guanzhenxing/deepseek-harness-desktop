@@ -89,7 +89,11 @@ async function makeControllerHome(label) {
   void label
   const home = path.join(userData, 'home')
   await mkdir(home, { recursive: true, mode: 0o700 })
-  return { userData, home, dispose: () => rm(userData, { recursive: true, force: true }) }
+  return {
+    userData,
+    home,
+    dispose: () => rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }),
+  }
 }
 
 async function runControllerScenario(install, scenario) {

@@ -36,7 +36,7 @@ export async function createDesktopSmokeRoot() {
       ) {
         throw new Error(`refusing to clean an unexpected smoke root: ${userData}`)
       }
-      await rm(userData, { recursive: true, force: true })
+      await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     },
   }
 }
