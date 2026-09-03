@@ -32,6 +32,7 @@ export const REQUIRED_STAGING_FILES = [
   'runtime-host/node_modules/@dsh-desktop/shell-core/lib/index.js',
   'runtime-host/node_modules/.pnpm/node_modules/@deepseek-ai/dsh/package.json',
   'runtime-host/node_modules/.pnpm/node_modules/@deepseek-ai/dsh-web-frontend/package.json',
+  'runtime-host/node_modules/@dsh-desktop/desktop-recovery-bridge/package.json',
   'runtime-cli/package.json',
   'runtime-cli/lib/index.js',
   'runtime-cli/node_modules/@deepseek-ai/dsh/package.json',

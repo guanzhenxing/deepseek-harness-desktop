@@ -161,6 +161,9 @@ importers:
       '@dsh-desktop/desktop-contracts':
         specifier: workspace:*
         version: link:../desktop-contracts
+      '@dsh-desktop/desktop-recovery-bridge':
+        specifier: workspace:*
+        version: link:../desktop-recovery-bridge
       '@dsh-desktop/home-lease':
         specifier: workspace:*
         version: link:../home-lease
@@ -2319,6 +2322,9 @@ packages:
 
   '@dsh-desktop/desktop-contracts@file:packages/desktop-contracts':
     resolution: {directory: packages/desktop-contracts, type: directory}
+
+  '@dsh-desktop/desktop-recovery-bridge@file:packages/desktop-recovery-bridge':
+    resolution: {directory: packages/desktop-recovery-bridge, type: directory}
 
   '@dsh-desktop/home-lease@file:packages/home-lease':
     resolution: {directory: packages/home-lease, type: directory}
@@ -8905,6 +8911,18 @@ snapshots:
     dependencies:
       zod: 4.5.4
 
+  '@dsh-desktop/desktop-recovery-bridge@file:packages/desktop-recovery-bridge(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))':
+    dependencies:
+      '@deepseek-ai/cordis': 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
+      '@deepseek-ai/dsh-client-connection': 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
+      '@deepseek-ai/dsh-host-webserver': 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
+      '@dsh-desktop/desktop-contracts': file:packages/desktop-contracts
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-invariants'
+      - supports-color
+
   '@dsh-desktop/home-lease@file:packages/home-lease(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))':
     dependencies:
       '@deepseek-ai/dsh-atomic-write': 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
@@ -8925,6 +8943,7 @@ snapshots:
       '@deepseek-ai/dsh-util-workspace-path': 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
       '@deepseek-ai/dsh-web-app': 0.1.2-alpha.3(763bef16639aa51e2bf262e429315d73)
       '@dsh-desktop/desktop-contracts': file:packages/desktop-contracts
+      '@dsh-desktop/desktop-recovery-bridge': file:packages/desktop-recovery-bridge(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
       '@dsh-desktop/home-lease': file:packages/home-lease(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
     transitivePeerDependencies:
       - '@cfworker/json-schema'
