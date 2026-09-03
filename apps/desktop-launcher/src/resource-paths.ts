@@ -28,3 +28,39 @@ export function resolveNativeAssets(
 }
 
 export { launcherDirectory }
+
+export type InstalledRuntimePaths = Readonly<{
+  hostEntry: string
+  hostInstallAnchor: string
+  cliEntry: string
+  nodeExecutable: string
+  pnpmEntry: string
+  leaseHelper: string
+  recoveryHtml: string
+  recoveryPreload: string
+  compatibilityManifest: string
+  trayIcon: string
+}>
+
+/**
+ * The fixed installed-resource layout produced by `scripts/stage-runtime.mjs`
+ * and electron-builder's extraResources. Runtime paths are derived only from
+ * the explicit app resources root — never by scanning the repository, a pnpm
+ * store, or the system.
+ */
+export function resolveInstalledRuntime(resourcesPath: string): InstalledRuntimePaths {
+  const root = path.resolve(resourcesPath)
+  const recovery = path.join(root, 'recovery')
+  return Object.freeze({
+    hostEntry: path.join(root, 'runtime-host', 'lib', 'host-entry.js'),
+    hostInstallAnchor: path.join(root, 'runtime-host', 'package.json'),
+    cliEntry: path.join(root, 'runtime-cli', 'bin', 'dsh-native'),
+    nodeExecutable: path.join(root, 'runtime-cli', 'node', 'bin', 'node'),
+    pnpmEntry: path.join(root, 'runtime-cli', 'pnpm', 'pnpm.cjs'),
+    leaseHelper: path.join(root, 'native', 'lease-helper'),
+    recoveryHtml: path.join(recovery, 'recovery-view.html'),
+    recoveryPreload: path.join(recovery, 'recovery-preload.cjs'),
+    compatibilityManifest: path.join(root, 'compatibility.json'),
+    trayIcon: path.join(root, 'icons', 'trayTemplate.png'),
+  })
+}

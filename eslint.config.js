@@ -33,4 +33,18 @@ export default tseslint.config(
     files: ['apps/desktop-launcher/src/recovery-view.js'],
     languageOptions: { globals: { document: 'readonly', window: 'readonly' } },
   },
+  {
+    // electron-builder loads its config with require(); the file is CommonJS
+    // on purpose (see build/electron-builder.config.cjs).
+    files: ['build/electron-builder.config.cjs'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+    languageOptions: {
+      globals: {
+        require: 'readonly',
+        module: 'readonly',
+        process: 'readonly',
+        __dirname: 'readonly',
+      },
+    },
+  },
 )

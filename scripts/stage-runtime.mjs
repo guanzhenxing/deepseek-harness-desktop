@@ -1,0 +1,364 @@
+#!/usr/bin/env node
+// Materialize the self-contained runtime staging tree under release/staging:
+//
+//   release/staging/
+//     app-shell/          tiny asar payload (package.json + main.cjs loader)
+//     runtime-host/       pnpm --prod deploy of desktop-launcher (Electron
+//                         utilityProcess Host closure, real files)
+//     runtime-cli/        pnpm --prod deploy of bundled-cli + official Node
+//                         runtime + pinned pnpm + bin/{dsh-native,node,pnpm}
+//     native/lease-helper compiled macOS lease helper
+//     recovery/           launcher-owned recovery document + preload + script
+//     compatibility.json  embedded release manifest (versions/arch/releaseId)
+//
+// Everything the app executes at runtime comes from this tree: the deployed
+// node_modules closures, the downloaded Node/pnpm runtimes (verified against
+// official checksums), the native helper, and the recovery assets. Nothing
+// resolves through the repository, the pnpm store, or system Node/pnpm.
+import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const staging = path.join(root, 'release', 'staging')
+const downloads = path.join(root, 'release', 'downloads')
+
+const requireFromRoot = createRequire(path.join(root, 'package.json'))
+const rootManifest = requireFromRoot('./package.json')
+const launcherManifest = requireFromRoot('./apps/desktop-launcher/package.json')
+// Node >= 22.12 require(esm): read the compiled product facts without
+// duplicating PRODUCT.appId/name in this script.
+const product = requireFromRoot('./packages/product-config/lib/index.js').PRODUCT
+
+const compatibilityDoc = JSON.parse(
+  await readFile(path.join(root, 'docs', 'compatibility.json'), 'utf8'),
+)
+// The bundled Node runtime uses the development baseline recorded in the
+// compatibility manifest (single source of truth).
+const NODE_BASELINE = compatibilityDoc.node.ci
+const PNPM_VERSION = rootManifest.packageManager.replace(/^pnpm@/u, '')
+const PNPM_TARBALL_INTEGRITY =
+  'sha512-GcyFLBIMcSV2DyRD7mvgyltA+fUFmN4aCaHxd1A+AQ5Xwjx3ZG4B52HeWb+HT7IqM5jDOrlpH8E+uUa28PTWIA=='
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { stdio: 'inherit', ...options })
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error(`${command} ${args.join(' ')} failed (${result.status ?? result.error})`)
+  }
+}
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+function verifyIntegrity(bytes, expected, label) {
+  const algorithm = expected.split('-', 1)[0]
+  const digest = createHash(algorithm).update(bytes).digest('base64')
+  if (`${algorithm}-${digest}` !== expected) {
+    throw new Error(`${label} integrity mismatch: expected ${expected}, got ${algorithm}-${digest}`)
+  }
+}
+
+async function gitCommitShort() {
+  return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim()
+}
+
+async function fetchChecked(url, target, expectedSha256Hex) {
+  const cached = await readFile(target).catch(() => undefined)
+  if (cached !== undefined && sha256(cached) === expectedSha256Hex) {
+    return target
+  }
+  run('curl', ['-fsSL', '-o', target, url])
+  const bytes = await readFile(target)
+  if (sha256(bytes) !== expectedSha256Hex) {
+    throw new Error(`downloaded ${url} does not match the pinned SHA256`)
+  }
+  return target
+}
+
+async function stageNodeRuntime(arch) {
+  const name = `node-v${NODE_BASELINE}-darwin-${arch}`
+  // Fetch the official SHASUMS256.txt; the tarball is verified against its
+  // entry, so the manifest bytes themselves need no separate pin.
+  const sumsPath = path.join(downloads, `SHASUMS256.txt-v${NODE_BASELINE}`)
+  if ((await readFile(sumsPath, 'utf8').catch(() => undefined)) === undefined) {
+    run('curl', [
+      '-fsSL',
+      '-o',
+      sumsPath,
+      `https://nodejs.org/dist/v${NODE_BASELINE}/SHASUMS256.txt`,
+    ])
+  }
+  const sumsText = await readFile(sumsPath, 'utf8')
+  const expected = sumsText
+    .split('\n')
+    .find((line) => line.endsWith(` ${name}.tar.gz`))
+    ?.split(/\s+/u)[0]
+  if (expected === undefined) throw new Error(`SHASUMS256.txt has no entry for ${name}.tar.gz`)
+  const tarball = await fetchChecked(
+    `https://nodejs.org/dist/v${NODE_BASELINE}/${name}.tar.gz`,
+    path.join(downloads, `${name}.tar.gz`),
+    expected,
+  )
+  const work = await mkdtemp(path.join(tmpdir(), 'dsh-stage-node-'))
+  try {
+    run('tar', ['-xzf', tarball, '-C', work])
+    const extracted = path.join(work, name)
+    const target = path.join(staging, 'runtime-cli', 'node')
+    // Move the whole official tree (bin/node, include, LICENSE, README...).
+    await rm(target, { recursive: true, force: true })
+    await rename(extracted, target)
+  } finally {
+    await rm(work, { recursive: true, force: true })
+  }
+}
+
+async function stagePnpm() {
+  const target = path.join(downloads, `pnpm-${PNPM_VERSION}.tgz`)
+  const bytes = await readFile(target).catch(() => undefined)
+  if (bytes === undefined) {
+    run('curl', [
+      '-fsSL',
+      '-o',
+      target,
+      `https://registry.npmjs.org/pnpm/-/pnpm-${PNPM_VERSION}.tgz`,
+    ])
+  }
+  const tarball = await readFile(target)
+  verifyIntegrity(tarball, PNPM_TARBALL_INTEGRITY, `pnpm-${PNPM_VERSION}.tgz`)
+  const work = await mkdtemp(path.join(tmpdir(), 'dsh-stage-pnpm-'))
+  try {
+    run('tar', ['-xzf', target, '-C', work])
+    const pnpmDir = path.join(staging, 'runtime-cli', 'pnpm')
+    await rm(pnpmDir, { recursive: true, force: true })
+    // The whole official package: bin/pnpm.mjs imports the dist/ tree.
+    await cp(path.join(work, 'package'), pnpmDir, { recursive: true })
+    // Stable entry point at pnpm/pnpm.cjs (the layout consumers reference).
+    await writeFile(
+      path.join(pnpmDir, 'pnpm.cjs'),
+      [
+        '#!/usr/bin/env node',
+        '// Loader: the official pnpm package stays intact under bin/ + dist/.',
+        "import('./bin/pnpm.mjs')",
+        '',
+      ].join('\n'),
+    )
+  } finally {
+    await rm(work, { recursive: true, force: true })
+  }
+}
+
+async function deployPackage(filter, target) {
+  await rm(target, { recursive: true, force: true })
+  run('corepack', [`pnpm@${PNPM_VERSION}`, '--filter', filter, '--prod', 'deploy', target])
+}
+
+async function pruneDevelopmentArtifacts(target) {
+  for (const entry of ['src', 'test', 'tsconfig.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
+    await rm(path.join(target, entry), { recursive: true, force: true })
+  }
+}
+
+async function writeShims() {
+  const cliRoot = path.join(staging, 'runtime-cli')
+  const bin = path.join(cliRoot, 'bin')
+  await mkdir(bin, { recursive: true })
+  // The CLI shim executes the bundled Node with argv forwarded verbatim and
+  // resolves the staged entry relative to itself — no PATH lookup.
+  await writeFile(
+    path.join(bin, 'dsh-native'),
+    [
+      '#!/bin/sh',
+      '# dsh-native launcher shim: always runs the bundled Node, never a PATH lookup.',
+      'DIR="$(cd "$(dirname "$0")/.." && pwd)"',
+      'exec "$DIR/node/bin/node" "$DIR/cli-entry.mjs" "$@"',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  await writeFile(
+    path.join(bin, 'node'),
+    [
+      '#!/bin/sh',
+      '# Bundled Node shim for child processes that spawn `node` by name.',
+      'DIR="$(cd "$(dirname "$0")/.." && pwd)"',
+      'exec "$DIR/node/bin/node" "$@"',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  await writeFile(
+    path.join(bin, 'pnpm'),
+    [
+      '#!/bin/sh',
+      '# Bundled pnpm shim (self-contained pnpm.cjs from the official tarball).',
+      'DIR="$(cd "$(dirname "$0")/.." && pwd)"',
+      'exec "$DIR/node/bin/node" "$DIR/pnpm/pnpm.cjs" "$@"',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  // The staged CLI entry runs the deployed bundled-cli with the installed
+  // runtime layout (dsh bin from the staged closure, bundled node, native
+  // helper, packaged desktop executable).
+  await writeFile(
+    path.join(cliRoot, 'cli-entry.mjs'),
+    [
+      "import path from 'node:path'",
+      "import { fileURLToPath } from 'node:url'",
+      "import { runBundledCli } from './lib/index.js'",
+      "import { resolvePackagedCliRuntime } from './lib/runtime-paths.js'",
+      '',
+      'const stagingRoot = path.dirname(fileURLToPath(import.meta.url))',
+      'const runtime = resolvePackagedCliRuntime({ stagingRoot })',
+      'const code = await runBundledCli(process.argv.slice(2), { runtime })',
+      'process.exit(code)',
+      '',
+    ].join('\n'),
+  )
+  await chmod(path.join(bin, 'dsh-native'), 0o755)
+  await chmod(path.join(bin, 'node'), 0o755)
+  await chmod(path.join(bin, 'pnpm'), 0o755)
+}
+
+async function writeAppShell(version) {
+  const shell = path.join(staging, 'app-shell')
+  await mkdir(shell, { recursive: true })
+  await writeFile(
+    path.join(shell, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: 'dsh-desktop-shell',
+        version,
+        private: true,
+        main: 'main.cjs',
+      },
+      undefined,
+      2,
+    )}\n`,
+  )
+  // CommonJS on purpose: Electron's ESM loader cannot load an ESM entry
+  // point from inside the asar archive, and the dynamic import() of the real
+  // (module) launcher from CJS works everywhere.
+  await writeFile(
+    path.join(shell, 'main.cjs'),
+    [
+      '// Packaged entry stub: the real launcher lives as real files under',
+      '// Contents/Resources/runtime-host so the Electron utilityProcess Host',
+      '// and its dependency closure never load from inside the asar archive.',
+      "const path = require('node:path')",
+      "import(path.join(process.resourcesPath, 'runtime-host', 'lib', 'main.js'))",
+      '',
+    ].join('\n'),
+  )
+}
+
+async function writeCompatibilityManifest(arch) {
+  const releaseId = `m3-${rootManifest.version}-${process.platform}-${arch}-${await gitCommitShort()}`
+  const manifest = {
+    schemaVersion: 1,
+    releaseId,
+    desktopVersion: rootManifest.version,
+    productExecutableName: product.name,
+    appId: product.appId,
+    dsh: compatibilityDoc.dsh,
+    electron: launcherManifest.devDependencies.electron,
+    node: NODE_BASELINE,
+    pnpm: PNPM_VERSION,
+    platform: process.platform,
+    arch,
+    generatedAt: new Date().toISOString(),
+  }
+  await writeFile(
+    path.join(staging, 'compatibility.json'),
+    `${JSON.stringify(manifest, undefined, 2)}\n`,
+  )
+  return { releaseId }
+}
+
+async function stageRecoveryAssets() {
+  const launcherSrc = path.join(root, 'apps', 'desktop-launcher', 'src')
+  const launcherLib = path.join(root, 'apps', 'desktop-launcher', 'lib')
+  const target = path.join(staging, 'recovery')
+  await mkdir(target, { recursive: true })
+  await cp(path.join(launcherSrc, 'recovery-view.html'), path.join(target, 'recovery-view.html'))
+  await cp(path.join(launcherSrc, 'recovery-view.js'), path.join(target, 'recovery-view.js'))
+  await cp(
+    path.join(launcherLib, 'recovery-preload.cjs'),
+    path.join(target, 'recovery-preload.cjs'),
+  )
+}
+
+async function assertIcons() {
+  const icons = path.join(root, 'release', 'icons')
+  for (const name of ['icon.icns', 'trayTemplate.png', 'trayTemplate@2x.png']) {
+    const identity = await stat(path.join(icons, name)).catch(() => undefined)
+    if (identity === undefined) {
+      throw new Error(
+        `missing ${path.join('release', 'icons', name)}; run scripts/build-icons.mjs first`,
+      )
+    }
+  }
+}
+
+async function main() {
+  if (process.platform !== 'darwin') {
+    throw new Error(`packaged desktop targets macOS (got ${process.platform})`)
+  }
+  const arch = process.arch
+  await assertIcons()
+  console.log('stage-runtime: building workspace')
+  run('corepack', [`pnpm@${PNPM_VERSION}`, 'run', 'build'], { cwd: root })
+  run('corepack', [`pnpm@${PNPM_VERSION}`, 'run', 'build:native'], { cwd: root })
+
+  await mkdir(staging, { recursive: true })
+  await rm(staging, { recursive: true, force: true })
+  await mkdir(staging, { recursive: true })
+  await mkdir(downloads, { recursive: true })
+
+  console.log('stage-runtime: deploying host closure')
+  await deployPackage('@dsh-desktop/desktop-launcher', path.join(staging, 'runtime-host'))
+  await pruneDevelopmentArtifacts(path.join(staging, 'runtime-host'))
+  console.log('stage-runtime: deploying cli closure')
+  await deployPackage('@dsh-desktop/bundled-cli', path.join(staging, 'runtime-cli'))
+  await pruneDevelopmentArtifacts(path.join(staging, 'runtime-cli'))
+
+  console.log(`stage-runtime: staging official Node v${NODE_BASELINE} (${arch})`)
+  await stageNodeRuntime(arch)
+  console.log(`stage-runtime: staging pnpm ${PNPM_VERSION}`)
+  await stagePnpm()
+  await writeShims()
+
+  await mkdir(path.join(staging, 'native'), { recursive: true })
+  await cp(
+    path.join(root, 'packages', 'home-lease', 'native', '.build', 'lease-helper'),
+    path.join(staging, 'native', 'lease-helper'),
+  )
+  await chmod(path.join(staging, 'native', 'lease-helper'), 0o755)
+  await stageRecoveryAssets()
+  await writeAppShell(rootManifest.version)
+  const { releaseId } = await writeCompatibilityManifest(arch)
+
+  const entries = await readdir(staging)
+  console.log(`stage-runtime: staged ${entries.join(', ')} (releaseId ${releaseId})`)
+}
+
+await main()

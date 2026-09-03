@@ -1,5 +1,6 @@
 import { fork, type Serializable } from 'node:child_process'
 import { homedir } from 'node:os'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
@@ -14,7 +15,7 @@ import { PRODUCT } from '@dsh-desktop/product-config'
 import { admitHome as admitHomeMarker } from '@dsh-desktop/release-compatibility'
 
 import { runDoctorUnlock } from './doctor.js'
-import { resolveCliRuntime } from './runtime-paths.js'
+import { resolveCliRuntime, type CliRuntimePaths } from './runtime-paths.js'
 
 const childModule = fileURLToPath(new URL('./cli-child.js', import.meta.url))
 
@@ -159,6 +160,8 @@ export type RunBundledCliOptions = Readonly<{
    * the release-compatibility marker fail-closed.
    */
   admitHome?: (home: string) => Promise<HomeAdmissionOutcome>
+  /** Installed-runtime override (`resolvePackagedCliRuntime`); development resolves from the repository. */
+  runtime?: CliRuntimePaths
   /** Test hooks for the descendant process-group checks. */
   groupAlive?: (pgid: number) => boolean
   killGroup?: (pgid: number, signal: NodeJS.Signals) => void
@@ -230,12 +233,21 @@ async function waitForDescendants(pgid: number, options: RunBundledCliOptions): 
 function childEnvironment(
   env: Readonly<Record<string, string | undefined>>,
   home: string,
+  runtime: CliRuntimePaths | undefined,
 ): Record<string, string> {
   const result: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) result[key] = value
   }
   result.DSH_HOME = home
+  if (runtime !== undefined) {
+    // Packaged mode: the official CLI spawns `pnpm`/`node` by name (plugin
+    // management); resolve them to the staged runtime instead of whatever the
+    // ambient PATH provides (there may be no system Node/pnpm at all).
+    const stagingRoot = path.resolve(path.dirname(runtime.nodeExecutable), '..', '..')
+    const binDirectories = [path.join(stagingRoot, 'bin'), path.dirname(runtime.nodeExecutable)]
+    result.PATH = `${binDirectories.join(path.delimiter)}${path.delimiter}${result.PATH ?? '/usr/bin:/bin'}`
+  }
   return result
 }
 
@@ -270,7 +282,7 @@ export async function runBundledCli(
       stderr,
     })
   }
-  const runtime = resolveCliRuntime(env)
+  const runtime = options.runtime ?? resolveCliRuntime(env)
   const probe =
     options.probe ??
     createNativeProcessProbe({
@@ -282,7 +294,7 @@ export async function runBundledCli(
   if (plan.profile === undefined) {
     // Upstream prints its own help/version/error for unresolvable profiles
     // and never writes the home on those paths, so no lease is taken.
-    const child = spawnChild({ argv, env: childEnvironment(env, home) })
+    const child = spawnChild({ argv, env: childEnvironment(env, home, options.runtime) })
     child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
     const exit = await child.exited
     const descendantsGone = await waitForDescendants(child.pid, options)
@@ -334,7 +346,7 @@ export async function runBundledCli(
     let child: CliChildHandle | undefined
     let authorized = false
     try {
-      child = spawnChild({ argv, env: childEnvironment(env, home) })
+      child = spawnChild({ argv, env: childEnvironment(env, home, options.runtime) })
       const identity = await probe.identify(child.pid)
       await lease.attachHost(identity)
       child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })

@@ -32,20 +32,28 @@ corepack pnpm@11.7.0 check
 
 当前可用命令：
 
-| 命令                    | 用途                                                   |
-| ----------------------- | ------------------------------------------------------ |
-| `pnpm build`            | 构建全部 TypeScript project references                 |
-| `pnpm format:check`     | 检查格式但不修改文件                                   |
-| `pnpm lint`             | 静态规则与依赖边界                                     |
-| `pnpm typecheck`        | Host、client 与脚本 TypeScript 类型检查                |
-| `pnpm test:unit`        | 纯函数、schema、state machine 和组件单元测试           |
-| `pnpm test:integration` | 构建后用隔离 home 启动真实 DSH Host 和官方 Web surface |
-| `pnpm smoke:dsh-ui`     | 独立 Electron/Host PID 的最小官方 DSH UI 闭环          |
-| `pnpm smoke:host-crash` | 只终止 Host，验证 launcher 恢复页与最终无残留进程      |
-| `pnpm check:docs`       | 检查必需文档、兼容性事实、本地链接与文本格式           |
-| `pnpm check`            | 合并当前阶段要求的全部快速阻塞门禁                     |
+| 命令                       | 用途                                                    |
+| -------------------------- | ------------------------------------------------------- |
+| `pnpm build`               | 构建全部 TypeScript project references                  |
+| `pnpm format:check`        | 检查格式但不修改文件                                    |
+| `pnpm lint`                | 静态规则与依赖边界                                      |
+| `pnpm typecheck`           | Host、client 与脚本 TypeScript 类型检查                 |
+| `pnpm test:unit`           | 纯函数、schema、state machine 和组件单元测试            |
+| `pnpm test:integration`    | 构建后用隔离 home 启动真实 DSH Host 和官方 Web surface  |
+| `pnpm build:icons`         | 从原创 SVG 生成 ICNS 与托盘模板（macOS 自带工具）       |
+| `pnpm stage:runtime`       | 物化自含 staging 闭包（Host/CLI/Node/pnpm/helper）      |
+| `pnpm verify:runtime-tree` | 校验 staging 完整性、符号链接闭包、singleton 与原生 ABI |
+| `pnpm package:dir`         | icons → staging → 校验 → 未打包 `.app`（ad-hoc 签名）   |
+| `pnpm package:dmg`         | 在 staging 之上生成 DMG 候选                            |
+| `pnpm smoke:dsh-ui`        | 独立 Electron/Host PID 的最小官方 DSH UI 闭环           |
+| `pnpm smoke:host-crash`    | 只终止 Host，验证 launcher 恢复页与最终无残留进程       |
+| `pnpm check:docs`          | 检查必需文档、兼容性事实、本地链接与文本格式            |
+| `pnpm check`               | 合并当前阶段要求的全部快速阻塞门禁                      |
 
-`pnpm smoke:package` 在 M3 建立；在此之前不能把源码 smoke 描述成安装包验收。
+`pnpm smoke:package` 在 M3 Task 5 建立；在此之前不能把源码 smoke 描述成安装包验收。打包固定
+electron-builder 26.15.3（配置 schema 以安装包内的 app-builder-lib 为准）；Host/CLI 运行时全部来自
+`release/staging`（pnpm `--prod` deploy + 官方 Node/pnpm 制品校验），`.app` 内不依赖仓库
+node_modules、pnpm store、系统 Node/pnpm 或 ASAR 虚拟路径。
 
 命令名是仓库契约；package 内部脚本可以变化，但 CI 和开发文档不引用临时实现路径。
 

@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -68,6 +69,56 @@ export function resolveCliRuntime(
     nodeExecutable: process.execPath,
     leaseHelper: resolveLeaseHelperPath(env),
     desktopEntryExecutables: Object.freeze(entries),
+    scanArgvNeedles: Object.freeze(needles),
+  })
+}
+
+/**
+ * Runtime paths inside an installed `.app` (`Contents/Resources/runtime-cli`):
+ * the official dsh bin resolves through the staged dependency closure, the
+ * shim's own Node binary replaces `process.execPath` assumptions, the lease
+ * helper comes from `Contents/Resources/native`, and the packaged desktop
+ * executable is read from the embedded compatibility manifest — never from
+ * the environment or the repository layout.
+ */
+export function resolvePackagedCliRuntime(
+  input: Readonly<{ stagingRoot: string }>,
+): CliRuntimePaths {
+  const stagingRoot = path.resolve(input.stagingRoot)
+  const resourcesRoot = path.resolve(stagingRoot, '..')
+  const requireHere = createRequire(path.join(stagingRoot, 'package.json'))
+  const manifestPath = requireHere.resolve('@deepseek-ai/dsh/package.json')
+  const manifest: unknown = requireHere(manifestPath)
+  const bin = (manifest as { bin?: Record<string, string> }).bin
+  const relative = bin?.dsh
+  if (typeof relative !== 'string' || relative === '') {
+    throw new Error('the staged runtime does not declare a bin.dsh entry')
+  }
+  const dshBin = path.resolve(path.dirname(manifestPath), relative)
+  const compatibility = JSON.parse(
+    readFileSync(path.join(resourcesRoot, 'compatibility.json'), 'utf8'),
+  ) as { productExecutableName?: unknown }
+  if (typeof compatibility.productExecutableName !== 'string') {
+    throw new Error('the embedded compatibility manifest does not name the app executable')
+  }
+  const appExecutable = path.resolve(
+    resourcesRoot,
+    '..',
+    'MacOS',
+    compatibility.productExecutableName,
+  )
+  const needles = [
+    dshBin,
+    path.join(stagingRoot, 'cli-entry.mjs'),
+    path.join(stagingRoot, 'lib', 'cli-child.js'),
+    path.join(resourcesRoot, 'runtime-host', 'lib', 'host-entry.js'),
+    appExecutable,
+  ]
+  return Object.freeze({
+    dshBin,
+    nodeExecutable: path.join(stagingRoot, 'node', 'bin', 'node'),
+    leaseHelper: path.join(resourcesRoot, 'native', 'lease-helper'),
+    desktopEntryExecutables: Object.freeze([appExecutable]),
     scanArgvNeedles: Object.freeze(needles),
   })
 }

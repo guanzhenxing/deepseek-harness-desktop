@@ -7,9 +7,10 @@ import type { RecoveryView } from '@dsh-desktop/shell-core'
 
 import { RECOVERY_DOCUMENT_PATH, toIpcView, validateRecoveryIpc } from './recovery-ipc.js'
 
-// This module always runs from lib/ (package main is lib/main.js); the
-// document and its script stay in src/ (not emitted by tsc), while the
-// sandboxed preload is the compiled lib/recovery-preload.cjs.
+// This module runs from lib/ (package main is lib/main.js); in development
+// the document and its script stay in src/ (not emitted by tsc) and the
+// sandboxed preload is the compiled lib/recovery-preload.cjs. A packaged
+// build receives explicit paths from Contents/Resources/recovery instead.
 const documentRoot = fileURLToPath(new URL('../src/', import.meta.url))
 
 export interface RecoveryWindowHandle {
@@ -26,6 +27,8 @@ export interface RecoveryWindowHandle {
 export function createRecoveryWindow(options: {
   onAction(action: 'retry' | 'safe-mode' | 'quit'): void
   isInRecovery(): boolean
+  documentPath?: string | undefined
+  preloadPath?: string | undefined
 }): RecoveryWindowHandle {
   const window = new BrowserWindow({
     width: 720,
@@ -38,7 +41,8 @@ export function createRecoveryWindow(options: {
       sandbox: true,
       webSecurity: true,
       partition: 'recovery-window',
-      preload: fileURLToPath(new URL('./recovery-preload.cjs', import.meta.url)),
+      preload:
+        options.preloadPath ?? fileURLToPath(new URL('./recovery-preload.cjs', import.meta.url)),
     },
   })
   window.webContents.session.setPermissionCheckHandler(() => false)
@@ -52,7 +56,7 @@ export function createRecoveryWindow(options: {
 
   // The one document URL senders may speak from; compared exactly, so any
   // navigation, query, or fragment retires the window's IPC privileges.
-  const documentPath = path.join(documentRoot, RECOVERY_DOCUMENT_PATH)
+  const documentPath = options.documentPath ?? path.join(documentRoot, RECOVERY_DOCUMENT_PATH)
   const expectedFrameUrl = pathToFileURL(documentPath).href
 
   // Capture the webContents id once: after destroy() the 'closed' handler

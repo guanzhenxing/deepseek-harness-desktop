@@ -57,7 +57,11 @@ import {
   type NativeUiAction,
   type NativeUiPort,
 } from './native-ui.js'
-import { resolveNativeAssets } from './resource-paths.js'
+import {
+  resolveInstalledRuntime,
+  resolveNativeAssets,
+  type InstalledRuntimePaths,
+} from './resource-paths.js'
 import {
   isScriptedSmokeMode,
   runLifecycleSequence,
@@ -65,7 +69,13 @@ import {
 } from './smoke-sequence.js'
 import { createWindowOpenGuard, DESKTOP_WEB_PREFERENCES } from './window-policy.js'
 
-const hostEntryPath = fileURLToPath(new URL('./host-entry.js', import.meta.url))
+// A packaged build derives every runtime path from the installed resources
+// root; development keeps the repository layout next to this module.
+const installedRuntime: InstalledRuntimePaths | undefined = app.isPackaged
+  ? resolveInstalledRuntime(process.resourcesPath)
+  : undefined
+const hostEntryPath =
+  installedRuntime?.hostEntry ?? fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
 const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
 
@@ -366,7 +376,7 @@ async function startApplication(): Promise<void> {
       ? resolveSmokeHome({ smokeMode, userData: userDataOverride, osHome: os.homedir() })
       : resolveDesktopHome({ env: process.env, osHome: os.homedir(), cwd: process.cwd() })
   const probe = createNativeProcessProbe({
-    helperPath: resolveLeaseHelperPath(process.env),
+    helperPath: installedRuntime?.leaseHelper ?? resolveLeaseHelperPath(process.env),
     entryExecutables: [process.execPath],
   })
   const profileName = PRODUCT.defaultProfileName
@@ -420,6 +430,12 @@ async function startApplication(): Promise<void> {
           })
       },
       isInRecovery: () => shell?.state === 'recovery',
+      ...(installedRuntime === undefined
+        ? {}
+        : {
+            documentPath: installedRuntime.recoveryHtml,
+            preloadPath: installedRuntime.recoveryPreload,
+          }),
     }))
   // A dead renderer reloads at most once on the same live Host surface;
   // anything beyond that budget goes to the launcher-owned recovery view.
