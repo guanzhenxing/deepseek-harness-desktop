@@ -42,13 +42,15 @@
 
 第 6 轮终审（全量最后扫描）：CLEAN，无新发现。
 
+**codex 外部审查修复（2026-09-03，第二个修订）**：codex 复审否定了"终审 CLEAN"结论，指出 3 个 P1 与若干缺口，全部修复——Safe Mode 注入面（safe profile 目录内容白名单 + host-runner safe 分支不加载 profile-local patch，两侧独立强制）、relaunch-once 预算改 home 级 marker（新事务 id 不再重置）、applyProfileTransaction 运行时白名单、marker `schemaVersion` 化与未知格式保护、`cache-quarantine` 分类映射补齐、unknown-layout 结构化诊断行、ADR 索引补 0006/0007 并新增 [ADR-0008](../adr/0008-projection-cache-quarantine.md)、projection-cache 测试改用共享 isolated-home fixture、architecture/data-layout 过时的"计划交付"措辞更正、故障矩阵补实际运行证据（§4 的 `M2-MATRIX` 行）。
+
 ## 3. 门禁结果（全部通过，修复后 HEAD）
 
 | 命令                     | 退出码 | 摘要                                                                    |
 | ------------------------ | ------ | ----------------------------------------------------------------------- |
-| `check`                  | 0      | 格式/lint/边界/类型/单测 183 通过（22 文件）/docs 校验                  |
+| `check`                  | 0      | 格式/lint/边界/类型/单测 186 通过（22 文件）/docs 校验（29 文件）        |
 | `build:native`           | 0      | lease-helper 编译                                                       |
-| `test:integration`       | 0      | 31 集成（8 文件）                                                       |
+| `test:integration`       | 0      | 32 集成（8 文件，含 safe 模式毒 patch 边界）                            |
 | `test:shared-home`       | 0      | 4 场景（双向接续 + 互斥 + restart 间隙）                                |
 | `smoke:dsh-ui`           | 0      | M0 冒烟不回归                                                           |
 | `smoke:host-crash`       | 0      | M0 冒烟不回归                                                           |
@@ -74,7 +76,16 @@
 | native-ui          | —（无生产 producer，接口预留）  | —          | 否            | 无（M3+ 原生菜单/托盘接入后产生） | 表驱动测试（策略层）                                                   |
 | unknown            | 未识别 stage/code               | 视情况    | 否            | fallback、`recover-transactions`（有意不映射） | needs-review/conflict smoke：禁 retry、doctor 指引、不猜测 profile 有错 |
 
-实际前后 hash 与 Host PID/lease generation 的逐行记录：journal（`transaction.json` 的 before/candidate SHA）与 lease owner 文件（PID/generation）即权威载体，测试通过读取这些磁盘事实断言（见 smoke 的 journalStates/sentinel 断言），不在本文档重复粘贴会过期的值。
+逐行**实际运行证据**（`smoke:profile-recovery` 输出的 `M2-MATRIX` 结构化行，2026-09-03 实跑，SHA 为 manifest 前 12 个 hex；空摘要 `e3b0c44298fc` 表示"文件不存在"，回滚后回到 before 即回到不存在）：
+
+```text
+M2-MATRIX {"scenario":"attributed-failure","category":"profile-composition","changed":true,"rollbackGranted":true,"beforeSha":"e3b0c44298fc","afterSha":"e3b0c44298fc","hostPid":65873,"leaseGeneration":"fc6a0d46-9968-41a5-9676-741dc09acd18"}
+M2-MATRIX {"scenario":"drifted-candidate","category":"profile-composition","changed":true,"rollbackGranted":false,"outcome":"conflict","afterSha":"cfe7182082e4","hostPid":65873,"leaseGeneration":"f740d637-1dbf-44ac-b23b-0eb2e5960a0a"}
+M2-MATRIX {"scenario":"healthy-commit","category":"runtime","changed":true,"rollbackGranted":false,"committed":true,"beforeSha":"e3b0c44298fc","afterSha":"d193ec18a8a9","hostPid":65873,"leaseGeneration":"f9418dd0-6f79-4b81-9ed6-ed18adfafdf6"}
+M2-MATRIX {"scenario":"retained-runtime","category":"runtime","changed":true,"rollbackGranted":false,"outcome":"retained","journalCount":24,"hostPid":65873,"leaseGeneration":"cda778f0-dd63-4a77-a4da-39c4d1da09d7"}
+```
+
+逐事务的完整 before/candidate SHA 权威记录在 `transaction.json`（journal 即证据载体，测试读取磁盘事实断言）；上表之外的非启动类（lease/credentials/network/native-ui 等）由表驱动单测覆盖判定函数，它们的 producer 语义见协议 §1。
 
 ## 5. 不变量与安全结论
 

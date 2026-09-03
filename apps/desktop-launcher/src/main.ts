@@ -148,7 +148,13 @@ let recoveryWindow: RecoveryWindowHandle | undefined
 let shutdownComplete = false
 let shutdownStarted = false
 
-/** Marker store for the single automatic profile-recovery relaunch. */
+type RecoveryMarker = Readonly<{ transactionId: string; attempt: number }>
+
+/**
+ * Marker store for the single automatic profile-recovery relaunch. The
+ * on-disk format is versioned (`schemaVersion: 1`); a file this build does
+ * not recognize is treated as "budget spent" and never rewritten or deleted.
+ */
 function createRecoveryMarkerStore(userData: string, home: string) {
   const digest = createHash('sha256').update(home).digest('hex').slice(0, 16)
   const directory = path.join(userData, 'recovery')
@@ -161,20 +167,45 @@ function createRecoveryMarkerStore(userData: string, home: string) {
       await handle.close()
     }
   }
+  const readRaw = async (): Promise<unknown> => {
+    try {
+      return JSON.parse(await readFile(file, 'utf8')) as unknown
+    } catch {
+      return undefined
+    }
+  }
+  const isKnownFormat = (value: unknown): value is RecoveryMarker & { schemaVersion: 1 } => {
+    if (typeof value !== 'object' || value === null) return false
+    const record = value as Record<string, unknown>
+    return (
+      record.schemaVersion === 1 &&
+      typeof record.transactionId === 'string' &&
+      typeof record.attempt === 'number'
+    )
+  }
   return {
+    /**
+     * `undefined` means no marker; any present file — including one in an
+     * unknown future format — reads as an object so the relaunch budget
+     * stays spent until this build proves a healthy session.
+     */
     async read(): Promise<unknown> {
-      try {
-        return JSON.parse(await readFile(file, 'utf8')) as unknown
-      } catch {
-        return undefined
-      }
+      const raw = await readRaw()
+      if (raw === undefined) return undefined
+      if (isKnownFormat(raw)) return raw
+      return { schemaVersion: 'unknown' }
     },
-    async write(marker: Readonly<{ transactionId: string; attempt: number }>): Promise<void> {
+    async write(marker: RecoveryMarker): Promise<void> {
+      const existing = await readRaw()
+      if (existing !== undefined && !isKnownFormat(existing)) return
       await mkdir(directory, { recursive: true, mode: 0o700 })
       const temporary = `${file}.${randomUUID()}.tmp`
       const handle = await open(temporary, 'wx', 0o600)
       try {
-        await handle.writeFile(`${JSON.stringify(marker, null, 2)}\n`, 'utf8')
+        await handle.writeFile(
+          `${JSON.stringify({ schemaVersion: 1, ...marker }, null, 2)}\n`,
+          'utf8',
+        )
         await handle.sync()
       } finally {
         await handle.close()
@@ -183,6 +214,9 @@ function createRecoveryMarkerStore(userData: string, home: string) {
       await syncDirectory(directory)
     },
     async clear(): Promise<void> {
+      // Only our own format is ever removed; unknown content stays put.
+      const existing = await readRaw()
+      if (existing !== undefined && !isKnownFormat(existing)) return
       await rm(file, { force: true }).catch(() => undefined)
     },
   }

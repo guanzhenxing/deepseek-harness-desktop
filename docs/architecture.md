@@ -41,7 +41,7 @@ macOS
         └── Node-capable DSH Host runner
             ├── DSH runtime and official Web UI
             ├── desktop-plugin                  # normal mode
-            ├── desktop-recovery-bridge         # planned M2 Safe Mode, E3 prerequisite
+            ├── desktop-recovery-bridge         # M2 Safe Mode (delivered), E3 prerequisite
             └── future product plugins
                 ├── plugin-market
                 ├── remote-access
@@ -172,7 +172,7 @@ Host-control `ready` 只说明 Host 和 surface publisher 已完成协议侧就�
 
 ## 6. Safe Mode 启动
 
-Safe Mode 计划在 M2 交付，也是 E3 的前置能力，不在 M0 实现：
+Safe Mode 已随 M2 交付，也是 E3 的前置能力：
 
 ```text
 launcher keeps the same home lease

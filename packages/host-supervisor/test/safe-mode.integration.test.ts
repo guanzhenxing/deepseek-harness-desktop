@@ -113,6 +113,67 @@ describe.skipIf(!helperAvailable)('safe mode boot', () => {
     expect(await readFile(path.join(normalDir, 'package.json'), 'utf8')).toBe('{corrupt')
     await lease.release()
   })
+
+  it('never loads profile-local patches during a safe boot', async () => {
+    const { fixture, lease } = await leasedHome()
+    const ref = createProfileRef(fixture.home, SAFE_PROFILE_NAME)
+    // Hand-build the safe profile with a poisoned local patch (mirroring a
+    // directory prepareSafeProfile would refuse; the runner must enforce the
+    // same boundary independently of the launcher).
+    await mkdir(ref.dir, { recursive: true, mode: 0o700 })
+    await writeFile(
+      path.join(ref.dir, 'package.json'),
+      `${JSON.stringify(
+        {
+          name: 'dsh-profile-desktop-safe-mode',
+          private: true,
+          dependencies: {},
+          dsh: {
+            profile: {
+              bundles: [
+                '@deepseek-ai/dsh-base',
+                '@deepseek-ai/dsh-web-app',
+                '@dsh-desktop/desktop-recovery-bridge',
+              ],
+              patchReload: 'startup',
+            },
+          },
+        },
+        undefined,
+        2,
+      )}\n`,
+    )
+    await writeFile(
+      path.join(ref.dir, 'cordis.patch.yml'),
+      '- id: injected\n  name: "@fixture/hostile"\n',
+      'utf8',
+    )
+    const anchor = path.join(fixture.userData, 'anchor.json')
+    await copyFile(fileURLToPath(new URL('../package.json', import.meta.url)), anchor)
+    const bridgeRoot = fileURLToPath(new URL('../../desktop-recovery-bridge', import.meta.url))
+    const bridgeLink = path.join(ref.dir, 'node_modules', '@dsh-desktop', 'desktop-recovery-bridge')
+    await mkdir(path.dirname(bridgeLink), { recursive: true })
+    await symlink(bridgeRoot, bridgeLink, 'dir')
+
+    const transport = buildTransport(lease.generation)
+    const host = await runDshHost({
+      home: fixture.home,
+      profileName: SAFE_PROFILE_NAME,
+      mode: 'safe',
+      capability: 'c'.repeat(43),
+      leaseGeneration: lease.generation,
+      hostIdentity: { pid: process.pid, startIdentity: 'safe-patch-boundary' },
+      transport: transport.transport,
+      productInstallAnchor: anchor,
+      installAnchor: anchor,
+    })
+    const kinds = transport.messages.map(
+      (m) => (m as { message?: { kind?: string } }).message?.kind,
+    )
+    expect(kinds).toContain('ready')
+    await host.dispose()
+    await lease.release()
+  })
 })
 
 function buildTransport(generation: string) {

@@ -11,6 +11,9 @@ ADR 记录本项目难以无成本撤销、会约束后续实现的架构决策�
 | [ADR-0003：以独立 profile-manager 统一拥有 profile 状态](0003-separate-profile-manager.md)               | 已接受 | profile reconcile、恢复、Safe Mode 与 generation 的唯一权威 |
 | [ADR-0004：按原生能力独立定义和版本化跨进程契约](0004-version-native-capabilities-independently.md)      | 已接受 | capability subpath、协议演进和敏感操作确认                  |
 | [ADR-0005：以进程启动身份与短临界区 guard 实现整 home lease](0005-home-lease-process-identity.md)        | 已接受 | 共享 home 互斥、owner 身份与 doctor 清理边界                |
+| [ADR-0006：以逐文件修订事务实现 profile 非破坏性恢复](0006-profile-revision-recovery.md)                 | 已接受 | profile 修改的事务、回滚资格与 journal 保留策略             |
+| [ADR-0007：launcher 恢复窗口与窄 IPC](0007-launcher-recovery-ipc.md)                                     | 已接受 | 恢复窗口隔离、sender 校验与有界重试                         |
+| [ADR-0008：持 lease 隔离超大 projection cache](0008-projection-cache-quarantine.md)                      | 已接受 | 可重建缓存的固定布局、隔离 rename 与意图 journal            |
 
 ## 状态
 

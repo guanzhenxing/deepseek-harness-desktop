@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { HomeLease } from '@dsh-desktop/home-lease'
@@ -16,9 +16,11 @@ export const SAFE_BUNDLE_PREFIX = [
 
 /**
  * Prepare (or verify) the Safe Mode profile: exactly the three first-party
- * bundles. A safe profile containing unknown user content — including an
- * unreadable or unparsable manifest — is never overwritten; the caller keeps
- * the local recovery page instead.
+ * bundles and nothing else. Any other entry in the profile directory — a
+ * local `cordis.patch.yml`, `pnpm-workspace.yaml`, `node_modules`, or any
+ * unknown file — is untrusted content the safe boot must never execute, so
+ * the profile reports conflict and is left untouched (the caller keeps the
+ * local recovery page instead).
  */
 export async function prepareSafeProfile(
   ref: ProfileRef,
@@ -41,6 +43,11 @@ export async function prepareSafeProfile(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
+  // The directory must hold exactly the manifest this module writes — the
+  // safe boot loads whatever layers the profile directory exposes.
+  const entries = await readdir(ref.dir).catch(() => [] as string[])
+  const unexpected = entries.filter((entry) => entry !== 'package.json')
+  if (unexpected.length > 0) return 'conflict'
   if (existing !== undefined) {
     let bundles: unknown
     try {

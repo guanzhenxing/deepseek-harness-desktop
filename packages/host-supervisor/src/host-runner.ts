@@ -307,11 +307,15 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
       async () =>
         loadOptionalPatches('dsh-desktop', path.join(options.home, 'cordis.patch.yml')) ?? [],
     )
-    const patches = structuredClone([
-      ...profile.layers.flatMap((layer) => layer.patches),
-      ...profile.patches,
-      ...homePatches,
-    ])
+    // Safe mode composes only the selected bundles' own patches plus the
+    // shared home patch: profile-local patches are user content the safe
+    // boot must never execute (the launcher's prepareSafeProfile refuses
+    // them, and the runner enforces the same boundary independently).
+    const patches = structuredClone(
+      safeMode
+        ? [...profile.layers.flatMap((layer) => layer.patches), ...homePatches]
+        : [...profile.layers.flatMap((layer) => layer.patches), ...profile.patches, ...homePatches],
+    )
     const environment = createLaunchEnvironmentSnapshot([
       { source: 'process', values: processEnvironment() },
     ])

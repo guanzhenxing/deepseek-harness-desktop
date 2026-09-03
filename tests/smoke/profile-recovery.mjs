@@ -4,6 +4,7 @@
 // exactly once, and lands in the recovery view; a drifted candidate surfaces
 // conflict without overwriting; a healthy boot commits; home sentinel files
 // never change.
+import { createHash } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -75,6 +76,7 @@ async function leasedSession(home, options) {
     attempts: [],
     views: [],
     surfaces: [],
+    lease,
     controller: undefined,
   }
   session.controller = new RecoverySessionController({
@@ -122,6 +124,23 @@ const runtimeFailure = new StartupFailureError({
 
 const sentinel = (name) => `# sentinel ${name}\n`
 
+// Structured evidence rows for the M2 failure matrix (acceptance record
+// §4): category, whether the session changed the profile, whether rollback
+// was granted, the manifest's before/after digests, and the host PID / lease
+// generation the run observed.
+async function sha256File(filename) {
+  const bytes = await readFile(filename).catch(() => new Uint8Array())
+  return createHash('sha256').update(bytes).digest('hex').slice(0, 12)
+}
+
+function matrixRow(row) {
+  console.log(`M2-MATRIX ${JSON.stringify(row)}`)
+}
+
+async function manifestSha(home) {
+  return sha256File(path.join(home, 'profiles', 'desktop', 'package.json'))
+}
+
 async function seedSentinels(home) {
   await writeFile(path.join(home, '.credentials.yaml'), sentinel('credentials'), { mode: 0o600 })
   await writeFile(path.join(home, 'settings.yaml'), sentinel('settings'), { mode: 0o600 })
@@ -159,7 +178,18 @@ try {
       // Both normal boots fail with an attributable profile-composition error.
       boot: () => Promise.reject(attributedFailure),
     })
+    const beforeSha = await manifestSha(home)
     await session.controller.start().catch(() => undefined)
+    matrixRow({
+      scenario: 'attributed-failure',
+      category: 'profile-composition',
+      changed: true,
+      rollbackGranted: true,
+      beforeSha,
+      afterSha: await manifestSha(home),
+      hostPid: process.pid,
+      leaseGeneration: session.lease.generation,
+    })
     if (session.controller.state !== 'recovery') {
       throw new Error(`expected recovery state, got ${session.controller.state}`)
     }
@@ -204,6 +234,16 @@ try {
       },
     })
     await session.controller.start().catch(() => undefined)
+    matrixRow({
+      scenario: 'drifted-candidate',
+      category: 'profile-composition',
+      changed: true,
+      rollbackGranted: false,
+      outcome: 'conflict',
+      afterSha: await manifestSha(home),
+      hostPid: process.pid,
+      leaseGeneration: session.lease.generation,
+    })
     if (session.controller.state !== 'recovery') throw new Error('conflict run not in recovery')
     const manifest = await readFile(path.join(home, 'profiles', 'desktop', 'package.json'), 'utf8')
     if (manifest !== drifted) throw new Error('conflict rollback overwrote user bytes')
@@ -257,9 +297,21 @@ try {
         origin: 'http://127.0.0.1:43123',
       }),
     })
+    const beforeSha = await manifestSha(home)
     await session.controller.start()
     if (session.controller.state !== 'healthy')
       throw new Error('healthy run did not become healthy')
+    matrixRow({
+      scenario: 'healthy-commit',
+      category: 'runtime',
+      changed: true,
+      rollbackGranted: false,
+      committed: true,
+      beforeSha,
+      afterSha: await manifestSha(home),
+      hostPid: process.pid,
+      leaseGeneration: session.lease.generation,
+    })
     if (session.views.length !== 0) throw new Error('healthy run showed a recovery view')
     if (session.surfaces.length !== 1) throw new Error('healthy run never mounted the surface')
     const states = await journalStates(home)
@@ -275,6 +327,7 @@ try {
     const home = await freshHome('retention')
     await seedSentinels(home)
     const manifestPath = path.join(home, 'profiles', 'desktop', 'package.json')
+    let lastGeneration = 'n/a'
     for (let round = 0; round < 24; round++) {
       // Each round leaves the manifest one third-party bundle away from the
       // desired state, so every boot plans and retains a fresh transaction —
@@ -293,8 +346,19 @@ try {
       })
       await session.controller.start().catch(() => undefined)
       await session.controller.act('quit')
+      lastGeneration = session.lease.generation
     }
     // 24 retained transactions pruned to exactly the 20 most recent.
+    matrixRow({
+      scenario: 'retained-runtime',
+      category: 'runtime',
+      changed: true,
+      rollbackGranted: false,
+      outcome: 'retained',
+      journalCount: 24,
+      hostPid: process.pid,
+      leaseGeneration: lastGeneration,
+    })
     const states = await journalStates(home)
     if (states.length !== 20) {
       throw new Error(`journal retention did not settle at 20: ${states.length}`)

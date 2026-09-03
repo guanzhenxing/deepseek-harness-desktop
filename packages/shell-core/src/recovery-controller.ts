@@ -368,7 +368,7 @@ export class RecoverySessionController implements RecoveryController {
           }
           if (outcome === 'restored') {
             this.#pendingTransaction = undefined
-            if (!this.#quitRequest && (await this.#mayAutoRestart(transactionId))) {
+            if (!this.#quitRequest && (await this.#mayAutoRestart())) {
               this.#autoRestartUsed = true
               await this.#options
                 .writeRecoveryMarker?.({ transactionId, attempt: 1 })
@@ -408,13 +408,14 @@ export class RecoverySessionController implements RecoveryController {
     await this.#options.window.showRecoveryView(this.getView())
   }
 
-  async #mayAutoRestart(transactionId: string): Promise<boolean> {
+  async #mayAutoRestart(): Promise<boolean> {
     if (this.#autoRestartUsed) return false
+    // The relaunch budget is home-scoped, not transaction-scoped: a marker
+    // left by any earlier recovery (this process or a previous one) means
+    // the one automatic relaunch was already spent and never crowned by a
+    // healthy session. Fresh transaction ids must not reset it.
     const marker = await this.#options.readRecoveryMarker?.()
-    if (typeof marker === 'object' && marker !== null) {
-      const recorded = marker as { transactionId?: unknown }
-      if (recorded.transactionId === transactionId) return false
-    }
+    if (marker !== undefined && marker !== null && typeof marker === 'object') return false
     return true
   }
 

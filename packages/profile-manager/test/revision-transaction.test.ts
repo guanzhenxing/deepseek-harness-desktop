@@ -256,6 +256,32 @@ describe('revision transactions', () => {
     await lease.release()
   })
 
+  it('refuses plans that reference anything outside the whitelist', async () => {
+    const { ref, lease } = await leasedHome()
+    const smuggled = {
+      ...ref,
+      dir: path.join(ref.home, 'profiles', 'desktop'),
+    }
+    const plan = {
+      ref: smuggled,
+      writes: [
+        {
+          path: '../../outside.json',
+          before: { exists: false, sha256: null },
+          beforeBytes: null,
+          candidateBytes: new TextEncoder().encode('{}\n'),
+          candidateSha256: '0'.repeat(64),
+        },
+      ],
+    } as unknown as Parameters<typeof applyProfileTransaction>[0]
+    await expect(applyProfileTransaction(plan, lease)).rejects.toThrow(/whitelisted/u)
+    // Refused before any side effect: no journal directory was created.
+    await expect(stat(path.join(ref.home, 'run', 'profile-transactions'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await lease.release()
+  })
+
   it('keeps journal snapshots private and stores only whitelisted relative paths', async () => {
     const { ref, lease } = await leasedHome()
     const plan = await planDesktopReconcile(ref, lease)

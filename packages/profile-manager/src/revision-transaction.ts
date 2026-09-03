@@ -6,6 +6,7 @@ import type { HomeLease } from '@dsh-desktop/home-lease'
 
 import type { ProfileRef } from './profile-ref.js'
 import { sha256Of } from './reconcile-plan.js'
+import { MANAGED_PROFILE_PATHS } from './reconcile-plan.js'
 import type { FileRevision, ManagedProfilePath, ProfileReconcilePlan } from './reconcile-plan.js'
 import { syncDirectory, writeAtomicDurable } from './durable-fs.js'
 
@@ -192,6 +193,12 @@ export async function applyProfileTransaction(
   assertLeaseMatches(lease, plan.ref)
   if (plan.ref.dir !== path.join(plan.ref.home, 'profiles', plan.ref.name)) {
     throw new Error('ProfileRef directory does not match its home')
+  }
+  // The managed-path whitelist is a runtime invariant, not just a type: no
+  // plan — however constructed — may journal or touch anything outside the
+  // three files the revision model owns.
+  if (plan.writes.some((write) => !MANAGED_PROFILE_PATHS.includes(write.path))) {
+    throw new Error('profile transaction plans may only reference whitelisted paths')
   }
   const home = plan.ref.home
   const id = randomUUID()

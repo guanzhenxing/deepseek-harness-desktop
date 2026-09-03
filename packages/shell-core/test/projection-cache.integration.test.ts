@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -12,26 +11,26 @@ import {
 } from '@dsh-desktop/home-lease'
 
 import { quarantineProjectionCache } from '../src/projection-cache.js'
+import {
+  createIsolatedHomeFixture,
+  type IsolatedHomeFixture,
+} from '../../../tests/helpers/isolated-home.js'
 
 const helperAvailable =
   process.platform === 'darwin' &&
   spawnSync(defaultLeaseHelperPath(), ['identity', String(process.pid)], { timeout: 5_000 })
     .status === 0
 
-const homes: string[] = []
+const fixtures: IsolatedHomeFixture[] = []
 
 async function home(): Promise<string> {
-  const userData = await mkdtemp(path.join(tmpdir(), 'dsh-projcache-int-'))
-  homes.push(userData)
-  const dir = path.join(userData, 'm0-dsh-home')
-  await mkdir(dir, { mode: 0o700 })
-  return dir
+  const fixture = await createIsolatedHomeFixture()
+  fixtures.push(fixture)
+  return fixture.home
 }
 
 afterEach(async () => {
-  for (const entry of homes.splice(0)) {
-    await rm(entry, { recursive: true, force: true }).catch(() => undefined)
-  }
+  for (const fixture of fixtures.splice(0)) await fixture.dispose()
 })
 
 describe.skipIf(!helperAvailable)('projection cache quarantine (real lease)', () => {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -111,6 +111,32 @@ describe('prepareSafeProfile', () => {
     await symlink(outside, path.join(ref.dir, 'package.json'), 'file')
     await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
     await expect(readFile(outside, 'utf8')).resolves.toBe('{}\n')
+    await lease.release()
+  })
+
+  it('refuses any directory content beyond the manifest it writes', async () => {
+    const { ref, lease } = await leasedHome()
+    await prepareSafeProfile(ref, lease)
+    // A local patch, a workspace file, or a dependency tree are all content
+    // the safe boot could execute: conflict, never overwrite or delete.
+    for (const [name, kind] of [
+      ['cordis.patch.yml', 'file'],
+      ['node_modules', 'dir'],
+    ] as const) {
+      const target = path.join(ref.dir, name)
+      if (kind === 'file') await writeFile(target, '# injected\n')
+      else await mkdir(target, { recursive: true })
+      await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
+      if (kind === 'file') {
+        await expect(readFile(target, 'utf8')).resolves.toBe('# injected\n')
+        await rm(target)
+      } else {
+        await expect(stat(target)).resolves.toBeTruthy()
+        await rm(target, { recursive: true })
+      }
+    }
+    // With the directory back to manifest-only, verification succeeds again.
+    await expect(prepareSafeProfile(ref, lease)).resolves.toBe('prepared')
     await lease.release()
   })
 })

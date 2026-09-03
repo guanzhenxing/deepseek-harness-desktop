@@ -1,5 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -12,15 +11,17 @@ import {
 } from '@dsh-desktop/home-lease'
 
 import { quarantineProjectionCache } from '../src/projection-cache.js'
+import {
+  createIsolatedHomeFixture,
+  type IsolatedHomeFixture,
+} from '../../../tests/helpers/isolated-home.js'
 
-const homes: string[] = []
+const fixtures: IsolatedHomeFixture[] = []
 
 async function home(): Promise<string> {
-  const userData = await mkdtemp(path.join(tmpdir(), 'dsh-projcache-'))
-  homes.push(userData)
-  const dir = path.join(userData, 'm0-dsh-home')
-  await mkdir(dir, { mode: 0o700 })
-  return dir
+  const fixture = await createIsolatedHomeFixture()
+  fixtures.push(fixture)
+  return fixture.home
 }
 
 function sameProbe(): ProcessProbe {
@@ -52,15 +53,7 @@ async function leaseOf(dir: string): Promise<HomeLease> {
 }
 
 afterEach(async () => {
-  for (const entry of homes.splice(0)) {
-    const resolved = path.resolve(entry)
-    if (
-      path.dirname(resolved) === path.resolve(tmpdir()) &&
-      path.basename(resolved).startsWith('dsh-projcache-')
-    ) {
-      await rm(resolved, { recursive: true, force: true })
-    }
-  }
+  for (const fixture of fixtures.splice(0)) await fixture.dispose()
 })
 
 async function cacheDir(dir: string): Promise<string> {

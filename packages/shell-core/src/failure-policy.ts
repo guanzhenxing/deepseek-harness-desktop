@@ -38,6 +38,7 @@ const STAGE_CATEGORIES: Readonly<Record<string, FailureCategory>> = {
   'resolve-runtime': 'runtime',
   'publish-surface': 'renderer',
   'host-control': 'runtime',
+  'cache-quarantine': 'runtime',
 }
 
 /** Codes inside the Host's broad `boot` stage that carry a real attribution. */

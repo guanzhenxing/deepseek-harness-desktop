@@ -82,7 +82,15 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
         )
       }
       if (cache.kind === 'unknown-layout') {
-        console.error('projection cache layout unrecognized; leaving it untouched')
+        // Diagnosable, never fatal: an uncertified cache layout is left
+        // untouched and the structured line is greppable in diagnostics.
+        console.error(
+          JSON.stringify({
+            kind: 'projection-cache-unknown-layout',
+            cacheRelative: 'storages/session_projcache/sessions',
+            action: 'left-untouched',
+          }),
+        )
       }
       // A journal that reached `applied` without attribution is only adopted
       // when it is the single open one and every managed file still matches

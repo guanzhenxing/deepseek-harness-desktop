@@ -254,6 +254,18 @@ describe('RecoverySessionController', () => {
     expect(setup.views).toHaveLength(1)
   })
 
+  it('a marker from an earlier transaction also spends the relaunch budget', async () => {
+    // The budget is home-scoped: a previous process already consumed the one
+    // automatic relaunch, and a fresh transaction id must not reset it.
+    const setup = fixture({
+      attemptStart: () => Promise.reject(new StartupFailureError(profileWriteFailure)),
+    })
+    setup.setMarker({ transactionId: 'tx-from-a-previous-process', attempt: 1 })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    expect(setup.portCalls.rolledBack).toEqual(['tx-1'])
+    expect(setup.attempts).toHaveLength(1)
+  })
+
   it('a rollback conflict keeps the journal, blocks retry, and never poisons safe mode', async () => {
     const lease = new RecordingLease()
     const views: unknown[] = []
