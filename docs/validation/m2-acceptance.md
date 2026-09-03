@@ -1,6 +1,6 @@
 # M2 验收记录：非破坏性恢复
 
-- **状态：完成，源码级验收通过**（2026-09-03 定稿，`6eeeb83`）。核心恢复链、Safe Mode、profile 事务、冲突保护、relaunch-once、IPC 隔离全部接通；三轮外部审查的 P1 全部闭合，最后两个持久化边界（marker 删除 durability、journal 完整 schema 校验）已在 `b786b02` 关闭。**不宣称"完全 CLEAN"**——审查不可能完备，遗留项见 §6。
+- **状态：完成，已合并 `main`**（2026-09-03，`fc54de8` fast-forward；合并后全量门禁在 main 复跑通过：check 206/集成 33/shared-home 4/五 smoke/`git diff --check`）。核心恢复链、Safe Mode、profile 事务、冲突保护、relaunch-once、IPC 隔离全部接通；三轮外部审查的 P1 全部闭合，最后两个持久化边界（marker 删除 durability、journal 完整 schema 校验）已在 `b786b02` 关闭。**不宣称"完全 CLEAN"**——审查不可能完备，遗留项见 §6。
 - 日期：2026-09-02（初版）／ 2026-09-02 深夜修订（自查修复后）
 - 基线：`main` @ `b8cf701`（M1 验收合并后）
 - 结果分支：`codex/m2-recovery`（本记录随最终 docs 提交）
@@ -50,6 +50,8 @@
 **自查攻击轮（2026-09-03，第四轮，双代理攻击轴+spec/standards 轴）**：P1×1 + P2×4 + P3×3，全部修复——`run/profile-transactions` 里的杂散文件（如 Finder 的 .DS_Store）曾让 journal 扫描抛 ENOTDIR：启动死循环、且健康启动后 prune 抛错会把已挂载的会话拆进恢复页（现非事务条目跳过、真实 I/O 错误保守判 corrupt）；journal `state` 白名单（位翻转的垃圾状态不再被当作"从未启动"而静默回滚）；reconcile 不再把 apply 阶段冲突的事务当正常 pending 返回（半应用 profile 不再被启动）；cache 隔离成功输出结构化日志（备份相对路径+字节），恢复页文案注明缓存例外；`doctorCommand` 在恢复窗口不再显示——会话持锁期间 doctor 必然拒绝解锁，摘要改为指向 journal 目录；rollback 的 before 快照缺失判 conflict 而非扫描失败；`prepareSafeProfile` 的 readdir 不再把 EACCES 吞成"空目录"；safe mode + 损坏 home patch 的行为（失败、不静默不重写）新增集成测试；credentials/network 两个 boot-code 映射如实标注为上游依赖（当前上游不产生结构化 code，分类落 unknown）；data-layout 补 shared-home 下 launch root 行。
 
 **codex 五审修复（2026-09-03，第五轮，3 P1 + 5 P2）**：safe 分支 `loadProfile` 传 `userLayer: false`——safe profile 的本地 `cordis.patch.yml` 连解析都不发生（毒 patch 集成测试升级为不可解析 YAML，仍启动到 ready）；事务恢复扫描与 adopted-采纳按 `journal.ref.name === ref.name` 限定归属（其他 profile 的事务不被 Desktop 回滚/采纳，corrupt 仍保守 needs-review）；safe-profile 与事务根的父目录链拒绝用户植入 symlink（`profiles/`、`desktop-safe-mode/`、`run/`、`profile-transactions/`，`assertRealDirectory` 共享 helper + 逃逸测试）；cache 目录树不可枚举（如 EACCES）返回 unknown-layout 而非按 0 字节放行；故障矩阵补齐至十类真会话证据（每行 before/after SHA + sessionPid + leaseGeneration，合成注入的类别带 producerNote 标注）；README/roadmap/主方案三处"待执行/计划交付"措辞更正；doctor 口径全文与实现一致（恢复窗口持锁期间不显示 unlock，release 失败的 doctor 建议只出现在日志）；两个 M2 smoke 改用共享 `createIsolatedHomeFixture`（isolated-home 迁移为 .mjs + .d.mts 单一实现，14 个测试文件随迁）。
+
+**codex 六审修复（2026-09-03，最终轮 `fc54de8`，含我方逐项复核）**：journal 读入校验补齐 transaction id UUID 正则、SHA-256 字段正则、before.exists/sha256 一致性与重复 path 拒绝；`currentSha` 三态化（missing/file/other）——受管路径被换成 symlink/目录时 rollback 判 conflict 而非误当"不存在"放过（新增 created-path symlink 漂移测试）；apply 循环逐写前重验 profiles/ 与 profile 目录为真实目录（防 plan→apply 间目录被替换，附逃逸测试）；cache 树内嵌 symlink 与特殊条目 → unknown-layout；rename 前复验 storages 父目录 inode；marker known 判定要求非空 transactionId 与安全正整数 attempt；CSP 恢复为 `script-src 'self'`——**我方 A/B 实机验证**（Electron 44.1.0 加载真实 recovery-view.html）：`'self'` 下视图脚本执行（executed=true），先前第三轮改成的相对路径形式 `recovery-view.js` 会被 CSP host-source 语义静默封死（executed=false 且无 console 报错）——即该轮"CSP 收紧"实为无告警的功能破坏，此轮修复以实机证据确认。
 
 ## 3. 门禁结果（全部通过，修复后 HEAD）
 
