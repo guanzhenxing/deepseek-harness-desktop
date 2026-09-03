@@ -27,6 +27,13 @@ export type AttemptMode = 'normal' | 'safe'
 
 export type CreateAttempt = (lease: HomeLease, mode: AttemptMode) => HostAttempt
 
+/**
+ * Read-only home compatibility admission, run after the lease is acquired and
+ * before any profile/cache/Host write. A refusal lands in the local recovery
+ * view with retry and Safe Mode withdrawn.
+ */
+export type HomeAdmissionCheck = () => Promise<'allow' | 'unknown-schema' | 'unsupported-data'>
+
 export type ProfilePrepareResult =
   | Readonly<{ kind: 'ready'; transactionId?: string; changed: boolean }>
   | Readonly<{ kind: 'blocked'; failure: StartupFailure }>
@@ -76,6 +83,8 @@ export type RecoverySessionOptions = Readonly<{
   maxRetries?: number
   retryWindowMs?: number
   now?(): number
+  /** Home compatibility admission gate (release-compatibility marker). */
+  admitHome?: HomeAdmissionCheck
 }>
 
 const DEFAULT_MAX_RETRIES = 3
@@ -165,6 +174,7 @@ export class RecoverySessionController implements RecoveryController {
     try {
       const lease = await this.#options.acquireLease()
       this.#lease = lease
+      await this.#admitHomeBeforeAnyWrite()
       await this.#prepareAndRun(lease)
     } catch (error) {
       if (error instanceof LeaseError) {
@@ -180,6 +190,46 @@ export class RecoverySessionController implements RecoveryController {
 
   #isHealthy(): boolean {
     return this.#state === 'healthy'
+  }
+
+  /**
+   * Admission refusal is a non-retryable, Safe-Mode-blocked home failure: no
+   * supported write path may touch a home it cannot prove compatible. The
+   * lease stays held for the diagnostic view and is released on quit.
+   */
+  async #admitHomeBeforeAnyWrite(): Promise<void> {
+    const check = this.#options.admitHome
+    if (check === undefined) return
+    this.#safeModeBlocked = true
+    let verdict: 'allow' | 'unknown-schema' | 'unsupported-data'
+    try {
+      verdict = await check()
+    } catch (error) {
+      throw new StartupFailureError({
+        stage: 'home-admission',
+        code: 'HOME_MARKER_UNREADABLE',
+        category: 'home-config',
+        summary: `无法读取数据目录的兼容性标记（${
+          error instanceof Error ? error.message : String(error)
+        }）；为避免破坏数据已停止启动。`,
+        retryable: false,
+      })
+    }
+    if (verdict === 'allow') {
+      // A fresh verdict reopens Safe Mode for this session's recovery view.
+      this.#safeModeBlocked = false
+      return
+    }
+    throw new StartupFailureError({
+      stage: 'home-admission',
+      code: verdict === 'unknown-schema' ? 'HOME_MARKER_UNKNOWN' : 'HOME_DATA_UNSUPPORTED',
+      category: 'home-config',
+      summary:
+        verdict === 'unknown-schema'
+          ? '这份数据目录的兼容性标记无法识别（缺失字段或来自未知版本）；为避免破坏数据已停止启动。'
+          : '这份数据目录由更高数据版本写入，当前版本不支持；请使用写入它的版本打开。',
+      retryable: false,
+    })
   }
 
   /**

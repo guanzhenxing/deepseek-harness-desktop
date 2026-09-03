@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { stat as statAsync } from 'node:fs/promises'
+import { stat as statAsync, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Writable } from 'node:stream'
 
@@ -134,6 +134,78 @@ describe('planCliInvocation', () => {
 })
 
 describe('runBundledCli', () => {
+  it('refuses an incompatible home before any write-home child spawns', async () => {
+    const home = await isolatedHome()
+    const stderr = new MemoryStderr()
+    let spawns = 0
+    const spawn: SpawnCliChild = (input) => {
+      spawns += 1
+      return makeFakeChild(0).spawn(input)
+    }
+    const code = await runBundledCli(['plugin', '--profile', 'desktop', 'add', '@example/a'], {
+      env: { DSH_HOME: home },
+      probe: fakeProbe,
+      guard: createInProcessGuardLock(),
+      spawnChild: spawn,
+      stderr,
+      admitHome: () => Promise.resolve('unsupported-data'),
+    })
+    expect(code).toBe(5)
+    expect(spawns).toBe(0)
+    expect(stderr.text()).toContain('newer release')
+    // The lease was acquired for the diagnostic and released again: no
+    // leftover lock keeps the home unusable for the next supported entry.
+    await expect(statAsync(ownerPathOf(home))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('reads the real marker and fails closed on unreadable content', async () => {
+    const home = await isolatedHome()
+    await mkdir(path.join(home, 'run'), { recursive: true })
+    await writeFile(
+      path.join(home, 'run', 'compatibility.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        dataEpoch: 2,
+        lastWriterReleaseId: 'future-release',
+        formats: {},
+      })}\n`,
+      'utf8',
+    )
+    const stderr = new MemoryStderr()
+    let spawns = 0
+    const code = await runBundledCli(['plugin', '--profile', 'desktop', 'add', '@example/a'], {
+      env: { DSH_HOME: home },
+      probe: fakeProbe,
+      guard: createInProcessGuardLock(),
+      spawnChild: (input) => {
+        spawns += 1
+        return makeFakeChild(0).spawn(input)
+      },
+      stderr,
+    })
+    expect(code).toBe(5)
+    expect(spawns).toBe(0)
+    expect(stderr.text()).toContain('newer release')
+
+    // A corrupt marker is equally refused through the default admission.
+    const corruptHome = await isolatedHome()
+    await mkdir(path.join(corruptHome, 'run'), { recursive: true })
+    await writeFile(path.join(corruptHome, 'run', 'compatibility.json'), '{broken', 'utf8')
+    const secondCode = await runBundledCli(['--profile', 'headless', 'work'], {
+      env: { DSH_HOME: corruptHome },
+      probe: fakeProbe,
+      guard: createInProcessGuardLock(),
+      spawnChild: (input) => {
+        spawns += 1
+        return makeFakeChild(0).spawn(input)
+      },
+      stderr,
+    })
+    expect(secondCode).toBe(5)
+    expect(spawns).toBe(0)
+    expect(stderr.text()).toContain('unknown compatibility marker')
+  })
+
   it('forwards argv verbatim and registers the child before authorizing boot', async () => {
     const home = await isolatedHome()
     const stderr = new MemoryStderr()

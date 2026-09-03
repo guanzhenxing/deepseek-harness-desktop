@@ -21,6 +21,10 @@ export default defineConfig({
       '@dsh-desktop/home-lease': path.join(root, 'packages/home-lease/src/index.ts'),
       '@dsh-desktop/host-supervisor': path.join(root, 'packages/host-supervisor/src/index.ts'),
       '@dsh-desktop/product-config': path.join(root, 'packages/product-config/src/index.ts'),
+      '@dsh-desktop/release-compatibility': path.join(
+        root,
+        'packages/release-compatibility/src/index.ts',
+      ),
       '@dsh-desktop/shell-core': path.join(root, 'packages/shell-core/src/index.ts'),
     },
   },

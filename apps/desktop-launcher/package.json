@@ -15,6 +15,7 @@
     "@dsh-desktop/host-supervisor": "workspace:*",
     "@dsh-desktop/product-config": "workspace:*",
     "@dsh-desktop/profile-manager": "workspace:*",
+    "@dsh-desktop/release-compatibility": "workspace:*",
     "@dsh-desktop/shell-core": "workspace:*"
   },
   "devDependencies": {

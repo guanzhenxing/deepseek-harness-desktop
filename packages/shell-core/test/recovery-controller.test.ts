@@ -80,6 +80,7 @@ function fixture(
   options: {
     attemptStart?: () => Promise<HostReady>
     attemptStop?: (reason: 'quit' | 'restart', deadlineMs: number) => Promise<void>
+    admitHome?: () => Promise<'allow' | 'unknown-schema' | 'unsupported-data'>
   } = {},
 ) {
   const lease = new RecordingLease()
@@ -151,6 +152,7 @@ function fixture(
     },
     onSessionFailure,
     now: () => clock.now,
+    ...(options.admitHome === undefined ? {} : { admitHome: options.admitHome }),
   })
   return {
     attempts,
@@ -165,6 +167,42 @@ function fixture(
 }
 
 describe('RecoverySessionController', () => {
+  it('refuses to touch the home when admission denies the compatibility marker', async () => {
+    const setup = fixture({
+      admitHome: () => Promise.resolve('unsupported-data'),
+    })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    expect(setup.controller.state).toBe('recovery')
+    // No Host attempt was ever created, so nothing could write the home.
+    expect(setup.attempts).toHaveLength(0)
+    const view = setup.views[0] as {
+      failure: StartupFailure
+      retryAllowed: boolean
+      safeModeAllowed: boolean
+    }
+    expect(view.failure.code).toBe('HOME_DATA_UNSUPPORTED')
+    expect(view.failure.category).toBe('home-config')
+    expect(view.retryAllowed).toBe(false)
+    // Safe Mode writes a profile into the same home: it must stay blocked.
+    expect(view.safeModeAllowed).toBe(false)
+    // The lease stays held for the diagnostic view and is released on quit.
+    await setup.controller.act('quit')
+    expect(setup.controller.state).toBe('stopped')
+    expect(setup.lease.calls).toContain('release')
+  })
+
+  it('treats an unreadable marker as a fail-closed admission denial', async () => {
+    const setup = fixture({
+      admitHome: () => Promise.reject(new Error('marker unreadable')),
+    })
+    await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+    expect(setup.attempts).toHaveLength(0)
+    const view = setup.views[0] as { failure: StartupFailure; retryAllowed: boolean }
+    expect(view.failure.code).toBe('HOME_MARKER_UNREADABLE')
+    expect(view.retryAllowed).toBe(false)
+    await setup.controller.act('quit')
+  })
+
   it('starts healthy, commits the transaction, and shows no recovery view', async () => {
     const setup = fixture()
     await setup.controller.start()

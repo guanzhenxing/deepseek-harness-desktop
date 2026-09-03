@@ -44,6 +44,9 @@ importers:
       '@dsh-desktop/product-config':
         specifier: workspace:*
         version: link:../../packages/product-config
+      '@dsh-desktop/release-compatibility':
+        specifier: workspace:*
+        version: link:../../packages/release-compatibility
 
   apps/desktop-launcher:
     dependencies:
@@ -62,6 +65,9 @@ importers:
       '@dsh-desktop/profile-manager':
         specifier: workspace:*
         version: link:../../packages/profile-manager
+      '@dsh-desktop/release-compatibility':
+        specifier: workspace:*
+        version: link:../../packages/release-compatibility
       '@dsh-desktop/shell-core':
         specifier: workspace:*
         version: link:../../packages/shell-core
@@ -157,6 +163,8 @@ importers:
       '@dsh-desktop/home-lease':
         specifier: workspace:*
         version: link:../home-lease
+
+  packages/release-compatibility: {}
 
   packages/shell-core:
     dependencies:

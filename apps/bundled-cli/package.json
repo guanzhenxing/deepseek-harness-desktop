@@ -16,6 +16,7 @@
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.2-alpha.3",
     "@dsh-desktop/home-lease": "workspace:*",
-    "@dsh-desktop/product-config": "workspace:*"
+    "@dsh-desktop/product-config": "workspace:*",
+    "@dsh-desktop/release-compatibility": "workspace:*"
   }
 }

@@ -11,6 +11,7 @@ import {
   type ProcessProbe,
 } from '@dsh-desktop/home-lease'
 import { PRODUCT } from '@dsh-desktop/product-config'
+import { admitHome as admitHomeMarker } from '@dsh-desktop/release-compatibility'
 
 import { runDoctorUnlock } from './doctor.js'
 import { resolveCliRuntime } from './runtime-paths.js'
@@ -141,6 +142,8 @@ function forkCliChild(
   }
 }
 
+export type HomeAdmissionOutcome = 'allow' | 'unknown-schema' | 'unsupported-data'
+
 export type RunBundledCliOptions = Readonly<{
   env?: Readonly<Record<string, string | undefined>>
   osHome?: string
@@ -150,12 +153,30 @@ export type RunBundledCliOptions = Readonly<{
   spawnChild?: SpawnCliChild
   appVersion?: string
   stderr?: NodeJS.WritableStream
+  /**
+   * Home compatibility admission, run after the lease is acquired and before
+   * any write-home child is spawned. Injectable for tests; the default reads
+   * the release-compatibility marker fail-closed.
+   */
+  admitHome?: (home: string) => Promise<HomeAdmissionOutcome>
   /** Test hooks for the descendant process-group checks. */
   groupAlive?: (pgid: number) => boolean
   killGroup?: (pgid: number, signal: NodeJS.Signals) => void
   descendantGraceMs?: number
   descendantEscalationMs?: number
 }>
+
+/** Exit code for a home this release refuses to touch. */
+const EXIT_HOME_INCOMPATIBLE = 5
+
+async function defaultAdmitHome(home: string): Promise<HomeAdmissionOutcome> {
+  try {
+    return await admitHomeMarker({ home })
+  } catch {
+    // Unreadable, symlinked or corrupt markers are all fail-closed refusals.
+    return 'unknown-schema'
+  }
+}
 
 function defaultGroupAlive(pgid: number): boolean {
   try {
@@ -298,6 +319,17 @@ export async function runBundledCli(
 
   let leaseKeptForDiagnosis = false
   try {
+    // Home compatibility admission: after the lease, before any write-home
+    // child exists. A refusal exits without a single home write.
+    const admission = await (options.admitHome ?? defaultAdmitHome)(home)
+    if (admission !== 'allow') {
+      stderr.write(
+        admission === 'unsupported-data'
+          ? 'dsh-native: this home holds data from a newer release; use the release that wrote it\n'
+          : 'dsh-native: this home has an unknown compatibility marker; refusing to start\n',
+      )
+      return EXIT_HOME_INCOMPATIBLE
+    }
     await lease.beforeSpawn(plan.profile)
     let child: CliChildHandle | undefined
     let authorized = false

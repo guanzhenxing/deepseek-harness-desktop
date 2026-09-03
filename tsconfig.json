@@ -42,6 +42,9 @@
       "path": "packages/profile-manager"
     },
     {
+      "path": "packages/release-compatibility"
+    },
+    {
       "path": "packages/shell-core"
     }
   ]
