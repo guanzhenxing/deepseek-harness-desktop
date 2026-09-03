@@ -1,8 +1,9 @@
 import os from 'node:os'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, screen, Tray } from 'electron'
 
 import {
   acquireHomeLease,
@@ -15,12 +16,18 @@ import { HostSupervisor, type HostFatalDetail, type HostReady } from '@dsh-deskt
 import { PRODUCT } from '@dsh-desktop/product-config'
 import { SAFE_PROFILE_NAME } from '@dsh-desktop/profile-manager'
 import {
+  closeWindowAction,
   createDesktopProfileRecovery,
   createRecoveryMarkerStore,
   isAllowedMainFrameNavigation,
+  readWindowState,
+  RendererReloadBudget,
+  restoreWindowState,
   RecoverySessionController,
   StartupFailureError,
   toStartupFailure,
+  writeWindowState,
+  type SavedWindowState,
   type StartupFailure,
 } from '@dsh-desktop/shell-core'
 
@@ -28,6 +35,14 @@ import { createElectronHostProcessFactory } from './electron-host-process.js'
 import { describeLeaseBlock, resolveSmokeHome } from './lease-diagnostics.js'
 import { createRecoveryWindow, type RecoveryWindowHandle } from './recovery-window.js'
 import { resolveSmokeUserData } from './m0-paths.js'
+import {
+  buildAboutPanelOptions,
+  NativeUiSession,
+  type MenuItemSpec,
+  type NativeUiAction,
+  type NativeUiPort,
+} from './native-ui.js'
+import { resolveNativeAssets } from './resource-paths.js'
 import { DESKTOP_WEB_PREFERENCES, denyWindowOpen } from './window-policy.js'
 
 const hostEntryPath = fileURLToPath(new URL('./host-entry.js', import.meta.url))
@@ -37,22 +52,53 @@ const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_D
 if (userDataOverride !== undefined) app.setPath('userData', path.resolve(userDataOverride))
 
 app.setName(PRODUCT.name)
+app.setAboutPanelOptions(
+  buildAboutPanelOptions({
+    productName: PRODUCT.name,
+    desktopVersion: app.getVersion(),
+    electronVersion: process.versions.electron,
+  }),
+)
+
+function workAreas(): { x: number; y: number; width: number; height: number }[] {
+  const displays = screen.getAllDisplays()
+  const primary = screen.getPrimaryDisplay()
+  return [primary, ...displays.filter((display) => display.id !== primary.id)].map(
+    (display) => display.workArea,
+  )
+}
 
 /** The main window port: loads the Host surface and can retire it. */
 class ElectronWindowPort {
   readonly window: BrowserWindow
+  readonly reloadBudget = new RendererReloadBudget()
   #allowedOrigin: string | undefined
+  #surfaceUrl: string | undefined
+  #revealed = false
+  readonly #stateFile: string
+  readonly #isQuitting: () => boolean
+  #saveTimer: NodeJS.Timeout | undefined
 
-  constructor() {
+  constructor(input: {
+    initialState: SavedWindowState | undefined
+    stateFile: string
+    isQuitting: () => boolean
+  }) {
+    this.#stateFile = input.stateFile
+    this.#isQuitting = input.isQuitting
+    const restored = restoreWindowState(input.initialState, workAreas())
     this.window = new BrowserWindow({
-      width: 1280,
-      height: 820,
+      x: restored.bounds.x,
+      y: restored.bounds.y,
+      width: restored.bounds.width,
+      height: restored.bounds.height,
       minWidth: 900,
       minHeight: 600,
       show: false,
       title: PRODUCT.name,
       webPreferences: DESKTOP_WEB_PREFERENCES,
     })
+    if (restored.maximized) this.window.maximize()
     this.window.webContents.session.setPermissionCheckHandler(() => false)
     this.window.webContents.session.setPermissionRequestHandler(
       (_webContents, _permission, callback) => {
@@ -71,14 +117,46 @@ class ElectronWindowPort {
     }
     this.window.webContents.on('will-navigate', guardNavigation)
     this.window.webContents.on('will-redirect', guardNavigation)
+    // Closing hides to the tray; only the quitting state machine may close.
+    this.window.on('close', (event) => {
+      if (closeWindowAction(this.#isQuitting()) === 'hide') {
+        event.preventDefault()
+        this.window.hide()
+      }
+    })
+    const scheduleSave = (): void => this.#scheduleStateSave()
+    this.window.on('resize', scheduleSave)
+    this.window.on('move', scheduleSave)
+    this.window.on('maximize', scheduleSave)
+    this.window.on('unmaximize', scheduleSave)
   }
 
   async loadSurface(surface: HostReady['surface'], origin: string): Promise<void> {
     this.#allowedOrigin = origin
+    this.#surfaceUrl = surface.url
     await this.window.loadURL(surface.url)
     if (!isAllowedMainFrameNavigation(origin, this.window.webContents.getURL())) {
       throw new Error('BrowserWindow finished on an untrusted origin')
     }
+    this.reloadBudget.noteSurfaceLoaded()
+    this.#revealed = true
+    this.window.show()
+  }
+
+  /**
+   * Dock/tray/second-instance reveal only restores a window the user has
+   * already seen: the first launch keeps waiting for the Host surface (and
+   * the recovery window owns the failure case).
+   */
+  canReveal(): boolean {
+    return this.#revealed
+  }
+
+  /** One policy-checked reload of the current surface after a renderer crash. */
+  async reloadSurface(): Promise<void> {
+    if (this.#surfaceUrl === undefined) return
+    await this.window.loadURL(this.#surfaceUrl)
+    if (this.window.isMinimized()) this.window.restore()
     this.window.show()
   }
 
@@ -86,6 +164,27 @@ class ElectronWindowPort {
     this.#allowedOrigin = undefined
     if (this.window.isDestroyed() || this.window.webContents.isDestroyed()) return
     this.window.webContents.stop()
+  }
+
+  /** Persist the normal bounds + maximized flag through an atomic write. */
+  persistWindowStateNow(): void {
+    if (this.window.isDestroyed()) return
+    void writeWindowState(this.#stateFile, {
+      bounds: this.window.getNormalBounds(),
+      maximized: this.window.isMaximized(),
+    }).catch((error: unknown) => {
+      console.error(
+        'window state could not be persisted:',
+        error instanceof Error ? error.message : error,
+      )
+    })
+  }
+
+  #scheduleStateSave(): void {
+    if (this.#saveTimer !== undefined) clearTimeout(this.#saveTimer)
+    this.#saveTimer = setTimeout(() => this.persistWindowStateNow(), 500)
+    // The timer must never keep the quit sequence alive.
+    this.#saveTimer.unref?.()
   }
 }
 
@@ -142,10 +241,91 @@ async function waitForOfficialUi(window: BrowserWindow): Promise<void> {
   throw new Error('Official DSH UI did not reach the M0 smoke markers')
 }
 
+function toElectronTemplate(
+  spec: readonly MenuItemSpec[],
+  dispatch: (action: NativeUiAction) => void,
+): Electron.MenuItemConstructorOptions[] {
+  return spec.map((item): Electron.MenuItemConstructorOptions => {
+    switch (item.kind) {
+      case 'separator':
+        return { type: 'separator' }
+      case 'role':
+        return item.label === undefined
+          ? { role: item.role }
+          : { role: item.role, label: item.label }
+      case 'action':
+        return { label: item.label, click: () => dispatch(item.action) }
+      case 'status':
+        return { label: item.label, enabled: false }
+      case 'submenu':
+        return { label: item.label, submenu: toElectronTemplate(item.items, dispatch) }
+    }
+  })
+}
+
+function createNativeUi(showMainWindow: () => void): NativeUiSession {
+  const assets = resolveNativeAssets({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  })
+  if (assets === undefined) {
+    console.error(
+      'tray template icons are missing; the tray stays disabled (run scripts/build-icons.mjs)',
+    )
+  }
+  let tray: Tray | undefined
+  const session = new NativeUiSession(
+    {
+      setApplicationMenu: (spec) => {
+        Menu.setApplicationMenu(
+          Menu.buildFromTemplate(toElectronTemplate(spec, (action) => session.dispatch(action))),
+        )
+      },
+      setTrayMenu: (spec) => {
+        if (assets === undefined) return
+        tray ??= (() => {
+          const image = nativeImage.createFromPath(assets.trayIcon)
+          image.addRepresentation({
+            scaleFactor: 2,
+            width: 32,
+            height: 32,
+            buffer: readFileSync(assets.trayIcon2x),
+          })
+          image.setTemplateImage(true)
+          const created = new Tray(image)
+          created.setToolTip(PRODUCT.name)
+          created.on('click', () => session.showMain())
+          return created
+        })()
+        tray.setContextMenu(
+          Menu.buildFromTemplate(toElectronTemplate(spec, (action) => session.dispatch(action))),
+        )
+      },
+      clearTray: () => {
+        tray?.destroy()
+        tray = undefined
+      },
+    } satisfies NativeUiPort,
+    {
+      show: () => showMainWindow(),
+      quit: () => {
+        app.quit()
+      },
+    },
+  )
+  return session
+}
+
 let shell: RecoverySessionController | undefined
 let recoveryWindow: RecoveryWindowHandle | undefined
+let nativeUi: NativeUiSession | undefined
+let windowPort: ElectronWindowPort | undefined
 let shutdownComplete = false
 let shutdownStarted = false
+
+function isQuitting(): boolean {
+  return shutdownStarted || shutdownComplete
+}
 
 async function startApplication(): Promise<void> {
   // Resolve the single shared home from the entry environment before any
@@ -160,7 +340,22 @@ async function startApplication(): Promise<void> {
   })
   const profileName = PRODUCT.defaultProfileName
   const marker = createRecoveryMarkerStore(app.getPath('userData'), home)
-  const windowPort = new ElectronWindowPort()
+  const stateFile = path.join(app.getPath('userData'), 'window-state.json')
+  const initialState = await readWindowState(stateFile)
+  const port = new ElectronWindowPort({ initialState, stateFile, isQuitting })
+  windowPort = port
+  const showMainWindow = (): void => {
+    const port = windowPort
+    if (port === undefined) return
+    if (!port.canReveal()) return
+    const window = port.window
+    if (window.isDestroyed()) return
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  }
+  nativeUi = createNativeUi(showMainWindow)
+  nativeUi.initialize('starting')
   let readyHost: HostReady | undefined
   let lastFatal: HostFatalDetail | undefined
   // The recovery window is created lazily on first failure: an eagerly
@@ -183,6 +378,39 @@ async function startApplication(): Promise<void> {
       },
       isInRecovery: () => shell?.state === 'recovery',
     }))
+  // A dead renderer reloads at most once on the same live Host surface;
+  // anything beyond that budget goes to the launcher-owned recovery view.
+  port.window.webContents.on('render-process-gone', (_event, details) => {
+    if (isQuitting() || shell === undefined) return
+    const hostSurfaceAlive = readyHost !== undefined && shell.state === 'healthy'
+    if (
+      port.reloadBudget.consumeIfAvailable({
+        hostSurfaceAlive,
+        quitting: isQuitting(),
+      })
+    ) {
+      smokeReport({ kind: 'renderer-reloaded', reason: details.reason })
+      void port.reloadSurface().catch((error: unknown) => {
+        console.error('renderer reload failed:', error instanceof Error ? error.message : error)
+      })
+      return
+    }
+    smokeReport({ kind: 'renderer-crashed', reason: details.reason })
+    void shell
+      .rendererCrashed({
+        stage: 'renderer',
+        code: 'RENDERER_CRASHED',
+        category: 'renderer',
+        summary: `界面渲染进程退出（${details.reason}）`,
+        retryable: true,
+      })
+      .catch((error: unknown) => {
+        console.error(
+          'renderer crash handling failed:',
+          error instanceof Error ? error.message : error,
+        )
+      })
+  })
   shell = new RecoverySessionController({
     acquireLease: () =>
       acquireHomeLease({
@@ -255,9 +483,10 @@ async function startApplication(): Promise<void> {
       }
     },
     loadSurface: async (ready) => {
-      await windowPort.loadSurface(ready.surface, ready.origin)
+      await port.loadSurface(ready.surface, ready.origin)
     },
     onHealthy: async () => {
+      nativeUi?.setStatus('running')
       // A healthy session spends the relaunch marker and retires the
       // launcher-owned recovery window. Runs after the state flips, so a
       // crash inside it is still a post-ready crash. The two steps are
@@ -276,12 +505,14 @@ async function startApplication(): Promise<void> {
     },
     window: {
       showRecoveryView: async (view) => {
+        nativeUi?.setStatus('recovery')
         smokeReport({ kind: 'recovery-view', stage: view.failure.stage, code: view.failure.code })
         await ensureRecoveryWindow().showRecoveryView(view)
       },
-      destroySurface: () => windowPort.destroySurface(),
+      destroySurface: () => port.destroySurface(),
     },
     onSessionFailure: (failure) => {
+      nativeUi?.setStatus('recovery')
       smokeReport({
         kind: 'session-failure',
         stage: failure.stage,
@@ -297,7 +528,7 @@ async function startApplication(): Promise<void> {
   await shell.start()
 
   if (smokeMode !== undefined) {
-    await waitForOfficialUi(windowPort.window)
+    await waitForOfficialUi(port.window)
     smokeReport({
       kind: 'ui-ready',
       launcherPid: process.pid,
@@ -323,18 +554,30 @@ else {
     app.quit()
   })
   app.on('second-instance', () => {
-    const window = BrowserWindow.getAllWindows()[0]
-    if (window?.isMinimized()) window.restore()
-    window?.focus()
+    // Duplicate launches only focus the existing window.
+    nativeUi?.showMain()
+    const window = windowPort?.window
+    if (window !== undefined && !window.isDestroyed()) {
+      if (window.isMinimized()) window.restore()
+      window.focus()
+    }
+    smokeReport({ kind: 'second-instance-focused' })
+  })
+  // Dock icon activation with no visible window brings the main window back.
+  app.on('activate', () => {
+    nativeUi?.showMain()
   })
   app.on('before-quit', (event) => {
     if (shutdownComplete) return
     event.preventDefault()
+    windowPort?.persistWindowStateNow()
+    nativeUi?.beginQuit()
     if (shutdownStarted) return
     shutdownStarted = true
     void (shell?.act('quit') ?? Promise.resolve())
       .catch(() => undefined)
       .finally(() => {
+        nativeUi?.destroy()
         recoveryWindow?.destroy()
         shutdownComplete = true
         // The stop chain has completed (Host stopped, lease released); a

@@ -206,6 +206,24 @@ export class RecoverySessionController implements RecoveryController {
     await this.#options.window.showRecoveryView(this.getView())
   }
 
+  /**
+   * The renderer surface died while the Host itself is still running (crash
+   * budget exhausted). Unlike a Host crash the attempt is still alive, so it
+   * is stopped here — its transaction already committed at healthy — and the
+   * launcher-owned recovery view takes over. Manual retry boots a fresh Host.
+   */
+  async rendererCrashed(failure: StartupFailure): Promise<void> {
+    if (this.#state !== 'healthy' && !this.#surfaceMounted) return
+    if (this.#state === 'stopped' || this.#state === 'stopping') return
+    this.#surfaceMounted = false
+    this.#state = 'recovery'
+    this.#failure = failure
+    this.#options.onSessionFailure?.(failure)
+    await this.#stopAttemptSafely()
+    this.#options.window.destroySurface()
+    await this.#options.window.showRecoveryView(this.getView())
+  }
+
   async act(action: RecoveryAction): Promise<void> {
     if (action === 'quit') this.#quitRequest = true
     const inFlight = this.#inFlight

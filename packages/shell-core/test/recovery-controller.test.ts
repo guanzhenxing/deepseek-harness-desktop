@@ -645,4 +645,57 @@ describe('RecoverySessionController', () => {
     expect(view.safeModeAllowed).toBe(false)
     expect(views).toHaveLength(2)
   })
+
+  it('moves a healthy session whose renderer crashed to recovery, stopping the live attempt', async () => {
+    const setup = fixture()
+    await setup.controller.start()
+    expect(setup.controller.state).toBe('healthy')
+    await setup.controller.rendererCrashed({
+      stage: 'renderer',
+      code: 'RENDERER_CRASHED',
+      category: 'renderer',
+      summary: 'renderer exited twice on the same Host surface',
+      retryable: true,
+    })
+    expect(setup.controller.state).toBe('recovery')
+    expect(setup.attempts[0]?.stop).toHaveBeenCalledWith('quit', 5_000)
+    expect(setup.views).toHaveLength(1)
+    const view = setup.views[0] as {
+      failure: StartupFailure
+      retryAllowed: boolean
+      safeModeAllowed: boolean
+    }
+    expect(view.failure.code).toBe('RENDERER_CRASHED')
+    expect(view.failure.category).toBe('renderer')
+    expect(view.retryAllowed).toBe(true)
+    expect(view.safeModeAllowed).toBe(true)
+    // The recovery view's retry boots a fresh attempt and returns to healthy.
+    await setup.controller.act('retry')
+    expect(setup.controller.state).toBe('healthy')
+    expect(setup.attempts).toHaveLength(2)
+  })
+
+  it('ignores a renderer crash while not healthy or already quitting', async () => {
+    const setup = fixture({
+      attemptStart: () => Promise.reject(new StartupFailureError(failure)),
+    })
+    await setup.controller.start().catch(() => undefined)
+    await setup.controller.rendererCrashed({
+      stage: 'renderer',
+      code: 'RENDERER_CRASHED',
+      category: 'renderer',
+      summary: 'late renderer crash',
+      retryable: true,
+    })
+    expect(setup.views).toHaveLength(1)
+    await setup.controller.act('quit')
+    await setup.controller.rendererCrashed({
+      stage: 'renderer',
+      code: 'RENDERER_CRASHED',
+      category: 'renderer',
+      summary: 'crash during shutdown',
+      retryable: true,
+    })
+    expect(setup.controller.state).toBe('stopped')
+  })
 })

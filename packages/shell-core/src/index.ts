@@ -1,5 +1,7 @@
 export * from './lifecycle.js'
 export * from './navigation.js'
+export * from './window-state.js'
+export * from './native-lifecycle.js'
 export * from './failure-policy.js'
 export * from './recovery-controller.js'
 export * from './projection-cache.js'
