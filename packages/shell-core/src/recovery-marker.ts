@@ -92,10 +92,13 @@ export function createRecoveryMarkerStore(userData: string, home: string) {
     },
     async clear(): Promise<void> {
       // Only this build's own format is ever removed; anything else on disk
-      // stays exactly as it is.
+      // stays exactly as it is. The removal is made durable (directory
+      // fsync) so a power loss cannot resurrect a cleared marker and wrongly
+      // spend a future session's relaunch budget.
       const existing = await readRaw()
       if (existing.state !== 'known') return
       await rm(file, { force: true })
+      await syncDirectory(directory)
     },
   }
 }

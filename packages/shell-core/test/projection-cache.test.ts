@@ -207,6 +207,36 @@ describe('quarantineProjectionCache', () => {
     await lease.release()
   })
 
+  it('treats a structurally invalid v1 journal as unknown data', async () => {
+    const dir = await home()
+    await writeCache(dir, 2048)
+    const lease = await leaseOf(dir)
+    const journalFile = path.join(dir, 'run', 'projection-cache-quarantine.json')
+    await mkdir(path.dirname(journalFile), { recursive: true, mode: 0o700 })
+    // Parsable JSON with schemaVersion 1, but a phase this module never
+    // writes and bytes of the wrong type: not a stale journal, unknown data.
+    const broken = `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        id: 'not-mine',
+        sourceRelative: 'storages/session_projcache/sessions',
+        backupRelative: 'storages/session_projcache.quarantine-not-mine',
+        bytes: 'lots',
+        createdAt: new Date().toISOString(),
+        phase: 42,
+      },
+      null,
+      2,
+    )}\n`
+    await writeFile(journalFile, broken, { mode: 0o600 })
+    expect(await quarantineProjectionCache({ home: dir, lease, thresholdBytes: 1 })).toEqual({
+      kind: 'unknown-layout',
+    })
+    expect(await readFile(journalFile, 'utf8')).toBe(broken)
+    expect(await stat(await cacheDir(dir))).toBeTruthy()
+    await lease.release()
+  })
+
   it('treats a journal without its backup as stale and rescans', async () => {
     const dir = await home()
     await writeCache(dir, 2048)

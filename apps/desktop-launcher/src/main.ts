@@ -257,19 +257,23 @@ async function startApplication(): Promise<void> {
     loadSurface: async (ready) => {
       await windowPort.loadSurface(ready.surface, ready.origin)
     },
-    onHealthy: () =>
+    onHealthy: async () => {
       // A healthy session spends the relaunch marker and retires the
       // launcher-owned recovery window. Runs after the state flips, so a
-      // crash inside it is still a post-ready crash.
-      marker
-        .clear()
-        .then(() => {
-          if (recoveryWindow !== undefined) {
-            recoveryWindow.destroy()
-            recoveryWindow = undefined
-          }
-        })
-        .catch(() => undefined),
+      // crash inside it is still a post-ready crash. The two steps are
+      // independent: a marker that cannot be cleared (it stays spent, the
+      // conservative direction) must not keep the recovery window alive.
+      await marker.clear().catch((error: unknown) => {
+        console.error(
+          'recovery marker could not be cleared after a healthy session:',
+          error instanceof Error ? error.message : error,
+        )
+      })
+      if (recoveryWindow !== undefined) {
+        recoveryWindow.destroy()
+        recoveryWindow = undefined
+      }
+    },
     window: {
       showRecoveryView: async (view) => {
         smokeReport({ kind: 'recovery-view', stage: view.failure.stage, code: view.failure.code })

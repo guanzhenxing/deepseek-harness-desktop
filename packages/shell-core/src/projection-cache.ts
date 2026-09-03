@@ -68,14 +68,24 @@ async function readJournal(home: string): Promise<JournalRead> {
   if (typeof value !== 'object' || value === null) return { state: 'foreign' }
   const record = value as Record<string, unknown>
   if (record.schemaVersion !== 1) return { state: 'foreign' }
-  if (typeof record.backupRelative !== 'string') return { state: 'foreign' }
-  // The journal is untrusted input: only the exact backup naming this
-  // module writes is ever resolved against the home.
+  // The journal is untrusted input, field by field: a parsable but
+  // structurally broken v1 record is unknown data, not a stale journal.
   if (
+    typeof record.backupRelative !== 'string' ||
     typeof record.sourceRelative !== 'string' ||
     record.sourceRelative !== CACHE_RELATIVE ||
+    // Only the exact backup naming this module writes is ever resolved
+    // against the home.
     !record.backupRelative.startsWith(`${QUARANTINE_RELATIVE_PREFIX}${QUARANTINE_PREFIX}`) ||
-    record.backupRelative.includes('..')
+    record.backupRelative.includes('..') ||
+    typeof record.id !== 'string' ||
+    record.id === '' ||
+    typeof record.bytes !== 'number' ||
+    !Number.isSafeInteger(record.bytes) ||
+    record.bytes < 0 ||
+    typeof record.createdAt !== 'string' ||
+    record.createdAt === '' ||
+    (record.phase !== 'intent' && record.phase !== 'renamed' && record.phase !== 'done')
   ) {
     return { state: 'foreign' }
   }
