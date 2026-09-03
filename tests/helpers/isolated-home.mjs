@@ -1,4 +1,3 @@
-import type { Stats } from 'node:fs'
 import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
@@ -7,13 +6,7 @@ import { fileURLToPath } from 'node:url'
 const fixturePrefix = 'dsh-desktop-isolated-'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-export interface IsolatedHomeFixture {
-  readonly home: string
-  readonly userData: string
-  dispose(): Promise<void>
-}
-
-function isInsideDirectory(parent: string, child: string): boolean {
+function isInsideDirectory(parent, child) {
   const relative = path.relative(parent, child)
   return (
     relative === '' ||
@@ -21,7 +14,7 @@ function isInsideDirectory(parent: string, child: string): boolean {
   )
 }
 
-function assertOutsideForbiddenRoots(home: string): void {
+function assertOutsideForbiddenRoots(home) {
   const resolved = path.resolve(home)
   if (resolved === path.parse(resolved).root) {
     throw new Error('isolated home must never be the filesystem root')
@@ -34,7 +27,7 @@ function assertOutsideForbiddenRoots(home: string): void {
   }
 }
 
-async function directoryIdentity(dirname: string, label: string): Promise<Stats> {
+async function directoryIdentity(dirname, label) {
   const identity = await lstat(dirname)
   if (identity.isSymbolicLink() || !identity.isDirectory()) {
     throw new Error(`${label} must be a real directory, not a symlink`)
@@ -48,7 +41,7 @@ async function directoryIdentity(dirname: string, label: string): Promise<Stats>
  * the repository, the filesystem root, or the real `~/.dsh`, and re-verifies
  * the recorded directory identity (realpath + dev/ino) before cleanup.
  */
-export async function createIsolatedHomeFixture(): Promise<IsolatedHomeFixture> {
+export async function createIsolatedHomeFixture() {
   const envHome = process.env.DSH_HOME
   if (envHome !== undefined && envHome.trim().length > 0) {
     throw new Error(
@@ -70,7 +63,7 @@ export async function createIsolatedHomeFixture(): Promise<IsolatedHomeFixture> 
   return Object.freeze({
     home,
     userData,
-    async dispose(): Promise<void> {
+    async dispose() {
       if (disposed) return
       disposed = true
       if (
@@ -80,8 +73,8 @@ export async function createIsolatedHomeFixture(): Promise<IsolatedHomeFixture> 
         throw new Error('refusing to clean an isolated fixture outside its temporary parent')
       }
       const currentUserData = await directoryIdentity(userData, 'isolated fixture userData')
-      const currentHome = await lstat(home).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      const currentHome = await lstat(home).catch((error) => {
+        if (error.code === 'ENOENT') return undefined
         throw error
       })
       if (

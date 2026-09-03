@@ -53,7 +53,7 @@ launcher 侧阶段（shell-core / desktop-recovery）：
 
 会话语义（`RecoverySessionController`）：
 
-- **外层 lease 全程持有**：恢复窗口存活期间会话不释放 lease——手动重试与 Safe Mode 复用同一 lease；lease 仅在 quit 链（stop Host → 确认退出 → release）释放。release 自身失败时故意保留 lease 并提示 doctor。
+- **外层 lease 全程持有**：恢复窗口存活期间会话不释放 lease——手动重试与 Safe Mode 复用同一 lease；lease 仅在 quit 链（stop Host → 确认退出 → release）释放。release 自身失败时故意保留 lease 并在日志中说明（完全退出后可由 `dsh-native doctor --unlock` 处理锁残留）。
 - **正常链**：`lease → 恢复未完成 journal → cache 检查 → reconcile plan → 持久 journal → apply → Host ready → 窗口挂载 → committed`。committed 仅在 surface 挂载后写入。
 - **失败链**：stop Host 并确认退出 → 分类 → 可归因且 SHA 匹配时回滚 → **最多一次自动正常重启**（relaunch-once）→ 恢复窗口。自动重启预算是 **home 级**：marker（`<userData>/recovery/<home 摘要>.json`，`schemaVersion: 1`）一旦写入即视为已消耗，新事务 id 不能重置；健康会话清除 marker，未知格式的 marker 视为已消耗且永不覆写或删除。
 - **重试预算**：滚动 60 秒窗口内手动重试至多 3 次，且失败必须 `retryable`；非重试失败（如 PROFILE_INVALID）不提供手动重试。post-ready 崩溃不自动重启。

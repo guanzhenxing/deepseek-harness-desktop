@@ -15,7 +15,7 @@ import { SAFE_BUNDLE_PREFIX, SAFE_PROFILE_NAME, prepareSafeProfile } from '../sr
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 
 const fixtures: IsolatedHomeFixture[] = []
 
@@ -111,6 +111,19 @@ describe('prepareSafeProfile', () => {
     await symlink(outside, path.join(ref.dir, 'package.json'), 'file')
     await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
     await expect(readFile(outside, 'utf8')).resolves.toBe('{}\n')
+    await lease.release()
+  })
+
+  it('refuses a symlinked profiles root or safe-profile directory', async () => {
+    const { ref, lease } = await leasedHome()
+    const outside = path.join(ref.home, '..', 'safe-outside')
+    await mkdir(outside, { recursive: true, mode: 0o700 })
+    await mkdir(path.join(ref.home, 'profiles'), { recursive: true, mode: 0o700 })
+    // The safe profile directory itself is a symlink out of the home.
+    await symlink(outside, ref.dir, 'dir')
+    await expect(prepareSafeProfile(ref, lease)).rejects.toThrow(/symlink/u)
+    const entries = await (await import('node:fs/promises')).readdir(outside)
+    expect(entries).toHaveLength(0)
     await lease.release()
   })
 

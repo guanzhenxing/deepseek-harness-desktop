@@ -14,7 +14,7 @@ import { quarantineProjectionCache } from '../src/projection-cache.js'
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 
 const helperAvailable =
   process.platform === 'darwin' &&

@@ -3,11 +3,12 @@
 // wired through the real recovery session: lease profile switch, safe profile
 // preparation, safe attempt, and back to a normal retry.
 import { spawn } from 'node:child_process'
-import { lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+
+import { createIsolatedHomeFixture } from '../helpers/isolated-home.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const dshManifest = createRequire(
@@ -22,24 +23,19 @@ const homeLease = requireFromShellCore('@dsh-desktop/home-lease')
 const { RecoverySessionController, StartupFailureError, createDesktopProfileRecovery } = shellCore
 const { acquireHomeLease, createInProcessGuardLock } = homeLease
 
-const disposableRoots = []
+const fixtures = []
 
+// The shared isolated-home fixture — the same environment, repo/root/real-home
+// refusals and identity-reverified cleanup the unit tests rely on.
 async function freshRoot(label) {
-  const userData = await mkdtemp(path.join(tmpdir(), `dsh-m2-safe-${label}-`))
-  const identity = await lstat(userData)
-  disposableRoots.push({ userData, dev: identity.dev, ino: identity.ino })
-  return userData
+  void label
+  const fixture = await createIsolatedHomeFixture()
+  fixtures.push(fixture)
+  return fixture.userData
 }
 
 async function disposeRoots() {
-  for (const entry of disposableRoots.splice(0)) {
-    const identity = await lstat(entry.userData).catch(() => undefined)
-    if (identity === undefined) continue
-    if (identity.dev !== entry.dev || identity.ino !== entry.ino) {
-      throw new Error('refusing to clean a smoke fixture whose identity changed')
-    }
-    await rm(entry.userData, { recursive: true, force: true })
-  }
+  for (const fixture of fixtures.splice(0)) await fixture.dispose()
 }
 
 async function run(args, env, cwd) {

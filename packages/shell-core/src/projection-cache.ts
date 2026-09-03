@@ -92,16 +92,34 @@ async function readJournal(home: string): Promise<JournalRead> {
   return { state: 'present', journal: record as unknown as QuarantineJournal }
 }
 
-async function directorySize(root: string): Promise<number> {
+/**
+ * Total file size under the cache tree, or undefined when the tree cannot be
+ * fully enumerated: an unreadable subtree means the layout is unknowable —
+ * the caller must refuse to move anything rather than assume it is small.
+ */
+async function directorySize(root: string): Promise<number | undefined> {
   const { readdir } = await import('node:fs/promises')
+  let entries
+  try {
+    entries = await readdir(root, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0
+    return undefined
+  }
   let total = 0
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
   for (const entry of entries) {
     const target = path.join(root, entry.name)
-    if (entry.isDirectory()) total += await directorySize(target)
-    else if (entry.isFile()) {
-      const identity = await stat(target).catch(() => undefined)
-      total += identity?.size ?? 0
+    if (entry.isDirectory()) {
+      const nested = await directorySize(target)
+      if (nested === undefined) return undefined
+      total += nested
+    } else if (entry.isFile()) {
+      const identity = await stat(target).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (identity === undefined) continue
+      total += identity.size
     }
   }
   return total
@@ -186,6 +204,7 @@ export async function quarantineProjectionCache(
     return { kind: 'unknown-layout' }
   }
   const bytes = await directorySize(sourceDir)
+  if (bytes === undefined) return { kind: 'unknown-layout' }
   if (bytes < input.thresholdBytes) return { kind: 'unchanged' }
   // The size scan walked the tree; refuse to move anything if the directory
   // identity moved underneath us between the scan and the rename.

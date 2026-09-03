@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -14,7 +14,7 @@ import { quarantineProjectionCache } from '../src/projection-cache.js'
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 
 const fixtures: IsolatedHomeFixture[] = []
 
@@ -151,6 +151,27 @@ describe('quarantineProjectionCache', () => {
     ).toEqual({ kind: 'unknown-layout' })
     expect(await stat(await cacheDir(dir2))).toBeTruthy()
     await lease2.release()
+  })
+
+  it('reports unknown-layout when the cache tree cannot be enumerated', async () => {
+    const dir = await home()
+    const cache = await writeCache(dir, 2048)
+    // An unreadable subtree makes the size — and with it the layout —
+    // unknowable: refuse to move anything instead of assuming "small".
+    const locked = path.join(cache, 'locked-session')
+    await mkdir(locked, { recursive: true, mode: 0o700 })
+    await writeFile(path.join(locked, 'proj.bin'), 'x'.repeat(64))
+    await chmod(locked, 0o000)
+    const lease = await leaseOf(dir)
+    try {
+      expect(await quarantineProjectionCache({ home: dir, lease, thresholdBytes: 1 })).toEqual({
+        kind: 'unknown-layout',
+      })
+      expect(await stat(cache)).toBeTruthy()
+    } finally {
+      await chmod(locked, 0o700)
+      await lease.release()
+    }
   })
 
   it('recognizes an interrupted rename from the journal and never moves the backup', async () => {

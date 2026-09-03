@@ -274,7 +274,12 @@ export async function runDshHost(options: RunDshHostOptions): Promise<DshHostHan
     // discovery never walks up into the launcher's project directory.
     process.chdir(launchDir)
     const profile = await staged('resolve-profile', 'PROFILE_INVALID', false, async () =>
-      loadProfile('dsh-desktop', options.profileName, installAnchor, options.home),
+      // Safe mode never even parses the profile-local cordis.patch.yml
+      // (userLayer: false): a corrupt or hostile patch must not be able to
+      // fail the safe boot, and its layers are never composed anyway.
+      loadProfile('dsh-desktop', options.profileName, installAnchor, options.home, {
+        userLayer: !safeMode,
+      }),
     )
     const rootConfigPath = path.join(launchDir, PROFILE_ROOT_FILENAME)
     await staged('resolve-runtime', 'RUNTIME_UNAVAILABLE', true, async () => {

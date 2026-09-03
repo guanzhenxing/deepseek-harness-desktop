@@ -49,46 +49,50 @@
 
 **自查攻击轮（2026-09-03，第四轮，双代理攻击轴+spec/standards 轴）**：P1×1 + P2×4 + P3×3，全部修复——`run/profile-transactions` 里的杂散文件（如 Finder 的 .DS_Store）曾让 journal 扫描抛 ENOTDIR：启动死循环、且健康启动后 prune 抛错会把已挂载的会话拆进恢复页（现非事务条目跳过、真实 I/O 错误保守判 corrupt）；journal `state` 白名单（位翻转的垃圾状态不再被当作"从未启动"而静默回滚）；reconcile 不再把 apply 阶段冲突的事务当正常 pending 返回（半应用 profile 不再被启动）；cache 隔离成功输出结构化日志（备份相对路径+字节），恢复页文案注明缓存例外；`doctorCommand` 在恢复窗口不再显示——会话持锁期间 doctor 必然拒绝解锁，摘要改为指向 journal 目录；rollback 的 before 快照缺失判 conflict 而非扫描失败；`prepareSafeProfile` 的 readdir 不再把 EACCES 吞成"空目录"；safe mode + 损坏 home patch 的行为（失败、不静默不重写）新增集成测试；credentials/network 两个 boot-code 映射如实标注为上游依赖（当前上游不产生结构化 code，分类落 unknown）；data-layout 补 shared-home 下 launch root 行。
 
+**codex 五审修复（2026-09-03，第五轮，3 P1 + 5 P2）**：safe 分支 `loadProfile` 传 `userLayer: false`——safe profile 的本地 `cordis.patch.yml` 连解析都不发生（毒 patch 集成测试升级为不可解析 YAML，仍启动到 ready）；事务恢复扫描与 adopted-采纳按 `journal.ref.name === ref.name` 限定归属（其他 profile 的事务不被 Desktop 回滚/采纳，corrupt 仍保守 needs-review）；safe-profile 与事务根的父目录链拒绝用户植入 symlink（`profiles/`、`desktop-safe-mode/`、`run/`、`profile-transactions/`，`assertRealDirectory` 共享 helper + 逃逸测试）；cache 目录树不可枚举（如 EACCES）返回 unknown-layout 而非按 0 字节放行；故障矩阵补齐至十类真会话证据（每行 before/after SHA + sessionPid + leaseGeneration，合成注入的类别带 producerNote 标注）；README/roadmap/主方案三处"待执行/计划交付"措辞更正；doctor 口径全文与实现一致（恢复窗口持锁期间不显示 unlock，release 失败的 doctor 建议只出现在日志）；两个 M2 smoke 改用共享 `createIsolatedHomeFixture`（isolated-home 迁移为 .mjs + .d.mts 单一实现，14 个测试文件随迁）。
+
 ## 3. 门禁结果（全部通过，修复后 HEAD）
 
-| 命令                     | 退出码 | 摘要                                                                                                                                                      |
-| ------------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `check`                  | 0      | 格式/lint/边界/类型/单测 194 通过（23 文件）/docs 校验（29 文件）                                                                                         |
-| `build:native`           | 0      | lease-helper 编译                                                                                                                                         |
-| `test:integration`       | 0      | 32 集成（8 文件，含 safe 模式毒 patch 边界）                                                                                                              |
-| `test:shared-home`       | 0      | 4 场景（双向接续 + 互斥 + restart 间隙）                                                                                                                  |
-| `smoke:dsh-ui`           | 0      | M0 冒烟不回归                                                                                                                                             |
-| `smoke:host-crash`       | 0      | M0 冒烟不回归                                                                                                                                             |
-| `smoke:shared-home`      | 0      | M1 双向 + sentinel                                                                                                                                        |
-| `smoke:profile-recovery` | 0      | 失败链（回滚+恰好一次 relaunch+sentinel 不变）、conflict 链（不覆盖+Safe Mode 不污染+禁 retry+doctor 提示）、健康链（committed）、24 轮保留 prune 到恰 20 |
-| `smoke:safe-mode`        | 0      | host 级（hostile bundle 不加载、正常 profile 字节不变）+ 会话级（safe-mode 接线 healthy、三 bundle、quit 释放）+ bridge 失效→恢复窗口诊断/退出有效        |
-| `git diff --check`       | 0      | 无空白错误                                                                                                                                                |
+| 命令                     | 退出码 | 摘要                                                                                                                                                           |
+| ------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `check`                  | 0      | 格式/lint/边界/类型/单测 194 通过（23 文件）/docs 校验（29 文件）                                                                                              |
+| `build:native`           | 0      | lease-helper 编译                                                                                                                                              |
+| `test:integration`       | 0      | 32 集成（8 文件，含 safe 模式毒 patch 边界）                                                                                                                   |
+| `test:shared-home`       | 0      | 4 场景（双向接续 + 互斥 + restart 间隙）                                                                                                                       |
+| `smoke:dsh-ui`           | 0      | M0 冒烟不回归                                                                                                                                                  |
+| `smoke:host-crash`       | 0      | M0 冒烟不回归                                                                                                                                                  |
+| `smoke:shared-home`      | 0      | M1 双向 + sentinel                                                                                                                                             |
+| `smoke:profile-recovery` | 0      | 失败链（回滚+恰好一次 relaunch+sentinel 不变）、conflict 链（不覆盖+Safe Mode 不污染+禁 retry+摘要指向 journal）、健康链（committed）、24 轮保留 prune 到恰 20 |
+| `smoke:safe-mode`        | 0      | host 级（hostile bundle 不加载、正常 profile 字节不变）+ 会话级（safe-mode 接线 healthy、三 bundle、quit 释放）+ bridge 失效→恢复窗口诊断/退出有效             |
+| `git diff --check`       | 0      | 无空白错误                                                                                                                                                     |
 
 ## 4. 故障矩阵（spec Task 6 要求的十行记录）
 
 判定函数 `shouldRollbackProfile`（`packages/shell-core/src/failure-policy.ts`）；生产 producer 见 [startup-recovery 协议](../protocols/startup-recovery.md) §1。"改 profile"列指该类别失败发生时会话是否存在未结算的 pending 事务。
 
-| category            | 典型 stage/code                        | 改 profile | 准许 rollback | 生产 producer                                  | 验证                                                                    |
-| ------------------- | -------------------------------------- | ---------- | ------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
-| lease               | `lease`（M1 错误码）                   | 否         | 否            | 入口生命周期                                   | 不进恢复窗口（对话框/退出码）；表驱动测试                               |
-| profile-write       | `reconcile-profile`/`RECONCILE_FAILED` | 是         | **是**        | desktop-recovery apply 相位                    | smoke 失败链：回滚→恰好一次 relaunch；单测 retain/rollback 分叉         |
-| profile-composition | `resolve-profile`/`PROFILE_INVALID`    | 是         | **是**        | host-runner + desktop-recovery plan 相位       | smoke 失败链；非 retryable 门控测试                                     |
-| home-config         | `load-home-patch`/`HOME_PATCH_INVALID` | 是         | 否            | host-runner                                    | 表驱动测试；retained 保留用户字节                                       |
-| credentials         | `boot`/`MISSING_CREDENTIAL`            | 是         | 否            | host-runner boot code                          | 表驱动测试；指引文案只引导官方设置                                      |
-| network             | `boot`/`PORT_IN_USE`                   | 是         | 否            | host-runner boot code                          | 表驱动测试                                                              |
-| runtime             | `resolve-runtime`/`host-control`       | 是         | 否            | host-runner                                    | smoke：runtime 失败→retained×24 轮、prune 到 20                         |
-| renderer            | `publish-surface`/`SURFACE_MISSING`    | 是         | 否            | host-runner publish 阶段                       | bridge 失效 smoke（renderer 类失败→恢复窗口，不回滚）                   |
-| native-ui           | —（无生产 producer，接口预留）         | —          | 否            | 无（M3+ 原生菜单/托盘接入后产生）              | 表驱动测试（策略层）                                                    |
-| unknown             | 未识别 stage/code                      | 视情况     | 否            | fallback、`recover-transactions`（有意不映射） | needs-review/conflict smoke：禁 retry、doctor 指引、不猜测 profile 有错 |
+| category            | 典型 stage/code                        | 改 profile | 准许 rollback | 生产 producer                                  | 验证                                                                         |
+| ------------------- | -------------------------------------- | ---------- | ------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| lease               | `lease`（M1 错误码）                   | 否         | 否            | 入口生命周期                                   | 不进恢复窗口（对话框/退出码）；表驱动测试                                    |
+| profile-write       | `reconcile-profile`/`RECONCILE_FAILED` | 是         | **是**        | desktop-recovery apply 相位                    | smoke 失败链：回滚→恰好一次 relaunch；单测 retain/rollback 分叉              |
+| profile-composition | `resolve-profile`/`PROFILE_INVALID`    | 是         | **是**        | host-runner + desktop-recovery plan 相位       | smoke 失败链；非 retryable 门控测试                                          |
+| home-config         | `load-home-patch`/`HOME_PATCH_INVALID` | 是         | 否            | host-runner                                    | 表驱动测试；retained 保留用户字节                                            |
+| credentials         | `boot`/`MISSING_CREDENTIAL`            | 是         | 否            | host-runner boot code                          | 表驱动测试；指引文案只引导官方设置                                           |
+| network             | `boot`/`PORT_IN_USE`                   | 是         | 否            | host-runner boot code                          | 表驱动测试                                                                   |
+| runtime             | `resolve-runtime`/`host-control`       | 是         | 否            | host-runner                                    | smoke：runtime 失败→retained×24 轮、prune 到 20                              |
+| renderer            | `publish-surface`/`SURFACE_MISSING`    | 是         | 否            | host-runner publish 阶段                       | bridge 失效 smoke（renderer 类失败→恢复窗口，不回滚）                        |
+| native-ui           | —（无生产 producer，接口预留）         | —          | 否            | 无（M3+ 原生菜单/托盘接入后产生）              | 表驱动测试（策略层）                                                         |
+| unknown             | 未识别 stage/code                      | 视情况     | 否            | fallback、`recover-transactions`（有意不映射） | needs-review/conflict smoke：禁 retry、摘要指向 journal、不猜测 profile 有错 |
 
 逐行**实际运行证据**（`smoke:profile-recovery` 输出的 `M2-MATRIX` 结构化行，2026-09-03 实跑，SHA 为 manifest 前 12 个 hex；空摘要 `e3b0c44298fc` 表示"文件不存在"，回滚后回到 before 即回到不存在）：
 
 ```text
-M2-MATRIX {"scenario":"attributed-failure","category":"profile-composition","changed":true,"rollbackGranted":true,"beforeSha":"e3b0c44298fc","afterSha":"e3b0c44298fc","sessionPid":65873,"leaseGeneration":"fc6a0d46-9968-41a5-9676-741dc09acd18"}
-M2-MATRIX {"scenario":"drifted-candidate","category":"profile-composition","changed":true,"rollbackGranted":false,"outcome":"conflict","afterSha":"cfe7182082e4","sessionPid":65873,"leaseGeneration":"f740d637-1dbf-44ac-b23b-0eb2e5960a0a"}
-M2-MATRIX {"scenario":"healthy-commit","category":"runtime","changed":true,"rollbackGranted":false,"committed":true,"beforeSha":"e3b0c44298fc","afterSha":"d193ec18a8a9","sessionPid":65873,"leaseGeneration":"f9418dd0-6f79-4b81-9ed6-ed18adfafdf6"}
-M2-MATRIX {"scenario":"retained-runtime","category":"runtime","changed":true,"rollbackGranted":false,"outcome":"retained","journalCount":24,"sessionPid":65873,"leaseGeneration":"cda778f0-dd63-4a77-a4da-39c4d1da09d7"}
+M2-MATRIX {"scenario":"attributed-failure","category":"profile-composition","changed":true,"rollbackGranted":true,"beforeSha":"e3b0c44298fc","afterSha":"e3b0c44298fc","sessionPid":35699,"leaseGeneration":"b9e97613-59fa-4bd5-b7a6-74ac4b47f6da"}
+M2-MATRIX {"scenario":"drifted-candidate","category":"profile-composition","changed":true,"rollbackGranted":false,"outcome":"conflict","beforeSha":"e3b0c44298fc","afterSha":"cfe7182082e4","sessionPid":35699,"leaseGeneration":"a1b8a6c2-bd55-4834-b8aa-53edf13bc0b1"}
+M2-MATRIX {"scenario":"healthy-commit","category":"runtime","changed":true,"rollbackGranted":false,"committed":true,"beforeSha":"e3b0c44298fc","afterSha":"d193ec18a8a9","sessionPid":35699,"leaseGeneration":"4455e9f7-3fa5-4a17-8bba-747488a6f565"}
+M2-MATRIX {"scenario":"retained-runtime","category":"runtime","changed":true,"rollbackGranted":false,"outcome":"retained","beforeSha":"e3b0c44298fc","afterSha":"321a3361d07c","journalCount":24,"sessionPid":35699,"leaseGeneration":"2749784a-015f-4c91-9afc-5399fb37959e"}
 ```
+
+（完整输出共 11 行：上述 4 行 + healthy-commit 与 retained-runtime 的 beforeSha 补全 + `matrix-<category>` 系列覆盖 home-config/credentials/network/renderer/native-ui/unknown 各一行真会话 retained 证据 + `matrix-lease` 一行入口生命周期拒绝证据；每次运行 SHA 一致、PID/generation 随运行变化。）
 
 `sessionPid` 是驱动会话的进程 PID——该 smoke 的 Host attempt 为会话内桩（矩阵证明的是会话/事务语义）；真实 Host 子进程的 PID 与 lease generation 记录见 `smoke:dsh-ui`/`smoke:host-crash`/`smoke:shared-home` 与 lease owner 文件。逐事务的完整 before/candidate SHA 权威记录在 `transaction.json`（journal 即证据载体，测试读取磁盘事实断言）；上表之外的非启动类（lease/credentials/network/native-ui 等）由表驱动单测覆盖判定函数，它们的 producer 语义见协议 §1。
 
@@ -96,7 +100,7 @@ M2-MATRIX {"scenario":"retained-runtime","category":"runtime","changed":true,"ro
 
 - **权属与修订条件**：白名单三文件（`reconcile-plan`）、journal ref 越界即 corrupt（`readJournal`）、所有恢复写要求 `lease.assertHeld()`、rollback 写回前逐文件复验 inode/SHA、事务 created 文件阶段间漂移 → conflict。
 - **一次自动恢复最多 relaunch 一次**：会话内 `#autoRestartUsed` + 跨进程 marker（`<userData>/recovery/<home 摘要>.json`，fsync 原子写，健康后清除）。smoke 断言恰好 2 次 normal boot。
-- **双失败仍可诊断退出**：普通 Host 与 Safe Mode 都失败（bridge 失效 smoke）→ 本地恢复窗口显示分类/摘要/doctor 指引，quit 释放 lease。
+- **双失败仍可诊断退出**：普通 Host 与 Safe Mode 都失败（bridge 失效 smoke）→ 本地恢复窗口显示分类与脱敏摘要（需人工介入的态指向 journal 目录），quit 释放 lease。
 - **home 权威数据不覆盖**：sentinel（credentials/settings/home patch）在全部四条 smoke 链中字节不变；journal 只含白名单文件快照。
 - **IPC**：exact webContents + exact loaded URL + 主 frame + 固定 schema + recovery 态，逐消息校验；window-open 拒绝；CSP `script-src recovery-view.js`。
 - **脱敏**：token（含引号形态）/api-key/password/Bearer 打码、home 路径占位、控制字符清洗、1024 上限。

@@ -21,7 +21,7 @@ import { runDshHost, type HostControlTransport } from '../src/host-runner.js'
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 
 const helperAvailable =
   process.platform === 'darwin' &&
@@ -172,7 +172,9 @@ describe.skipIf(!helperAvailable)('safe mode boot', () => {
     )
     await writeFile(
       path.join(ref.dir, 'cordis.patch.yml'),
-      '- id: injected\n  name: "@fixture/hostile"\n',
+      // Unparseable on purpose: with userLayer:false the safe boot must not
+      // even READ this file — neither parsing nor composing it can fail.
+      '{ not a patch list',
       'utf8',
     )
     const anchor = path.join(fixture.userData, 'anchor.json')

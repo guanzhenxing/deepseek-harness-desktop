@@ -39,7 +39,14 @@ export async function recoverInterruptedTransactions(
   for (const id of await readdirTransactionIds(lease.home)) {
     const journal = await readJournal(lease.home, id)
     if (journal === 'missing') continue
+    // A corrupt journal of unknown ownership is still ours to worry about:
+    // needs-review, never silently skipped.
     if (journal === 'corrupt') return outcome('needs-review')
+    // Ownership boundary: journals belong to the profile they recorded.
+    // Another profile's transactions (a safe-mode profile, a future CLI
+    // entrypoint) are never settled or rolled back from this scan — the
+    // desktop entrypoint only owns the profile it was asked to recover.
+    if (journal.ref.name !== ref.name) continue
     if (
       journal.state === 'committed' ||
       journal.state === 'rolled-back' ||
@@ -77,9 +84,14 @@ export async function findAppliedTransactions(
   for (const id of await readdirTransactionIds(ref.home)) {
     const journal = await readJournal(ref.home, id)
     if (journal === 'missing' || journal === 'corrupt' || journal.state !== 'applied') continue
+    // Same ownership boundary as the recovery scan: only this profile's
+    // open transactions may be adopted and eventually committed.
+    if (journal.ref.name !== ref.name) continue
     let atCandidate = true
+    // The journal's own recorded directory is the authoritative target; it
+    // is validated to sit inside <home>/profiles/<name> by readJournal.
     for (const write of journal.writes) {
-      const { sha } = await currentSha(path.join(ref.dir, write.path))
+      const { sha } = await currentSha(path.join(journal.ref.dir, write.path))
       if (sha !== write.candidateSha256) {
         atCandidate = false
         break

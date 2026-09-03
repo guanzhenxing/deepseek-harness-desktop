@@ -1,4 +1,4 @@
-import { readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -20,11 +20,14 @@ import {
   rollbackProfileTransaction,
   transactionDir,
 } from '../src/revision-transaction.js'
-import { recoverInterruptedTransactions } from '../src/revision-recovery.js'
+import {
+  findAppliedTransactions,
+  recoverInterruptedTransactions,
+} from '../src/revision-recovery.js'
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 
 const fixtures: IsolatedHomeFixture[] = []
 
@@ -292,6 +295,52 @@ describe('revision transactions', () => {
     expect(tx.state).toBe('conflict')
     // The drifted user bytes are exactly what stays on disk.
     expect(await readFile(manifest, 'utf8')).toBe('{"userChanged":true}\n')
+    await lease.release()
+  })
+
+  it('never settles or rolls back another profile\u2019s transactions', async () => {
+    const { ref, lease } = await leasedHome()
+    // Build an interrupted transaction owned by a different profile —
+    // planDesktopReconcile only owns 'desktop', so hand-craft the plan the
+    // way another entrypoint's journal would look on disk.
+    const otherRef = createProfileRef(ref.home, 'other')
+    const otherPlan = {
+      ref: otherRef,
+      writes: [
+        {
+          path: 'package.json',
+          before: { exists: false, sha256: null },
+          beforeBytes: null,
+          candidateBytes: new TextEncoder().encode('{}\n'),
+          candidateSha256: '0'.repeat(64),
+        },
+      ],
+    } as unknown as Parameters<typeof applyProfileTransaction>[0]
+    const otherTx = await applyProfileTransaction(otherPlan, lease)
+    // The desktop recovery scan only owns the profile it was asked about.
+    await expect(recoverInterruptedTransactions(ref, lease)).resolves.toBe('clean')
+    const journal = await readJournal(ref.home, otherTx.id)
+    expect(journal === 'corrupt' || journal === 'missing' ? journal : journal.state).toBe('applied')
+    // Its files stay exactly where the other profile left them.
+    await expect(stat(path.join(otherRef.dir, 'package.json'))).resolves.toBeTruthy()
+    const adopted = await findAppliedTransactions(ref)
+    expect(adopted).toHaveLength(0)
+    await lease.release()
+  })
+
+  it('refuses to journal through a symlinked transactions root', async () => {
+    const { ref, lease } = await leasedHome()
+    const outside = path.join(ref.home, '..', 'tx-outside')
+    await mkdir(outside, { recursive: true, mode: 0o700 })
+    const runDir = path.join(ref.home, 'run')
+    await mkdir(runDir, { recursive: true, mode: 0o700 })
+    const { symlink } = await import('node:fs/promises')
+    await symlink(outside, path.join(runDir, 'profile-transactions'), 'dir')
+    const plan = await planDesktopReconcile(ref, lease)
+    await expect(applyProfileTransaction(plan, lease)).rejects.toThrow(/symlink/u)
+    // Nothing escaped: the outside directory stays empty.
+    const entries = await (await import('node:fs/promises')).readdir(outside)
+    expect(entries).toHaveLength(0)
     await lease.release()
   })
 

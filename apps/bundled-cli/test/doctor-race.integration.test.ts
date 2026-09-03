@@ -10,7 +10,7 @@ import { defaultLeaseHelperPath } from '@dsh-desktop/home-lease'
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 import { withCliWeb } from '../../../tests/helpers/shared-home-driver.mjs'
 
 const helperPath = defaultLeaseHelperPath()

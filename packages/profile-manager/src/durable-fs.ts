@@ -1,6 +1,24 @@
 import { randomUUID } from 'node:crypto'
-import { open, rename, unlink } from 'node:fs/promises'
+import { lstat, open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
+
+/**
+ * Refuse user-planted symlinks on any directory this package writes through:
+ * every existing level of a writable path must be a real directory, and a
+ * freshly created level is verified right after creation. ENOENT returns
+ * false so callers can create-then-reverify.
+ */
+export async function assertRealDirectory(dirname: string, label: string): Promise<boolean> {
+  const identity = await lstat(dirname).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (identity === undefined) return false
+  if (identity.isSymbolicLink() || !identity.isDirectory()) {
+    throw new Error(`${label} must be a real directory, not a symlink`)
+  }
+  return true
+}
 
 export async function syncDirectory(dirname: string): Promise<void> {
   const handle = await open(dirname, 'r')

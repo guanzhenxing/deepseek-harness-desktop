@@ -5,11 +5,13 @@
 // conflict without overwriting; a healthy boot commits; home sentinel files
 // never change.
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+
+import { createIsolatedHomeFixture } from '../helpers/isolated-home.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const requireFromShellCore = createRequire(
@@ -26,28 +28,20 @@ const {
 } = shellCore
 const { acquireHomeLease, createInProcessGuardLock } = homeLease
 
-const disposableHomes = []
+const fixtures = []
 
-// A throwaway home with the same refusal rules as the shared test fixture:
-// never the real home, never inside the repo, and identity-reverified cleanup.
+// The shared isolated-home fixture (environment, repo/root/real-home
+// refusals, identity-reverified cleanup) — the same one unit tests use.
 async function freshHome(label) {
-  const userData = await mkdtemp(path.join(tmpdir(), `dsh-m2-${label}-`))
-  const home = path.join(userData, 'home')
-  await mkdir(path.join(home, 'profiles', 'desktop'), { recursive: true, mode: 0o700 })
-  const identity = await lstat(userData)
-  disposableHomes.push({ userData, dev: identity.dev, ino: identity.ino })
-  return home
+  void label
+  const fixture = await createIsolatedHomeFixture()
+  fixtures.push(fixture)
+  await mkdir(path.join(fixture.home, 'profiles', 'desktop'), { recursive: true, mode: 0o700 })
+  return fixture.home
 }
 
 async function disposeHomes() {
-  for (const entry of disposableHomes.splice(0)) {
-    const identity = await lstat(entry.userData).catch(() => undefined)
-    if (identity === undefined) continue
-    if (identity.dev !== entry.dev || identity.ino !== entry.ino) {
-      throw new Error('refusing to clean a home fixture whose identity changed')
-    }
-    await rm(entry.userData, { recursive: true, force: true })
-  }
+  for (const fixture of fixtures.splice(0)) await fixture.dispose()
 }
 
 function sameProbe() {
@@ -170,6 +164,26 @@ async function assertSentinels(home) {
   }
 }
 
+async function expectLeaseRefusal(home) {
+  let refused = null
+  try {
+    await acquireHomeLease({
+      home,
+      entrypoint: 'desktop',
+      profile: 'desktop',
+      appVersion: '0.0.0',
+      probe: sameProbe(),
+      guard: createInProcessGuardLock(),
+    })
+  } catch (error) {
+    refused = error
+  }
+  if (refused === null) throw new Error('second acquisition of a held home was not refused')
+  if (!String(refused.code ?? '').includes('BUSY')) {
+    throw new Error(`lease refusal had unexpected code: ${refused.code}`)
+  }
+}
+
 async function journalStates(home) {
   const txRoot = path.join(home, 'run', 'profile-transactions')
   const ids = await readdir(txRoot).catch(() => [])
@@ -237,6 +251,7 @@ try {
     const home = await freshHome('conflict')
     await seedSentinels(home)
     const drifted = '{"userChanged":true}\n'
+    const beforeSha = await manifestSha(home)
     const session = await leasedSession(home, {
       boot: async () => {
         // The transaction applied; the user rewrites the candidate before the
@@ -252,6 +267,7 @@ try {
       changed: true,
       rollbackGranted: false,
       outcome: 'conflict',
+      beforeSha,
       afterSha: await manifestSha(home),
       sessionPid: process.pid,
       leaseGeneration: session.lease.generation,
@@ -346,6 +362,7 @@ try {
     const home = await freshHome('retention')
     await seedSentinels(home)
     const manifestPath = path.join(home, 'profiles', 'desktop', 'package.json')
+    const retainedBeforeSha = await manifestSha(home)
     let lastGeneration = 'n/a'
     for (let round = 0; round < 24; round++) {
       // Each round leaves the manifest one third-party bundle away from the
@@ -374,6 +391,8 @@ try {
       changed: true,
       rollbackGranted: false,
       outcome: 'retained',
+      beforeSha: retainedBeforeSha,
+      afterSha: await manifestSha(home),
       journalCount: 24,
       sessionPid: process.pid,
       leaseGeneration: lastGeneration,
@@ -443,6 +462,98 @@ try {
       await healthy.controller.act('quit')
     } finally {
       await rm(markerRoot, { recursive: true, force: true })
+    }
+  }
+
+  // ── Matrix completion: every category leaves the profile retained ──
+  {
+    const categories = [
+      {
+        category: 'home-config',
+        stage: 'load-home-patch',
+        code: 'HOME_PATCH_INVALID',
+        retryable: false,
+      },
+      {
+        category: 'credentials',
+        stage: 'boot',
+        code: 'MISSING_CREDENTIAL',
+        retryable: false,
+        producerNote: 'policy-table (upstream emits BOOT_FAILED only)',
+      },
+      {
+        category: 'network',
+        stage: 'boot',
+        code: 'PORT_IN_USE',
+        retryable: false,
+        producerNote: 'policy-table (upstream emits BOOT_FAILED only)',
+      },
+      { category: 'renderer', stage: 'publish-surface', code: 'SURFACE_MISSING', retryable: false },
+      {
+        category: 'native-ui',
+        stage: 'native-ui',
+        code: 'MENU_FAILED',
+        retryable: true,
+        producerNote: 'policy-table (no native UI producer yet)',
+      },
+      { category: 'unknown', stage: 'mystery-stage', code: 'WHATEVER', retryable: true },
+    ]
+    for (const spec of categories) {
+      const home = await freshHome(`matrix-${spec.category}`)
+      await seedSentinels(home)
+      const failure = new StartupFailureError({
+        stage: spec.stage,
+        code: spec.code,
+        category: spec.category,
+        summary: `synthetic ${spec.category} failure for the acceptance matrix`,
+        retryable: spec.retryable,
+      })
+      const session = await leasedSession(home, { boot: () => Promise.reject(failure) })
+      const beforeSha = await manifestSha(home)
+      await session.controller.start().catch(() => undefined)
+      // None of these categories may roll back: the journal settles retained
+      // and the profile bytes are exactly the candidate the reconcile wrote.
+      const states = await journalStates(home)
+      if (!states.includes('retained')) {
+        throw new Error(
+          `${spec.category} did not retain its transaction: ${JSON.stringify(states)}`,
+        )
+      }
+      matrixRow({
+        scenario: `matrix-${spec.category}`,
+        category: spec.category,
+        changed: true,
+        rollbackGranted: false,
+        outcome: 'retained',
+        beforeSha,
+        afterSha: await manifestSha(home),
+        sessionPid: process.pid,
+        leaseGeneration: session.lease.generation,
+        ...(spec.producerNote === undefined ? {} : { producerNote: spec.producerNote }),
+      })
+      await assertSentinels(home)
+      await session.controller.act('quit')
+    }
+
+    // The lease category never reaches the recovery window: a second
+    // acquisition of a held home must be refused at the entry lifecycle.
+    {
+      const home = await freshHome('matrix-lease')
+      const session = await leasedSession(home, {
+        boot: () => Promise.reject(runtimeFailure),
+      })
+      await session.controller.start().catch(() => undefined)
+      await expectLeaseRefusal(home)
+      matrixRow({
+        scenario: 'matrix-lease',
+        category: 'lease',
+        changed: false,
+        rollbackGranted: false,
+        outcome: 'entry-lifecycle (dialog + exit code, no recovery window)',
+        sessionPid: process.pid,
+        leaseGeneration: session.lease.generation,
+      })
+      await session.controller.act('quit')
     }
   }
 

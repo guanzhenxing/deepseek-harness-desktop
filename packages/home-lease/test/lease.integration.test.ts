@@ -15,7 +15,7 @@ import {
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 
 const helperPath = defaultLeaseHelperPath()
 const holderScript = fileURLToPath(

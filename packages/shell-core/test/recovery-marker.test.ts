@@ -8,7 +8,7 @@ import { createRecoveryMarkerStore } from '../src/recovery-marker.js'
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 
 const fixtures: IsolatedHomeFixture[] = []
 

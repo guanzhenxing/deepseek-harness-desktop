@@ -9,7 +9,7 @@ import type { ProfileRef } from './profile-ref.js'
 import { sha256Of } from './reconcile-plan.js'
 import { MANAGED_PROFILE_PATHS } from './reconcile-plan.js'
 import type { FileRevision, ManagedProfilePath, ProfileReconcilePlan } from './reconcile-plan.js'
-import { syncDirectory, writeAtomicDurable } from './durable-fs.js'
+import { assertRealDirectory, syncDirectory, writeAtomicDurable } from './durable-fs.js'
 
 export type RevisionTransactionState =
   | 'prepared'
@@ -227,6 +227,13 @@ export async function applyProfileTransaction(
   }
   const home = plan.ref.home
   const id = randomUUID()
+  // The transaction tree must sit inside the real home layout: a symlinked
+  // run/ or profile-transactions/ root would move journals (and before
+  // snapshots) outside the home.
+  await assertRealDirectory(path.join(home, 'run'), 'DSH home run directory')
+  const rootExisted = await assertRealDirectory(transactionsRoot(home), 'profile transactions root')
+  if (!rootExisted) await mkdir(transactionsRoot(home), { recursive: true, mode: 0o700 })
+  await assertRealDirectory(transactionsRoot(home), 'profile transactions root')
   await mkdir(transactionDir(home, id), { recursive: true, mode: 0o700 })
   await mkdir(path.join(transactionDir(home, id), 'before'), { recursive: true, mode: 0o700 })
 

@@ -22,7 +22,7 @@ import {
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
-} from '../../../tests/helpers/isolated-home.js'
+} from '../../../tests/helpers/isolated-home.mjs'
 import {
   acquireHomeLease,
   createNativeProcessProbe,

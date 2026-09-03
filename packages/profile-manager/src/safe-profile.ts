@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { HomeLease } from '@dsh-desktop/home-lease'
 
 import type { ProfileRef } from './profile-ref.js'
-import { writeAtomicDurable } from './durable-fs.js'
+import { assertRealDirectory, writeAtomicDurable } from './durable-fs.js'
 
 export const SAFE_PROFILE_NAME = 'desktop-safe-mode'
 
@@ -33,6 +33,12 @@ export async function prepareSafeProfile(
     throw new Error('safe profile preparation requires a lease bound to the home')
   }
   await lease.assertHeld()
+  // The safe profile tree must be real directories: a symlinked profiles/
+  // or desktop-safe-mode/ would write the manifest outside the home.
+  await assertRealDirectory(path.join(ref.home, 'profiles'), 'profiles directory')
+  const dirExisted = await assertRealDirectory(ref.dir, 'safe profile directory')
+  if (!dirExisted) await mkdir(ref.dir, { recursive: true, mode: 0o700 })
+  await assertRealDirectory(ref.dir, 'safe profile directory')
   const manifestPath = path.join(ref.dir, 'package.json')
   let existing: string | undefined
   try {
@@ -68,7 +74,6 @@ export async function prepareSafeProfile(
     }
     return 'prepared'
   }
-  await mkdir(ref.dir, { recursive: true, mode: 0o700 })
   const manifest = `${JSON.stringify(
     {
       name: 'dsh-profile-desktop-safe-mode',

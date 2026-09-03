@@ -204,7 +204,7 @@ Electron launcher 在 Host 启动前已经存在，并且不加载 DSH 或第三
 
 v1 的 launcher-owned 恢复面只提供启动日志摘要、重试、退出和 lease 诊断，不在 Electron Main 中复制 DSH 设置、会话或市场业务。
 
-M2 计划交付非破坏性的 Safe Mode，它同时是后续插件市场的前置条件：停止正常 Host 后，以独立的 `desktop-safe-mode` profile 启动 `@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app` 与本项目最小第一方 bundle `desktop-recovery-bridge`。该 profile 不读取正常 `desktop` profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，但仍复用同一 home 中的凭据、会话和用户数据。
+M2 已交付非破坏性的 Safe Mode（源码级验收通过），它同时是后续插件市场的前置条件：停止正常 Host 后，以独立的 `desktop-safe-mode` profile 启动 `@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app` 与本项目最小第一方 bundle `desktop-recovery-bridge`。该 profile 不读取正常 `desktop` profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，但仍复用同一 home 中的凭据、会话和用户数据。
 
 `desktop-recovery-bridge` 只等待官方 `connection` 服务，并通过与正常 Desktop 相同的 Host-control surface 契约发布 authenticated recovery URL。它不包含市场 catalog、产品 settings、profile 变更、窗口逻辑或更新策略。即使 Safe Mode Host 或该 bridge 失败，launcher-owned 的日志摘要、lease 诊断、重试和退出仍然可用。
 
