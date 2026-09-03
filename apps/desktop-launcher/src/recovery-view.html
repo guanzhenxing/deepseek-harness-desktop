@@ -39,8 +39,10 @@
     <p>阶段 <code id="failure-stage"></code>，错误 <code id="failure-code"></code>：</p>
     <pre id="failure-summary"></pre>
     <p class="muted">
-      你的 DSH 权威数据（凭据、设置、会话与存储）不会被启动恢复修改。若本次启动更新了 profile
-      候选文件，其修改前的内容已保存在修订 journal 中，可诊断或恢复。
+      你的 DSH 权威数据（凭据、设置、会话内容）不会被启动恢复修改。若本次启动更新了 profile
+      候选文件，其修改前的内容已保存在修订 journal
+      中，可诊断或恢复。唯一的例外：超大的可重建投影缓存（session projection
+      cache）可能被移动到隔离备份目录，日志中记录了位置与大小。
     </p>
     <p id="doctor-command" style="display: none">
       锁残留时可在完全退出后运行：<code id="doctor-command-text"></code>

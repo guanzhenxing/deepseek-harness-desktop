@@ -19,21 +19,23 @@ Host 侧命名阶段（host-runner，随 fatal 信封透传，不压平为 BOOT_
 | `resolve-profile` | `PROFILE_INVALID`         | profile-composition | false     |
 | `load-home-patch` | `HOME_PATCH_INVALID`      | home-config         | false     |
 | `boot`            | `BOOT_FAILED`（未识别码） | unknown             | true      |
-| `boot`            | `MISSING_CREDENTIAL`      | credentials         | false     |
-| `boot`            | `PORT_IN_USE`             | network             | false     |
+| `boot`            | `MISSING_CREDENTIAL`¹     | credentials         | false     |
+| `boot`            | `PORT_IN_USE`¹            | network             | false     |
 | `publish-surface` | `SURFACE_MISSING`         | renderer            | false     |
 | `host-control`    | Host-control 错误码       | runtime             | false     |
 
 launcher 侧阶段（shell-core / desktop-recovery）：
 
-| stage                  | code                   | category             | 说明                                           |
-| ---------------------- | ---------------------- | -------------------- | ---------------------------------------------- |
-| `reconcile-profile`    | `RECONCILE_FAILED`     | profile-write        | 事务 apply 阶段失败（`ProfileReconcileError`） |
-| `resolve-profile`      | `PROFILE_INVALID`      | profile-composition  | reconcile plan 阶段失败（用户内容不可解析）    |
-| `recover-transactions` | `RECOVERY_CONFLICT` 等 | unknown（有意不映射） | 中断事务结算失败，永不作为自动回滚依据         |
-| `cache-quarantine`     | `CACHE_QUARANTINE_FAILED` | runtime           | cache 隔离机制自身失败                          |
+| stage                  | code                      | category              | 说明                                           |
+| ---------------------- | ------------------------- | --------------------- | ---------------------------------------------- |
+| `reconcile-profile`    | `RECONCILE_FAILED`        | profile-write         | 事务 apply 阶段失败（`ProfileReconcileError`） |
+| `resolve-profile`      | `PROFILE_INVALID`         | profile-composition   | reconcile plan 阶段失败（用户内容不可解析）    |
+| `recover-transactions` | `RECOVERY_CONFLICT` 等    | unknown（有意不映射） | 中断事务结算失败，永不作为自动回滚依据         |
+| `cache-quarantine`     | `CACHE_QUARANTINE_FAILED` | runtime               | cache 隔离机制自身失败                         |
 
 `lease` 错误（M1 lease 错误码）不进恢复窗口：lease 获取失败保持入口生命周期行为（Desktop 对话框+退出 1，CLI 退出码 3）。
+
+¹ 上游 dsh 0.1.2-alpha.3 的 boot 阶段错误统一以 `BOOT_FAILED` 到达，尚不携带结构化的 `MISSING_CREDENTIAL`/`PORT_IN_USE` 码；这两行映射在上游 fatal 信封携带这些 code 时生效，当前这类失败分类为 unknown（绝不从消息文本猜测）。native-ui 同样为接口预留（无生产 producer，M3+ 原生菜单/托盘接入后产生）。
 
 ## 2. 摘要脱敏
 
@@ -56,4 +58,4 @@ launcher 侧阶段（shell-core / desktop-recovery）：
 - **失败链**：stop Host 并确认退出 → 分类 → 可归因且 SHA 匹配时回滚 → **最多一次自动正常重启**（relaunch-once）→ 恢复窗口。自动重启预算是 **home 级**：marker（`<userData>/recovery/<home 摘要>.json`，`schemaVersion: 1`）一旦写入即视为已消耗，新事务 id 不能重置；健康会话清除 marker，未知格式的 marker 视为已消耗且永不覆写或删除。
 - **重试预算**：滚动 60 秒窗口内手动重试至多 3 次，且失败必须 `retryable`；非重试失败（如 PROFILE_INVALID）不提供手动重试。post-ready 崩溃不自动重启。
 - **Safe Mode**：仅用户在恢复窗口显式选择；先准备 safe profile、再切换 lease owner profile、然后以 `mode: 'safe'` 创建新 attempt，与正常 attempt 组合互斥。退出 Safe Mode 不自动修改正常 profile。
-- **恢复事务结算**：`recover-transactions` 阶段的失败（conflict / needs-review）有意映射为 `unknown` 且不可重试——它们是"需人工/doctor 介入"的诊断态，恢复窗口显示 doctor 指引并禁用重试。
+- **恢复事务结算**：`recover-transactions` 阶段的失败（conflict / needs-review）有意映射为 `unknown` 且不可重试——它们是需人工介入的诊断态：恢复窗口的摘要指向 `<home>/run/profile-transactions`（journal 记录分歧详情）并禁用重试。`doctorCommand` 仅适用于完全退出后的锁残留场景；恢复窗口存活期间会话持有 lease，doctor 会拒绝解锁，因此视图不显示该命令。

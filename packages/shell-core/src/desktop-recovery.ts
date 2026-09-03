@@ -61,7 +61,7 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
             stage: 'recover-transactions',
             code: 'RECOVERY_CONFLICT',
             summary:
-              'a previous profile recovery found diverged files; the profile was left untouched — run dsh-native doctor',
+              'a previous profile recovery found diverged files; the profile was left untouched — inspect run/profile-transactions in the DSH home (the journal records the divergence)',
             retryable: false,
             home,
           }),
@@ -92,6 +92,17 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
           }),
         )
       }
+      if (cache.kind === 'quarantined') {
+        // A renamed sessions cache is user-visible state: log where it went
+        // (relative path and size only, never contents).
+        console.error(
+          JSON.stringify({
+            kind: 'projection-cache-quarantined',
+            backupRelative: cache.relativeBackupPath,
+            bytes: cache.bytes,
+          }),
+        )
+      }
       // A journal that reached `applied` without attribution is only adopted
       // when it is the single open one and every managed file still matches
       // the recorded candidate — the boot that follows settles it on
@@ -111,7 +122,7 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
         const applied = await findAppliedTransactions(normalRef)
         if (applied.length !== 1 || !applied[0]!.atCandidate) {
           return needsReviewBlock(
-            'a previous startup left the profile mid-transaction without failure attribution; the profile was left untouched — run dsh-native doctor',
+            'a previous startup left the profile mid-transaction without failure attribution; the profile was left untouched — inspect run/profile-transactions in the DSH home (the journal records the divergence)',
           )
         }
         adopted = applied[0]!.id
@@ -121,7 +132,7 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
         const pending = await planDesktopReconcile(normalRef, lease).catch(() => undefined)
         if (pending === undefined || pending.writes.length > 0) {
           return needsReviewBlock(
-            'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — run dsh-native doctor',
+            'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — inspect run/profile-transactions in the DSH home (the journal records the divergence)',
           )
         }
       }
@@ -145,7 +156,7 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
         // restore the fresh transaction's files, then block for review.
         await rollbackProfileTransaction(result.transactionId, lease).catch(() => undefined)
         return needsReviewBlock(
-          'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — run dsh-native doctor',
+          'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — inspect run/profile-transactions in the DSH home (the journal records the divergence)',
         )
       }
       const transactionId = result.transactionId ?? adopted

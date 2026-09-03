@@ -44,8 +44,14 @@ export async function prepareSafeProfile(
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
   // The directory must hold exactly the manifest this module writes — the
-  // safe boot loads whatever layers the profile directory exposes.
-  const entries = await readdir(ref.dir).catch(() => [] as string[])
+  // safe boot loads whatever layers the profile directory exposes. A
+  // directory that cannot even be enumerated propagates the error: the
+  // caller keeps the local recovery page rather than writing beside
+  // unenumerated content.
+  const entries = await readdir(ref.dir).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return [] as string[]
+    throw error
+  })
   const unexpected = entries.filter((entry) => entry !== 'package.json')
   if (unexpected.length > 0) return 'conflict'
   if (existing !== undefined) {

@@ -46,6 +46,8 @@
 
 **codex 二审修复（2026-09-03，第三个修订）**：marker 写入失败不再静默继续 relaunch（预算未落盘 = 不消耗 relaunch，直接进恢复页，故障注入单测覆盖）；损坏的 marker 文件（解析失败）与未知 schema 一视同仁——预算视为已消耗且永不覆写/删除（marker store 移入 shell-core 成为共享实现并单测）；`fallbackFailure` 统一走 `toStartupFailure` 脱敏（loadSurface/commit/port 的普通异常不再绕过 token/home 打码，测试覆盖）；恢复页文案区分"home 权威数据未改"与"profile 候选已保留于 journal"；矩阵 `hostPid` 更名 `sessionPid` 并说明其语义；profile-recovery smoke 新增 cross-process 链（文件版 marker 串两个会话验证跨进程预算不被重置、健康后清除恢复）；projection-cache 损坏 journal 返回 unknown-layout 且字节不变（"不触碰未知数据"闭合）；credentials 摘要把 guidance 计入 1024 上限。；**codex 三审（P1 清零，2 个 P2 残留修复）**：marker 清除改为 durable（rm 后目录 fsync，断电不能"复活"已清除的 marker），onHealthy 的 marker 清理与恢复窗口销毁解耦（清理失败不再连带吞掉窗口销毁，错误显式记日志）；projection-cache journal 的 v1 记录做字段级严格校验（id/bytes/createdAt/phase 类型与取值），可解析但结构损坏的 v1 journal 一律按未知数据处理（unknown-layout、字节不变）。
 
+**自查攻击轮（2026-09-03，第四轮，双代理攻击轴+spec/standards 轴）**：P1×1 + P2×4 + P3×3，全部修复——`run/profile-transactions` 里的杂散文件（如 Finder 的 .DS_Store）曾让 journal 扫描抛 ENOTDIR：启动死循环、且健康启动后 prune 抛错会把已挂载的会话拆进恢复页（现非事务条目跳过、真实 I/O 错误保守判 corrupt）；journal `state` 白名单（位翻转的垃圾状态不再被当作"从未启动"而静默回滚）；reconcile 不再把 apply 阶段冲突的事务当正常 pending 返回（半应用 profile 不再被启动）；cache 隔离成功输出结构化日志（备份相对路径+字节），恢复页文案注明缓存例外；`doctorCommand` 在恢复窗口不再显示——会话持锁期间 doctor 必然拒绝解锁，摘要改为指向 journal 目录；rollback 的 before 快照缺失判 conflict 而非扫描失败；`prepareSafeProfile` 的 readdir 不再把 EACCES 吞成"空目录"；safe mode + 损坏 home patch 的行为（失败、不静默不重写）新增集成测试；credentials/network 两个 boot-code 映射如实标注为上游依赖（当前上游不产生结构化 code，分类落 unknown）；data-layout 补 shared-home 下 launch root 行。
+
 ## 3. 门禁结果（全部通过，修复后 HEAD）
 
 | 命令                     | 退出码 | 摘要                                                                                                                                                      |

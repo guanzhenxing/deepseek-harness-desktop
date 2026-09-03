@@ -35,6 +35,7 @@
 | `<safeProfile>/**`                                  | `profile-manager`            | 只创建 Safe Mode 自身投影，不自动修改正常 profile                                 | 可重建；不得包含第三方 bundle 或正常 patch layer                                                           |
 | `<home>/run/host.lock/`                             | `home-lease`                 | launcher 或 bundled CLI 在整个 Host writer 生命周期持有                           | 不是数据备份；只可按 owner 身份受控恢复                                                                    |
 | `<home>/run/profile-transactions/**`                | `profile-manager`            | M2 起持有 home lease 时原子写入                                                   | 用于崩溃恢复，终态（committed/rolled-back/retained）最近 20 条保留，conflict 与未终态不自动清理；M0 不创建 |
+| `<home>/profiles/.dsh-desktop-run-*`                | `host-supervisor`            | Host 每次启动的中性 launch root（临时 cordis 根 + bundle 投影）；退出时删除       | 不含用户数据；异常残留不阻塞（下次启动新目录）                                                             |
 | `<home>/run/projection-cache-quarantine.json`       | `shell-core`                 | cache 隔离 rename 前后的意图 journal（crash 窗口 spanning）；move 落定后自清理    | 只写相对路径与字节数；不复制内容                                                                           |
 | `<home>/storages/session_projcache.quarantine-<id>` | `shell-core`                 | 超 512 MiB 的可重建 projection cache 在持 lease、无 Host 时同文件系统 rename 隔离 | 备份保留不自动删除；rename 前后写意图 journal                                                              |
 

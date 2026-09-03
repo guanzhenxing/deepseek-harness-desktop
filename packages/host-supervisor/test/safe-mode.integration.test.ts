@@ -114,6 +114,33 @@ describe.skipIf(!helperAvailable)('safe mode boot', () => {
     await lease.release()
   })
 
+  it('fails safe mode on a corrupted home patch without rewriting it', async () => {
+    const { fixture, lease } = await leasedHome()
+    const ref = createProfileRef(fixture.home, SAFE_PROFILE_NAME)
+    await expect(prepareSafeProfile(ref, lease)).resolves.toBe('prepared')
+    // Safe mode keeps the shared home patch semantics: a broken home patch
+    // also breaks safe mode — never silently ignored or rewritten.
+    const homePatch = path.join(fixture.home, 'cordis.patch.yml')
+    await writeFile(homePatch, '{ not a patch list', { mode: 0o600 })
+    const anchor = path.join(fixture.userData, 'anchor.json')
+    await copyFile(fileURLToPath(new URL('../package.json', import.meta.url)), anchor)
+    await expect(
+      runDshHost({
+        home: fixture.home,
+        profileName: SAFE_PROFILE_NAME,
+        mode: 'safe',
+        capability: 'c'.repeat(43),
+        leaseGeneration: lease.generation,
+        hostIdentity: { pid: process.pid, startIdentity: 'safe-home-patch' },
+        transport: buildTransport(lease.generation).transport,
+        productInstallAnchor: anchor,
+        installAnchor: anchor,
+      }),
+    ).rejects.toThrow()
+    expect(await readFile(homePatch, 'utf8')).toBe('{ not a patch list')
+    await lease.release()
+  })
+
   it('never loads profile-local patches during a safe boot', async () => {
     const { fixture, lease } = await leasedHome()
     const ref = createProfileRef(fixture.home, SAFE_PROFILE_NAME)

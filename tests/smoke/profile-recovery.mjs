@@ -285,7 +285,14 @@ try {
     if (replay.controller.state !== 'recovery') throw new Error('replay did not reach recovery')
     const view = replay.controller.getView()
     if (view.retryAllowed) throw new Error('conflict-blocked view still offers retry')
-    if (view.doctorCommand === null) throw new Error('conflict-blocked view hides the doctor hint')
+    // The session holds the lease, so an unlock command would be refused:
+    // the view must point at the journal instead of advertising doctor.
+    if (view.doctorCommand !== null) {
+      throw new Error('conflict-blocked view advertises an unlock it cannot use')
+    }
+    if (!view.failure.summary.includes('run/profile-transactions')) {
+      throw new Error('conflict-blocked view does not point at the journal')
+    }
     await replay.controller.act('safe-mode')
     if (replay.controller.state !== 'healthy') {
       throw new Error('safe mode after conflict did not become healthy')

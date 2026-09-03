@@ -256,6 +256,45 @@ describe('revision transactions', () => {
     await lease.release()
   })
 
+  it('skips stray files in the transactions root and treats unknown states as corrupt', async () => {
+    const { ref, lease } = await leasedHome()
+    const plan = await planDesktopReconcile(ref, lease)
+    const tx = await applyProfileTransaction(plan, lease)
+    // A Finder-dropped file in the transactions root is not a journal: the
+    // scan skips it instead of failing every future startup.
+    await writeFile(path.join(ref.home, 'run', 'profile-transactions', '.DS_Store'), 'junk')
+    await expect(recoverInterruptedTransactions(ref, lease)).resolves.toBe('needs-review')
+    // A journal with an unrecognized state (bit rot) is corrupt — needs
+    // review, never silently rolled back as if it had never booted.
+    const journalFile = path.join(transactionDir(ref.home, tx.id), 'transaction.json')
+    const raw = JSON.parse(await readFile(journalFile, 'utf8')) as { state: string }
+    raw.state = 'garbage-state'
+    await writeFile(journalFile, `${JSON.stringify(raw, null, 2)}\n`)
+    expect(await readJournal(ref.home, tx.id)).toBe('corrupt')
+    await expect(recoverInterruptedTransactions(ref, lease)).resolves.toBe('needs-review')
+    await lease.release()
+  })
+
+  it('reports a plan-to-apply drift as a conflict transaction', async () => {
+    const { ref, lease } = await leasedHome()
+    await applyFullInitial(ref, lease)
+    // Stage a change the next plan will want to write, then drift the file
+    // between plan and apply — the exact window reconcileUnderLease shields
+    // by refusing to boot a conflict transaction.
+    const manifest = path.join(ref.dir, 'package.json')
+    const raw = JSON.parse(await readFile(manifest, 'utf8'))
+    raw.dsh.profile.bundles = ['@fixture/drift', ...raw.dsh.profile.bundles]
+    await writeFile(manifest, `${JSON.stringify(raw, null, 2)}\n`)
+    const plan = await planDesktopReconcile(ref, lease)
+    expect(plan.writes.length).toBeGreaterThan(0)
+    await writeFile(manifest, '{"userChanged":true}\n')
+    const tx = await applyProfileTransaction(plan, lease)
+    expect(tx.state).toBe('conflict')
+    // The drifted user bytes are exactly what stays on disk.
+    expect(await readFile(manifest, 'utf8')).toBe('{"userChanged":true}\n')
+    await lease.release()
+  })
+
   it('refuses plans that reference anything outside the whitelist', async () => {
     const { ref, lease } = await leasedHome()
     const smuggled = {

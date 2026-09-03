@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, open, readFile, rm, stat, unlink } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import path from 'node:path'
 
 import type { HomeLease } from '@dsh-desktop/home-lease'
@@ -64,6 +65,17 @@ async function writeJournalDurable(home: string, record: JournalRecord): Promise
   )
 }
 
+const JOURNAL_STATES: readonly RevisionTransactionState[] = [
+  'prepared',
+  'applying',
+  'applied',
+  'committed',
+  'retained',
+  'rolling-back',
+  'rolled-back',
+  'conflict',
+]
+
 export async function readJournal(
   home: string,
   id: string,
@@ -73,7 +85,13 @@ export async function readJournal(
     const identity = await lstat(file)
     if (identity.isSymbolicLink() || !identity.isFile()) return 'corrupt'
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing'
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return 'missing'
+    // A readdir entry that is not a transaction directory (e.g. a stray
+    // `.DS_Store` the Finder dropped in) is simply not a journal — skip it
+    // instead of failing the whole scan. Anything else (EACCES, …) stays a
+    // conservative corrupt so an unreadable real journal blocks recovery.
+    if (code === 'ENOTDIR' || code === 'ENAMETOOLONG') return 'missing'
     throw error
   }
   let value: unknown
@@ -86,7 +104,14 @@ export async function readJournal(
   const record = value as Record<string, unknown>
   if (record.schemaVersion !== 1) return 'corrupt'
   if (typeof record.id !== 'string' || record.id !== id) return 'corrupt'
-  if (typeof record.state !== 'string') return 'corrupt'
+  if (
+    typeof record.state !== 'string' ||
+    !JOURNAL_STATES.includes(record.state as RevisionTransactionState)
+  ) {
+    // An unrecognized state (bit rot, foreign writer) must never fall into
+    // the recovery branches that treat unknown states as never-booted.
+    return 'corrupt'
+  }
   if (typeof record.createdAt !== 'string') return 'corrupt'
   // The ref comes from disk; a journal whose recorded profile escapes this
   // home's profiles/<name> layout is corrupt, never a rollback target.
@@ -376,7 +401,16 @@ export async function rollbackProfileTransaction(
     if (sha === write.before.sha256) continue
     if (sha === write.candidateSha256) {
       const snapshot = await beforeSnapshotPath(lease.home, id, write.path)
-      const snapshotIdentity = await stat(snapshot)
+      let snapshotIdentity: Stats
+      try {
+        snapshotIdentity = await stat(snapshot)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        // A missing before-snapshot for a file needing restore is a broken
+        // journal, not a reason to leave candidate bytes in place.
+        await writeJournalDurable(lease.home, { ...journal, state: 'conflict' })
+        return 'conflict'
+      }
       if (snapshotIdentity.isFile() !== true) {
         await writeJournalDurable(lease.home, { ...journal, state: 'conflict' })
         return 'conflict'

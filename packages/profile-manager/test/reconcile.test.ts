@@ -95,7 +95,7 @@ describe('reconcileDesktopProfile lease authority', () => {
     await expect(readFile(manifest, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('rejects a lease bound to another home', async () => {
+  it('refuses a lease bound to another home', async () => {
     const home = await testHome()
     const other = await testHome()
     const lease = await heldLease(other)

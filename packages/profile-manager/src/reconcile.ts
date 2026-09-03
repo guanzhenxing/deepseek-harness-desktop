@@ -277,6 +277,15 @@ async function reconcileUnderLease(ref: ProfileRef, lease: HomeLease): Promise<R
     } catch (cause) {
       throw new ProfileReconcileError('apply', cause)
     }
+    // A transaction that ended in conflict left the journal — and possibly
+    // some files — mid-flight; never hand it back as a bootable pending
+    // transaction. The launcher's failure chain surfaces it via the journal.
+    if (tx.state === 'conflict') {
+      throw new ProfileReconcileError(
+        'apply',
+        new Error('reconcile transaction ended in conflict; the journal records the divergence'),
+      )
+    }
     transactionId = tx.id
   }
   const manifestPath = path.join(ref.dir, 'package.json')

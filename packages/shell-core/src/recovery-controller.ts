@@ -126,6 +126,10 @@ export class RecoverySessionController implements RecoveryController {
     // Startup actions exist only while the session still holds the lease:
     // a lease-less recovery view may offer diagnosis and quit, nothing else.
     const leaseHeld = this.#lease !== undefined && !this.#leaseReleased
+    // The doctor command applies to a leftover home lock after a full exit —
+    // which never happens while this session holds the lease, so the view
+    // never advertises it (advertising an unlock that doctor must refuse is
+    // worse than silence).
     return Object.freeze({
       failure: this.#failure,
       retryAllowed:
@@ -134,10 +138,7 @@ export class RecoverySessionController implements RecoveryController {
         this.#failure.retryable &&
         this.#retryBudgetRemaining() > 0,
       safeModeAllowed: leaseHeld && this.#state === 'recovery' && !this.#safeModeBlocked,
-      doctorCommand:
-        this.#failure.stage === 'recover-transactions'
-          ? ('dsh-native doctor --unlock' as const)
-          : null,
+      doctorCommand: null,
     })
   }
 
@@ -355,10 +356,9 @@ export class RecoverySessionController implements RecoveryController {
 
       if (this.#pendingTransaction !== undefined && this.#lease !== undefined) {
         const transactionId = this.#pendingTransaction
-        if (
-          !this.#surfaceMounted &&
-          shouldRollbackProfile({ failure, changed: this.#changed, healthy: false })
-        ) {
+        // #surfaceMounted was reset above: a failure past the mount never
+        // rolls the transaction back (its health evidence stands).
+        if (shouldRollbackProfile({ failure, changed: this.#changed, healthy: false })) {
           let outcome: 'restored' | 'conflict'
           try {
             outcome = await this.#options.profile.rollback(transactionId, this.#lease)
