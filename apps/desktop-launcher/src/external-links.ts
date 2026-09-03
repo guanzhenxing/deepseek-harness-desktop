@@ -36,29 +36,23 @@ export function externalUrlPolicy(input: {
   return 'external'
 }
 
-export type MainFrameDecision = 'allow' | 'deny' | 'deny-external'
-
 /**
- * Main-frame navigations may only stay on the authenticated surface origin.
- * Cross-origin targets are still blocked in the frame; browser-protocol
- * targets are additionally handed to the system browser by the caller (the
- * launcher), which is the only process allowed to open external URLs.
+ * Main-frame navigations (user clicks without target, scripts, HTTP
+ * redirects) may only stay on the authenticated surface origin. Everything
+ * else — including allowed browser protocols — is simply blocked: an
+ * in-frame navigation cannot be reliably attributed to a user gesture, so it
+ * must never hand a URL to the system browser. External handoff happens only
+ * through the window-open guard (target=_blank links).
  */
 export function decideMainFrameNavigation(input: {
   allowedOrigin: string | undefined
   target: string
-}): MainFrameDecision {
+}): 'allow' | 'deny' {
   if (
     input.allowedOrigin !== undefined &&
     isAllowedMainFrameNavigation(input.allowedOrigin, input.target)
   ) {
     return 'allow'
-  }
-  if (
-    input.allowedOrigin !== undefined &&
-    externalUrlPolicy({ target: input.target, currentOrigin: input.allowedOrigin }) === 'external'
-  ) {
-    return 'deny-external'
   }
   return 'deny'
 }

@@ -208,6 +208,36 @@ describe('runBundledCli', () => {
     expect(stderr.text()).toContain('unknown compatibility marker')
   })
 
+  it('admits the home even for profile-less passthrough commands', async () => {
+    const home = await isolatedHome()
+    await mkdir(path.join(home, 'run'), { recursive: true })
+    await writeFile(
+      path.join(home, 'run', 'compatibility.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        dataEpoch: 2,
+        lastWriterReleaseId: 'future-release',
+        formats: {},
+      })}\n`,
+      'utf8',
+    )
+    const stderr = new MemoryStderr()
+    let spawns = 0
+    const code = await runBundledCli(['--help'], {
+      env: { DSH_HOME: home },
+      probe: fakeProbe,
+      guard: createInProcessGuardLock(),
+      stderr,
+      spawnChild: (input) => {
+        spawns += 1
+        return makeFakeChild(0).spawn(input)
+      },
+    })
+    expect(code).toBe(5)
+    expect(spawns).toBe(0)
+    expect(stderr.text()).toContain('newer release')
+  })
+
   it('forwards argv verbatim and registers the child before authorizing boot', async () => {
     const home = await isolatedHome()
     const stderr = new MemoryStderr()

@@ -10,6 +10,7 @@ const SMOKE_MODES = [
   'auth',
   'navigation',
   'lifecycle',
+  'recovery',
 ] as const
 
 export async function resolveSmokeUserData(

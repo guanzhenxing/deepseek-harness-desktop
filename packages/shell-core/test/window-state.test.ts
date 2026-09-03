@@ -8,6 +8,7 @@ import {
   closeWindowAction,
   DEFAULT_WINDOW_SIZE,
   MIN_WINDOW_SIZE,
+  minWindowSizeFor,
   parseSavedWindowState,
   readWindowState,
   restoreWindowState,
@@ -178,6 +179,26 @@ describe('window-state persistence', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('minWindowSizeFor', () => {
+  it('keeps the standard minimum on normal displays', () => {
+    expect(
+      minWindowSizeFor({
+        bounds: { x: 0, y: 0, width: 1280, height: 820 },
+        maximized: false,
+      }),
+    ).toEqual(MIN_WINDOW_SIZE)
+  })
+
+  it('relaxes to a restored window that legitimately fits a smaller work area', () => {
+    expect(
+      minWindowSizeFor({
+        bounds: { x: 0, y: 0, width: 800, height: 500 },
+        maximized: false,
+      }),
+    ).toEqual({ width: 800, height: 500 })
   })
 })
 

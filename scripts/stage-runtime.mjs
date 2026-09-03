@@ -15,6 +15,7 @@
 // node_modules closures, the downloaded Node/pnpm runtimes (verified against
 // official checksums), the native helper, and the recovery assets. Nothing
 // resolves through the repository, the pnpm store, or system Node/pnpm.
+import { Buffer } from 'node:buffer'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -271,6 +272,27 @@ async function writeAppShell(version) {
   )
 }
 
+/**
+ * Closure digest for one staged runtime: the exact versions of the watched
+ * DSH singletons plus a SHA-256 over the sorted virtual-store entry names.
+ * Deterministic for identical dependency sets; the M4 upgrade precheck
+ * compares these instead of trusting version strings alone.
+ */
+async function closureDigest(closureRoot) {
+  const store = path.join(closureRoot, 'node_modules', '.pnpm')
+  const entries = (await readdir(store).catch(() => [])).filter((name) => name !== 'node_modules')
+  const watched = {}
+  for (const name of ['react', '@deepseek-ai/cordis', '@deepseek-ai/dsh']) {
+    const prefix = `${name.replace('/', '+')}@`
+    const versions = entries
+      .filter((entry) => entry.startsWith(prefix))
+      .map((entry) => entry.slice(prefix.length).split('_')[0])
+    watched[name] = [...new Set(versions)].sort()
+  }
+  const storeSha256 = sha256(Buffer.from([...entries].sort().join('\n') + '\n', 'utf8'))
+  return { singletons: watched, storeEntryCount: entries.length, storeSha256 }
+}
+
 async function writeCompatibilityManifest(arch) {
   const releaseId = `m3-${rootManifest.version}-${process.platform}-${arch}-${await gitCommitShort()}`
   const manifest = {
@@ -286,6 +308,10 @@ async function writeCompatibilityManifest(arch) {
     platform: process.platform,
     arch,
     generatedAt: new Date().toISOString(),
+    closureDigest: {
+      'runtime-host': await closureDigest(path.join(staging, 'runtime-host')),
+      'runtime-cli': await closureDigest(path.join(staging, 'runtime-cli')),
+    },
   }
   await writeFile(
     path.join(staging, 'compatibility.json'),

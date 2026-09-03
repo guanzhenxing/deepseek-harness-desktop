@@ -111,13 +111,13 @@ describe('decideMainFrameNavigation', () => {
     ).toBe('allow')
   })
 
-  it('blocks cross-origin navigation, routing browser protocols to the system browser', () => {
+  it('blocks every off-surface main-frame navigation without external handoff', () => {
     expect(
       decideMainFrameNavigation({
         allowedOrigin: surfaceOrigin,
         target: 'https://example.com/leave',
       }),
-    ).toBe('deny-external')
+    ).toBe('deny')
     expect(
       decideMainFrameNavigation({ allowedOrigin: surfaceOrigin, target: 'file:///etc/passwd' }),
     ).toBe('deny')

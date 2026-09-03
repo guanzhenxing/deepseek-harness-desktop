@@ -494,7 +494,7 @@ catalog、overrides 和 lock 文件由脚本生成与校验，禁止手工维护
 
 ### 7.4 版本所有权与兼容性清单
 
-M0 已建立 [`compatibility.json`](compatibility.json) 作为首份机器可读清单。当前清单状态为 `development-source-smoke`；M3 才加入安装制品、平台矩阵和制品 SHA-256。
+M0 已建立 [`compatibility.json`](compatibility.json) 作为首份机器可读清单。M3 起清单状态为 `packaged-candidate-local`，并新增安装制品记录（releaseId、darwin-arm64、制品 SHA-256 与闭包摘要见 `release/artifacts.json` 与内嵌清单）；平台矩阵只包含实际构建并运行过的架构。
 
 Desktop 发行版同时涉及四条独立版本轴：
 

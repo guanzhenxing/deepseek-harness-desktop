@@ -292,8 +292,18 @@ export async function runBundledCli(
     })
 
   if (plan.profile === undefined) {
-    // Upstream prints its own help/version/error for unresolvable profiles
-    // and never writes the home on those paths, so no lease is taken.
+    // Profile-less passthrough still admits the home: it takes no lease
+    // (nothing provably writes), but a release must never operate on a home
+    // it refuses — admission is read-only and cheap. doctor stays exempt.
+    const admission = await (options.admitHome ?? defaultAdmitHome)(home)
+    if (admission !== 'allow') {
+      stderr.write(
+        admission === 'unsupported-data'
+          ? 'dsh-native: this home holds data from a newer release; use the release that wrote it\n'
+          : 'dsh-native: this home has an unknown compatibility marker; refusing to start\n',
+      )
+      return EXIT_HOME_INCOMPATIBLE
+    }
     const child = spawnChild({ argv, env: childEnvironment(env, home, options.runtime) })
     child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
     const exit = await child.exited

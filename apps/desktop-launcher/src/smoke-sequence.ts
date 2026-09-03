@@ -11,12 +11,16 @@ export type SmokeSequenceContext = Readonly<{
   simulateDockActivate(): void
   /** Resolves once the launcher-owned recovery view is actually visible. */
   waitForRecoveryView(): Promise<void>
+  /** Resolves once the session controller reports a healthy (re)boot. */
+  waitForHealthy(): Promise<void>
+  /** Drives the Safe Mode entry of the same state machine the recovery page uses. */
+  enterSafeMode(): Promise<void>
   report(payload: Record<string, unknown>): void
   quit(): void
 }>
 
 export function isScriptedSmokeMode(mode: string | undefined): boolean {
-  return mode === 'navigation' || mode === 'lifecycle'
+  return mode === 'navigation' || mode === 'lifecycle' || mode === 'recovery'
 }
 
 function sleep(ms: number): Promise<void> {
@@ -57,13 +61,10 @@ export async function runNavigationSequence(context: SmokeSequenceContext): Prom
   await sleep(600)
   await wc.executeJavaScript(
     `(() => {
-      try { location.assign('https://example.com/main-frame-approved') } catch {}
-      return true
-    })()`,
-  )
-  await sleep(400)
-  await wc.executeJavaScript(
-    `(() => {
+      // Script-driven main-frame navigation must be BLOCKED without any
+      // external handoff: in-frame navigation carries no provable user
+      // gesture, so it never reaches the system browser.
+      try { location.assign('https://example.com/main-frame-blocked') } catch {}
       try { location.assign('http://127.0.0.1:9999/?token=leak2') } catch {}
       try { location.assign('file:///etc/passwd') } catch {}
       return true
@@ -118,5 +119,31 @@ export async function runLifecycleSequence(context: SmokeSequenceContext): Promi
     }),
   ])
   context.report({ kind: 'lifecycle', step: 'sequence-done' })
+  context.quit()
+}
+
+/**
+ * The recovery scenario on the real application: a poisoned profile-local
+ * patch fails the real Host boot, the launcher-owned recovery view appears,
+ * and entering Safe Mode boots the fixed first-party set through a real
+ * utilityProcess Host until the session is healthy — then quits cleanly.
+ */
+export async function runRecoverySequence(context: SmokeSequenceContext): Promise<void> {
+  await Promise.race([
+    context.waitForRecoveryView(),
+    sleep(120_000).then(() => {
+      throw new Error('the poisoned profile never reached the recovery view')
+    }),
+  ])
+  context.report({ kind: 'recovery', step: 'recovery-view-reached' })
+  await context.enterSafeMode()
+  await Promise.race([
+    context.waitForHealthy(),
+    sleep(300_000).then(() => {
+      throw new Error('the Safe Mode host never became healthy')
+    }),
+  ])
+  context.report({ kind: 'recovery', step: 'safe-mode-healthy' })
+  await sleep(1_000)
   context.quit()
 }

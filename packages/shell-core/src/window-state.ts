@@ -86,6 +86,21 @@ export function restoreWindowState(
   return { bounds: clampInto(rawBounds, host), maximized }
 }
 
+/**
+ * The BrowserWindow minimum must follow the restored state: a work area
+ * smaller than 900x600 legitimately restores a smaller window, and a fixed
+ * minWidth/minHeight would push it right back past the work-area edges.
+ */
+export function minWindowSizeFor(restored: SavedWindowState): Readonly<{
+  width: number
+  height: number
+}> {
+  return Object.freeze({
+    width: Math.min(MIN_WINDOW_SIZE.width, restored.bounds.width),
+    height: Math.min(MIN_WINDOW_SIZE.height, restored.bounds.height),
+  })
+}
+
 /** Closing the window hides it to the tray; only quitting may really close. */
 export function closeWindowAction(quitting: boolean): 'hide' | 'close' {
   return quitting ? 'close' : 'hide'

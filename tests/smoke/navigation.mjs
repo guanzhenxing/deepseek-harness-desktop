@@ -18,19 +18,20 @@ try {
       const external = reports
         .filter((report) => report.kind === 'external-opened')
         .map((report) => report.url)
-      const expected = [
-        'https://example.com/popup-approved',
-        'https://example.com/main-frame-approved',
-      ]
+      const expected = ['https://example.com/popup-approved']
       if (JSON.stringify(external) !== JSON.stringify(expected)) {
         throw new Error(
           `external handoff mismatch: got ${JSON.stringify(external)}, expected ${JSON.stringify(expected)}`,
         )
       }
-      // The denied file/loopback targets must never appear anywhere.
+      // The denied file/loopback targets — and script-driven main-frame
+      // navigation of ANY kind — must never reach the external path.
       for (const report of reports) {
         if (report.kind === 'external-opened' && /127\.0\.0\.1|file:|token/.test(report.url)) {
           throw new Error(`denied target reached the external path: ${report.url}`)
+        }
+        if (report.kind === 'external-opened' && report.url.includes('main-frame-blocked')) {
+          throw new Error('script-driven navigation reached the system browser')
         }
       }
       // Blocked main-frame navigation leaves the page on the surface origin.

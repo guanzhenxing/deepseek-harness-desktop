@@ -511,6 +511,68 @@ function cliDoctorScenario(install) {
   }
 }
 
+function recoveryScenario(install) {
+  return async () => {
+    const fixture = await makeControllerHome('recovery')
+    const poisonPatch = 'cordis:\n  this: [is: not: valid: yaml\n'
+    try {
+      const profileDir = path.join(fixture.home, 'profiles', 'desktop')
+      await mkdir(profileDir, { recursive: true, mode: 0o700 })
+      await writeFile(
+        path.join(profileDir, 'package.json'),
+        `${JSON.stringify(
+          {
+            name: 'dsh-profile-desktop',
+            private: true,
+            dependencies: {},
+            dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'] } },
+          },
+          undefined,
+          2,
+        )}\n`,
+      )
+      await writeFile(path.join(profileDir, 'cordis.patch.yml'), poisonPatch)
+      const reports = await runInstalledApp({
+        executable: install.executable,
+        mode: 'recovery',
+        userData: fixture.userData,
+        cwd: fixture.userData,
+        timeoutMs: 480_000,
+        async action({ waitFor }) {
+          await waitFor(
+            (report) => report.kind === 'recovery' && report.step === 'recovery-view-reached',
+            'recovery view on the installed app',
+          )
+          await waitFor(
+            (report) => report.kind === 'recovery' && report.step === 'safe-mode-healthy',
+            'real Safe Mode host healthy',
+          )
+        },
+      })
+      // Exactly one automatic relaunch before the view (rollback → relaunch →
+      // fail again), i.e. two real normal Host boots.
+      const failures = reports.filter((report) => report.kind === 'host-failed').length
+      if (failures < 2) {
+        throw new Error(`expected at least two failed normal boots, saw ${failures}`)
+      }
+      // The poisoned user patch must survive byte-exact (it is user content).
+      const patchBytes = await readFile(
+        path.join(fixture.home, 'profiles', 'desktop', 'cordis.patch.yml'),
+        'utf8',
+      )
+      if (patchBytes !== poisonPatch) throw new Error('the poisoned user patch was modified')
+      // The lease must be gone after the scripted quit.
+      const lockGone = await access(path.join(fixture.home, 'run', 'host.lock')).then(
+        () => false,
+        (error) => error.code === 'ENOENT',
+      )
+      if (!lockGone) throw new Error('home lease survived the recovery quit')
+    } finally {
+      await fixture.dispose()
+    }
+  }
+}
+
 function cliVersionScenario(install) {
   return async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), 'dsh-cli-cwd-'))
@@ -635,6 +697,7 @@ try {
   await record('installed-cli-busy', cliBusyScenario(install))
   await record('installed-cli-doctor', cliDoctorScenario(install))
   await record('installed-cli-plugin', cliPluginScenario(install))
+  await record('installed-recovery', recoveryScenario(install))
   await record('installed-controller-recovery', () =>
     runControllerScenario(install, 'recovery-chain'),
   )

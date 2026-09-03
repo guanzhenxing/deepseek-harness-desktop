@@ -56,7 +56,7 @@ M3 内嵌 `supportedDataEpochs = [1]`。
 - **Desktop**：`RecoverySessionController` 在取得 home lease 之后、任何 profile/cache/Host 写入之前调用一次（实现于 `#admitHomeBeforeAnyWrite`）。拒绝产生非重试的 `home-config` 失败（code `HOME_MARKER_UNKNOWN` / `HOME_DATA_UNSUPPORTED` / `HOME_MARKER_UNREADABLE`），进入本地恢复页，同时撤下 Safe Mode 入口（Safe Mode 也要写 home，不得绕过）；lease 保持持有供诊断，由用户退出时释放。
 - **CLI**：`dsh-native` 在取得 lease 之后、spawn 官方 CLI 子进程之前判定；拒绝打印原因并以退出码 5 结束，不产生任何子进程与写入。
 - **doctor**：`dsh-native doctor --unlock` 是只读诊断/清理路径，不做 admission。
-- 无 profile 的透传路径（帮助、版本）不取 lease 也不写 home，不做 admission。
+- 无 profile 的透传路径（帮助、版本）不取 lease，但同样过 admission（只读检查；拒绝即退出码 5，不 spawn 任何子进程）——CLI 没有任何绕过面。
 
 ## 5. 安全与诚实边界
 

@@ -30,6 +30,7 @@ import {
   createDesktopProfileRecovery,
   createRecoveryMarkerStore,
   isAllowedMainFrameNavigation,
+  minWindowSizeFor,
   readWindowState,
   RendererReloadBudget,
   restoreWindowState,
@@ -66,6 +67,7 @@ import {
   isScriptedSmokeMode,
   runLifecycleSequence,
   runNavigationSequence,
+  runRecoverySequence,
 } from './smoke-sequence.js'
 import { createWindowOpenGuard, DESKTOP_WEB_PREFERENCES } from './window-policy.js'
 
@@ -120,13 +122,14 @@ class ElectronWindowPort {
     this.#isQuitting = input.isQuitting
     this.#openExternal = input.openExternal
     const restored = restoreWindowState(input.initialState, workAreas())
+    const minimum = minWindowSizeFor(restored)
     this.window = new BrowserWindow({
       x: restored.bounds.x,
       y: restored.bounds.y,
       width: restored.bounds.width,
       height: restored.bounds.height,
-      minWidth: 900,
-      minHeight: 600,
+      minWidth: minimum.width,
+      minHeight: minimum.height,
       show: false,
       title: PRODUCT.name,
       webPreferences: DESKTOP_WEB_PREFERENCES,
@@ -147,14 +150,13 @@ class ElectronWindowPort {
     )
     this.window.webContents.on('will-attach-webview', (event) => event.preventDefault())
     const guardNavigation = (event: Electron.Event, target: string): void => {
-      const decision = decideMainFrameNavigation({ allowedOrigin: this.#allowedOrigin, target })
-      if (decision === 'allow') return
-      event.preventDefault()
-      if (decision === 'deny-external') {
-        // The only external path: a policy-approved user link the launcher
-        // itself hands to the system browser.
-        void this.#openExternal(target).catch(() => undefined)
+      if (decideMainFrameNavigation({ allowedOrigin: this.#allowedOrigin, target }) === 'allow') {
+        return
       }
+      // In-frame navigation is blocked outright — user gesture cannot be
+      // proven here, so it must never reach the system browser. External
+      // handoff happens only in the window-open guard.
+      event.preventDefault()
     }
     this.window.webContents.on('will-navigate', guardNavigation)
     this.window.webContents.on('will-redirect', guardNavigation)
@@ -411,6 +413,10 @@ async function startApplication(): Promise<void> {
   const recoveryShown = new Promise<void>((resolve) => {
     resolveRecoveryShown = resolve
   })
+  let resolveHealthyOnce: (() => void) | undefined
+  const healthyShown = new Promise<void>((resolve) => {
+    resolveHealthyOnce = resolve
+  })
   // The recovery window is created lazily on first failure: an eagerly
   // created, never-loaded hidden window stalls Electron's quit sequence.
   const ensureRecoveryWindow = (): RecoveryWindowHandle =>
@@ -556,6 +562,7 @@ async function startApplication(): Promise<void> {
     },
     onHealthy: async () => {
       nativeUi?.setStatus('running')
+      resolveHealthyOnce?.()
       // A healthy session spends the relaunch marker and retires the
       // launcher-owned recovery window. Runs after the state flips, so a
       // crash inside it is still a post-ready crash. The two steps are
@@ -597,8 +604,10 @@ async function startApplication(): Promise<void> {
   })
   await shell.start()
 
-  if (smokeMode !== undefined) {
+  if (smokeMode !== undefined && smokeMode !== 'recovery') {
     await waitForOfficialUi(port.window)
+  }
+  if (smokeMode !== undefined) {
     const driverOwnedModes = ['shared-home', 'conversation', 'auth', 'navigation', 'lifecycle']
     smokeReport({
       kind: 'ui-ready',
@@ -615,12 +624,16 @@ async function startApplication(): Promise<void> {
         showMain: () => nativeUi?.showMain(),
         simulateDockActivate: () => app.emit('activate', { preventDefault() {} } as never, false),
         waitForRecoveryView: () => recoveryShown,
+        waitForHealthy: () => healthyShown,
+        enterSafeMode: () => shell?.act('safe-mode') ?? Promise.resolve(),
         report: (payload: Record<string, unknown>) => smokeReport(payload),
         quit: () => app.quit(),
       }
       await (smokeMode === 'navigation'
         ? runNavigationSequence(context)
-        : runLifecycleSequence(context))
+        : smokeMode === 'recovery'
+          ? runRecoverySequence(context)
+          : runLifecycleSequence(context))
     } else if (!driverOwnedModes.includes(smokeMode)) {
       app.quit()
     }
