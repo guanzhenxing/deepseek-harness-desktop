@@ -16,12 +16,12 @@
 
 ## 2. 制品与架构
 
-| 项         | 值                                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------- |
-| 候选 DMG   | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64）                           |
-| releaseId  | `m3-0.0.0-darwin-arm64-d4068ad`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 关联） |
-| DMG SHA256 | 见 `release/SHA256SUMS` / `release/artifacts.json`（外置记录，不自嵌避免自引用哈希）              |
-| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵                                                        |
+| 项         | 值                                                                                                                                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 候选 DMG   | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64）                                                                                                                 |
+| releaseId  | `m3-0.0.0-darwin-arm64-fa16f9a`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 经 SHA 关联；制品构建时的源码快照为 `fa16f9a`，其源码内容与分支 HEAD 一致——HEAD 仅追加文档） |
+| DMG SHA256 | `1bfe6445e8b1e4f44dc4b7a0871a7a39ead393f42dc93849ff63a7d7c66537c9`（约 355 MB；外置记录不自嵌，避免自引用哈希）                                                                         |
+| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵                                                                                                                                              |
 
 `.app` 布局（全部来自 staging 闭包，经 `hdiutil attach -readonly -nobrowse` → `ditto` 安装到临时目录验证）：
 
