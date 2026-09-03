@@ -2,12 +2,22 @@ import { lstat, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+const SMOKE_MODES = [
+  'ui',
+  'host-crash',
+  'shared-home',
+  'conversation',
+  'auth',
+  'navigation',
+  'lifecycle',
+] as const
+
 export async function resolveSmokeUserData(
   smokeMode: string | undefined,
   override: string | undefined,
 ): Promise<string | undefined> {
   if (smokeMode === undefined && override === undefined) return undefined
-  if (!['ui', 'host-crash', 'shared-home'].includes(smokeMode ?? '')) {
+  if (!(SMOKE_MODES as readonly string[]).includes(smokeMode ?? '')) {
     throw new Error('M0 userData overrides are available only in supported smoke modes')
   }
   if (

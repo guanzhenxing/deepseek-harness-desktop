@@ -76,7 +76,12 @@ type ProfilePortCalls = {
   markers: { transactionId: string; attempt: number }[]
 }
 
-function fixture(options: { attemptStart?: () => Promise<HostReady> } = {}) {
+function fixture(
+  options: {
+    attemptStart?: () => Promise<HostReady>
+    attemptStop?: (reason: 'quit' | 'restart', deadlineMs: number) => Promise<void>
+  } = {},
+) {
   const lease = new RecordingLease()
   const attempts: {
     start: ReturnType<typeof vi.fn>
@@ -133,7 +138,7 @@ function fixture(options: { attemptStart?: () => Promise<HostReady> } = {}) {
     },
     createAttempt: (_lease, mode) => {
       const start = vi.fn(options.attemptStart ?? (async () => ready))
-      const stop = vi.fn(async () => undefined)
+      const stop = vi.fn(options.attemptStop ?? (async () => undefined))
       attempts.push({ start, stop, mode })
       return { start, stop } as unknown as HostAttempt
     },
@@ -673,6 +678,39 @@ describe('RecoverySessionController', () => {
     await setup.controller.act('retry')
     expect(setup.controller.state).toBe('healthy')
     expect(setup.attempts).toHaveLength(2)
+  })
+
+  it('awaits an in-flight renderer-crash stop before releasing the lease', async () => {
+    let releaseStop: (() => void) | undefined
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve
+    })
+    let stopSettled = false
+    const setup = fixture({
+      attemptStop: () =>
+        stopGate.then(() => {
+          stopSettled = true
+        }),
+    })
+    await setup.controller.start()
+    // A renderer crash begins stopping the live attempt (the stop hangs).
+    const crashing = setup.controller.rendererCrashed({
+      stage: 'renderer',
+      code: 'RENDERER_CRASHED',
+      category: 'renderer',
+      summary: 'crash with a slow dispose',
+      retryable: true,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Quit arrives while that stop is still in flight.
+    const quitting = setup.controller.act('quit')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(setup.lease.calls).not.toContain('release')
+    releaseStop?.()
+    await Promise.all([crashing, quitting])
+    expect(stopSettled).toBe(true)
+    expect(setup.controller.state).toBe('stopped')
+    expect(setup.lease.calls).toContain('release')
   })
 
   it('ignores a renderer crash while not healthy or already quitting', async () => {

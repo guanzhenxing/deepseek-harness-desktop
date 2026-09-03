@@ -10,3 +10,15 @@ export function isAllowedMainFrameNavigation(origin: string, target: string): bo
     return false
   }
 }
+
+/** Loopback hostnames that must never be handed to the system browser. */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host.endsWith('.localhost')
+  )
+}

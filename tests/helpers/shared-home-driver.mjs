@@ -99,6 +99,24 @@ async function removeVerifiedTree(target, recorded) {
   await rm(resolved, { recursive: true })
 }
 
+/** Build the workspace (and the native helper) before spawning the app. */
+export async function ensureLauncherBuilt() {
+  const { spawn } = await import('node:child_process')
+  for (const [command, args] of [
+    ['pnpm', ['run', 'build']],
+    ['pnpm', ['run', 'build:native']],
+  ]) {
+    await new Promise((resolve, reject) => {
+      const child = spawn(command, args, { cwd: repositoryRoot, stdio: 'inherit' })
+      child.once('error', reject)
+      child.once('exit', (code) => {
+        if (code === 0) resolve(undefined)
+        else reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`))
+      })
+    })
+  }
+}
+
 export async function runDshNative(argv, options = {}) {
   const child = spawn(process.execPath, [dshNativeScript, ...argv], {
     cwd: options.cwd ?? repositoryRoot,
@@ -138,17 +156,17 @@ function consumeLines(stream, onLine) {
 }
 
 /**
- * Boot the Electron Desktop against the fixture home in `shared-home` smoke
- * mode, expose its authenticated surface to `action`, then stop it with
- * SIGTERM so the normal before-quit chain releases the lease.
+ * Boot the Electron Desktop against the fixture home in the given smoke mode
+ * (default `shared-home`), expose its authenticated surface to `action`, then
+ * stop it with SIGTERM so the normal before-quit chain releases the lease.
  */
-export async function withDesktop(home, userData, action) {
+export async function withDesktop(home, userData, action, mode = 'shared-home') {
   let desktopExit
   const child = spawn(electronBinary, ['.'], {
     cwd: launcherDirectory,
     env: {
       ...process.env,
-      DSH_DESKTOP_SMOKE: 'shared-home',
+      DSH_DESKTOP_SMOKE: mode,
       DSH_DESKTOP_M0_USER_DATA: userData,
       DSH_TELEMETRY_DISABLED: '1',
     },
@@ -163,6 +181,11 @@ export async function withDesktop(home, userData, action) {
     }
   })
   consumeLines(child.stderr, (line) => process.stderr.write(`${line}\n`))
+  // Watch the exit from spawn time: modes that quit themselves (lifecycle)
+  // can be gone before the finally block attaches a listener.
+  const exited = new Promise((resolve) => {
+    child.once('exit', (code, signal) => resolve({ code, signal }))
+  })
 
   try {
     const ready = await waitFor(
@@ -182,20 +205,14 @@ export async function withDesktop(home, userData, action) {
       client,
       surfaceUrl: ready.surfaceUrl,
       report: ready,
+      reports,
       waitForReport: (predicate) => nextReport(predicate),
     })
   } finally {
-    child.kill('SIGTERM')
-    const exit = await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        child.kill('SIGKILL')
-        resolve({ code: null, signal: 'SIGKILL' })
-      }, 30_000)
-      child.once('exit', (code, signal) => {
-        clearTimeout(timer)
-        resolve({ code, signal })
-      })
-    })
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+    const killTimer = setTimeout(() => child.kill('SIGKILL'), 30_000)
+    const exit = await exited
+    clearTimeout(killTimer)
     await waitUntilDead(child.pid)
     if (exit.code !== 0) {
       desktopExit = new Error(`desktop exited with code ${exit.code} and signal ${exit.signal}`)
@@ -351,7 +368,7 @@ function isAlive(pid) {
   }
 }
 
-async function waitUntilDead(pid, timeoutMs = 10_000) {
+export async function waitUntilDead(pid, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (!isAlive(pid)) return

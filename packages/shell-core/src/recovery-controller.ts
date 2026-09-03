@@ -101,6 +101,7 @@ export class RecoverySessionController implements RecoveryController {
   #retryTimestamps: number[] = []
   #inFlight: Promise<void> | undefined
   #stopPromise: Promise<void> | undefined
+  #attemptStop: Promise<void> | undefined
   #quitRequest = false
   #pendingTransaction: string | undefined
   #changed = false
@@ -466,12 +467,14 @@ export class RecoverySessionController implements RecoveryController {
   async #stopAttemptSafely(): Promise<void> {
     const attempt = this.#attempt
     this.#attempt = undefined
-    if (attempt === undefined) return
-    try {
-      await attempt.stop('quit', this.#options.shutdownDeadlineMs ?? 5_000)
-    } catch {
-      /* the original failure is what the user needs to see */
+    if (attempt !== undefined) {
+      // Track the stop even when nobody awaits this call: a concurrent quit
+      // must wait for it before releasing the home lease.
+      this.#attemptStop = attempt
+        .stop('quit', this.#options.shutdownDeadlineMs ?? 5_000)
+        .catch(() => undefined)
     }
+    await this.#attemptStop
   }
 
   #stopAndRelease(): Promise<void> {

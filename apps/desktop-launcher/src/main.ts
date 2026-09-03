@@ -3,7 +3,16 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { app, BrowserWindow, dialog, Menu, nativeImage, screen, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  nativeImage,
+  screen,
+  shell as electronShell,
+  Tray,
+} from 'electron'
 
 import {
   acquireHomeLease,
@@ -32,6 +41,11 @@ import {
 } from '@dsh-desktop/shell-core'
 
 import { createElectronHostProcessFactory } from './electron-host-process.js'
+import {
+  decideMainFrameNavigation,
+  externalUrlPolicy,
+  type OpenExternalAdapter,
+} from './external-links.js'
 import { describeLeaseBlock, resolveSmokeHome } from './lease-diagnostics.js'
 import { createRecoveryWindow, type RecoveryWindowHandle } from './recovery-window.js'
 import { resolveSmokeUserData } from './m0-paths.js'
@@ -43,7 +57,12 @@ import {
   type NativeUiPort,
 } from './native-ui.js'
 import { resolveNativeAssets } from './resource-paths.js'
-import { DESKTOP_WEB_PREFERENCES, denyWindowOpen } from './window-policy.js'
+import {
+  isScriptedSmokeMode,
+  runLifecycleSequence,
+  runNavigationSequence,
+} from './smoke-sequence.js'
+import { createWindowOpenGuard, DESKTOP_WEB_PREFERENCES } from './window-policy.js'
 
 const hostEntryPath = fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
@@ -77,15 +96,18 @@ class ElectronWindowPort {
   #revealed = false
   readonly #stateFile: string
   readonly #isQuitting: () => boolean
+  readonly #openExternal: OpenExternalAdapter
   #saveTimer: NodeJS.Timeout | undefined
 
   constructor(input: {
     initialState: SavedWindowState | undefined
     stateFile: string
     isQuitting: () => boolean
+    openExternal: OpenExternalAdapter
   }) {
     this.#stateFile = input.stateFile
     this.#isQuitting = input.isQuitting
+    this.#openExternal = input.openExternal
     const restored = restoreWindowState(input.initialState, workAreas())
     this.window = new BrowserWindow({
       x: restored.bounds.x,
@@ -105,14 +127,22 @@ class ElectronWindowPort {
         callback(false)
       },
     )
-    this.window.webContents.setWindowOpenHandler(denyWindowOpen)
+    this.window.webContents.setWindowOpenHandler(
+      createWindowOpenGuard({
+        policy: externalUrlPolicy,
+        currentOrigin: () => this.#allowedOrigin,
+        openExternal: this.#openExternal,
+      }),
+    )
     this.window.webContents.on('will-attach-webview', (event) => event.preventDefault())
     const guardNavigation = (event: Electron.Event, target: string): void => {
-      if (
-        this.#allowedOrigin === undefined ||
-        !isAllowedMainFrameNavigation(this.#allowedOrigin, target)
-      ) {
-        event.preventDefault()
+      const decision = decideMainFrameNavigation({ allowedOrigin: this.#allowedOrigin, target })
+      if (decision === 'allow') return
+      event.preventDefault()
+      if (decision === 'deny-external') {
+        // The only external path: a policy-approved user link the launcher
+        // itself hands to the system browser.
+        void this.#openExternal(target).catch(() => undefined)
       }
     }
     this.window.webContents.on('will-navigate', guardNavigation)
@@ -342,7 +372,15 @@ async function startApplication(): Promise<void> {
   const marker = createRecoveryMarkerStore(app.getPath('userData'), home)
   const stateFile = path.join(app.getPath('userData'), 'window-state.json')
   const initialState = await readWindowState(stateFile)
-  const port = new ElectronWindowPort({ initialState, stateFile, isQuitting })
+  // Automated runs record external handoffs instead of opening the user's
+  // browser; a manual system external-link check covers the real path.
+  const openExternal: OpenExternalAdapter =
+    smokeMode === undefined
+      ? (url) => electronShell.openExternal(url)
+      : async (url) => {
+          smokeReport({ kind: 'external-opened', url })
+        }
+  const port = new ElectronWindowPort({ initialState, stateFile, isQuitting, openExternal })
   windowPort = port
   const showMainWindow = (): void => {
     const port = windowPort
@@ -358,6 +396,10 @@ async function startApplication(): Promise<void> {
   nativeUi.initialize('starting')
   let readyHost: HostReady | undefined
   let lastFatal: HostFatalDetail | undefined
+  let resolveRecoveryShown: (() => void) | undefined
+  const recoveryShown = new Promise<void>((resolve) => {
+    resolveRecoveryShown = resolve
+  })
   // The recovery window is created lazily on first failure: an eagerly
   // created, never-loaded hidden window stalls Electron's quit sequence.
   const ensureRecoveryWindow = (): RecoveryWindowHandle =>
@@ -508,6 +550,7 @@ async function startApplication(): Promise<void> {
         nativeUi?.setStatus('recovery')
         smokeReport({ kind: 'recovery-view', stage: view.failure.stage, code: view.failure.code })
         await ensureRecoveryWindow().showRecoveryView(view)
+        resolveRecoveryShown?.()
       },
       destroySurface: () => port.destroySurface(),
     },
@@ -529,18 +572,32 @@ async function startApplication(): Promise<void> {
 
   if (smokeMode !== undefined) {
     await waitForOfficialUi(port.window)
+    const driverOwnedModes = ['shared-home', 'conversation', 'auth', 'navigation', 'lifecycle']
     smokeReport({
       kind: 'ui-ready',
       launcherPid: process.pid,
       hostPid: readyHost?.pid,
-      ...(smokeMode === 'shared-home' ? { surfaceUrl: readyHost?.surface.url } : {}),
+      ...(driverOwnedModes.includes(smokeMode) ? { surfaceUrl: readyHost?.surface.url } : {}),
     })
     if (smokeMode === 'host-crash' && readyHost !== undefined) {
       process.kill(readyHost.pid, 'SIGKILL')
-    } else if (smokeMode !== 'shared-home') {
+    } else if (isScriptedSmokeMode(smokeMode)) {
+      // Scripted modes run their probe sequence and then quit themselves.
+      const context = {
+        window: port.window,
+        showMain: () => nativeUi?.showMain(),
+        simulateDockActivate: () => app.emit('activate', { preventDefault() {} } as never, false),
+        waitForRecoveryView: () => recoveryShown,
+        report: (payload: Record<string, unknown>) => smokeReport(payload),
+        quit: () => app.quit(),
+      }
+      await (smokeMode === 'navigation'
+        ? runNavigationSequence(context)
+        : runLifecycleSequence(context))
+    } else if (!driverOwnedModes.includes(smokeMode)) {
       app.quit()
     }
-    // In shared-home mode the driver owns the shutdown moment; the app stays
+    // In driver-owned modes the driver owns the shutdown moment; the app stays
     // up holding the lease until it receives SIGTERM.
   }
 }
