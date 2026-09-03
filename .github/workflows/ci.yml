@@ -59,3 +59,50 @@ jobs:
         run: pnpm smoke:profile-recovery
       - name: Run safe-mode smoke
         run: pnpm smoke:safe-mode
+      - name: Run conversation smoke
+        run: pnpm smoke:conversation
+      - name: Run auth smoke
+        run: pnpm smoke:auth
+      - name: Run navigation smoke
+        run: pnpm smoke:navigation
+      - name: Run lifecycle smoke
+        run: pnpm smoke:lifecycle
+
+  # M3: build the packaged candidate on macOS and keep the artifacts as
+  # private job output (no public release). The artifact-level smoke runs
+  # against the DMG candidate exactly as locally.
+  macos-package:
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the packaged candidate (dir + dmg)
+        run: |
+          pnpm package:dir
+          pnpm package:dmg
+      - name: Verify artifacts
+        run: pnpm verify:artifacts
+      - name: Run the artifact-level package smoke
+        run: pnpm smoke:package
+      - name: Upload candidate artifacts (private job output)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m3-candidate-${{ runner.arch }}
+          path: |
+            release/dist/*.dmg
+            release/artifacts.json
+            release/SHA256SUMS
+            release/package-smoke.json
+          retention-days: 14
