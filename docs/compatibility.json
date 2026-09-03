@@ -38,7 +38,7 @@
       "os": "darwin",
       "arch": "arm64",
       "artifact": "dmg",
-      "releaseId": "m3-0.0.0-darwin-arm64-fa16f9a",
+      "releaseId": "m3-0.0.0-darwin-arm64-a903288",
       "smokes": [
         "dsh-ui",
         "host-crash",
@@ -48,6 +48,7 @@
         "conversation",
         "shared-home",
         "cli-version",
+        "recovery",
         "cli-busy",
         "cli-doctor",
         "cli-plugin",
