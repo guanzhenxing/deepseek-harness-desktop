@@ -38,7 +38,10 @@ function attachDmg(dmg) {
 }
 
 function detach(mountPoint) {
-  spawnSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+  const result = spawnSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+  if (result.status !== 0) {
+    console.error(`warning: hdiutil could not detach ${mountPoint}; unmount it manually`)
+  }
 }
 
 export async function verifyArtifacts(artifactsFile) {

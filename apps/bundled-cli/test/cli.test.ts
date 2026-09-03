@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { stat as statAsync, mkdir, writeFile } from 'node:fs/promises'
+import { readFileSync, realpathSync } from 'node:fs'
+import { stat as statAsync, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Writable } from 'node:stream'
 
@@ -17,6 +18,7 @@ import {
   type CliChildHandle,
   type SpawnCliChild,
 } from '../src/main.js'
+import { resolvePackagedCliRuntime } from '../src/runtime-paths.js'
 import {
   createIsolatedHomeFixture,
   type IsolatedHomeFixture,
@@ -501,5 +503,55 @@ describe('runBundledCli', () => {
       code: 'ENOENT',
     })
     void dead
+  })
+})
+
+describe('resolvePackagedCliRuntime', () => {
+  async function stagingFixture(compatibilityJson: string | undefined) {
+    const root = await mkdtemp(path.join(tmpdir(), 'dsh-staged-cli-'))
+    const stagingRoot = path.join(root, 'runtime-cli')
+    const dshDir = path.join(stagingRoot, 'node_modules', '@deepseek-ai', 'dsh')
+    await mkdir(dshDir, { recursive: true })
+    await writeFile(
+      path.join(dshDir, 'package.json'),
+      `${JSON.stringify({ name: '@deepseek-ai/dsh', bin: { dsh: './lib/bin.js' } })}\n`,
+    )
+    if (compatibilityJson !== undefined) {
+      await mkdir(path.join(root, 'runtime-host'), { recursive: true })
+      await writeFile(path.join(root, 'compatibility.json'), compatibilityJson)
+    }
+    return stagingRoot
+  }
+
+  it('resolves the staged dsh bin and the packaged desktop executable', async () => {
+    const stagingRoot = await stagingFixture(
+      `${JSON.stringify({ productExecutableName: 'DeepSeek Harness Desktop' })}\n`,
+    )
+    const runtime = resolvePackagedCliRuntime({ stagingRoot })
+    const canonicalRoot = realpathSync(stagingRoot)
+    expect(runtime.dshBin).toBe(
+      path.join(canonicalRoot, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    )
+    expect(runtime.nodeExecutable).toBe(path.join(canonicalRoot, 'node', 'bin', 'node'))
+    expect(runtime.leaseHelper).toBe(
+      path.join(path.dirname(canonicalRoot), 'native', 'lease-helper'),
+    )
+    expect(runtime.desktopEntryExecutables[0]).toMatch(/MacOS\/DeepSeek Harness Desktop$/u)
+  })
+
+  it('fails with a reinstall diagnosis when the embedded manifest is corrupt', async () => {
+    const stagingRoot = await stagingFixture('{broken json')
+    expect(() => resolvePackagedCliRuntime({ stagingRoot })).toThrow(/reinstall the application/u)
+    const missing = await stagingFixture(undefined)
+    expect(() => resolvePackagedCliRuntime({ stagingRoot: missing })).toThrow(
+      /reinstall the application/u,
+    )
+  })
+
+  it('rejects a manifest that does not name the app executable', async () => {
+    const stagingRoot = await stagingFixture(`${JSON.stringify({ releaseId: 'x' })}\n`)
+    expect(() => resolvePackagedCliRuntime({ stagingRoot })).toThrow(
+      /does not name the app executable/u,
+    )
   })
 })

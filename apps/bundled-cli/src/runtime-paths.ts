@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -84,7 +84,10 @@ export function resolveCliRuntime(
 export function resolvePackagedCliRuntime(
   input: Readonly<{ stagingRoot: string }>,
 ): CliRuntimePaths {
-  const stagingRoot = path.resolve(input.stagingRoot)
+  // Canonicalize once: Node's package resolution realpaths the staged dsh
+  // package (e.g. /var → /private/var on macOS); every derived path must use
+  // the same canonical root or argv needles would mismatch between them.
+  const stagingRoot = realpathSync(path.resolve(input.stagingRoot))
   const resourcesRoot = path.resolve(stagingRoot, '..')
   const requireHere = createRequire(path.join(stagingRoot, 'package.json'))
   const manifestPath = requireHere.resolve('@deepseek-ai/dsh/package.json')
@@ -95,9 +98,16 @@ export function resolvePackagedCliRuntime(
     throw new Error('the staged runtime does not declare a bin.dsh entry')
   }
   const dshBin = path.resolve(path.dirname(manifestPath), relative)
-  const compatibility = JSON.parse(
-    readFileSync(path.join(resourcesRoot, 'compatibility.json'), 'utf8'),
-  ) as { productExecutableName?: unknown }
+  let compatibility: { productExecutableName?: unknown }
+  try {
+    compatibility = JSON.parse(
+      readFileSync(path.join(resourcesRoot, 'compatibility.json'), 'utf8'),
+    ) as { productExecutableName?: unknown }
+  } catch {
+    throw new Error(
+      'the installed compatibility manifest is missing or corrupt; reinstall the application',
+    )
+  }
   if (typeof compatibility.productExecutableName !== 'string') {
     throw new Error('the embedded compatibility manifest does not name the app executable')
   }

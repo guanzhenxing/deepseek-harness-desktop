@@ -6,7 +6,7 @@
 // neutral cwd); profile-recovery/safe-mode/admission run through the
 // installed runtime closure via the controller driver.
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as sleepTimer } from 'node:timers'
@@ -259,6 +259,13 @@ function lifecycleScenario(install) {
             (report) => report.kind === 'recovery-view' && report.code === 'RENDERER_CRASHED',
             'renderer recovery view',
           )
+          // The full quit must release the home lease (same bar as the dev
+          // lifecycle smoke and the conversation scenario).
+          const lockGone = await access(path.join(fixture.home, 'run', 'host.lock')).then(
+            () => false,
+            (error) => error.code === 'ENOENT',
+          )
+          if (!lockGone) throw new Error('home lease survived the installed lifecycle quit')
         },
       })
     } finally {
@@ -508,9 +515,16 @@ function cliVersionScenario(install) {
   return async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), 'dsh-cli-cwd-'))
     try {
+      const compatibility = JSON.parse(
+        await readFile(path.join(repositoryRoot, 'docs', 'compatibility.json'), 'utf8'),
+      )
       const version = await runInstalledCli(install.cliEntry, ['--version'], { cwd })
       if (version.code !== 0) throw new Error(`--version exited ${version.code}`)
-      if (version.output.trim() === '') throw new Error('--version printed nothing')
+      if (!version.output.includes(compatibility.dsh.npmVersion)) {
+        throw new Error(
+          `--version output does not carry the pinned DSH version ${compatibility.dsh.npmVersion}: ${version.output.trim().slice(0, 120)}`,
+        )
+      }
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }

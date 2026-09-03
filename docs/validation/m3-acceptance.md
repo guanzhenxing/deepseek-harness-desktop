@@ -52,6 +52,18 @@
 2. 调试期间多次在你的桌面产生崩溃弹窗，根因为（a）`fs.cp` 复制破坏 .app 内相对符号链接（dyld SIGABRT）与（b）DMG 内封的是 fuse 后未重签的副本（内核 SIGKILL）；两处已修复（`ditto` 安装、`hdiutil` 封装已签名 .app），harness 增加无条件收尾（信号处理 + 进程组/临时目录/挂载清理）。
 3. `--prepackaged` 路径与 afterPack 资源复制不兼容（DMG 内 .app 缺资源），已弃用该路径。
 
+## 5.5 自查轮（交付前对抗审查）
+
+按对抗清单（I/O 失败、corrupt-not-unknown、TS-vs-runtime、进程重启、UI copy vs state、证据真实性、攻击最新修复）自查后修复并随源码重建重验（提交 `fa16f9a`）：
+
+1. `resolvePackagedCliRuntime` 对内嵌清单损坏给出"reinstall the application"诊断而非裸堆栈（新增 3 条单测覆盖损坏/缺失/缺字段），并把 staging 根 realpath 规范化（消除 /var 与 /private/var 混用导致的 argv needle 不一致）；
+2. `writeWindowState` rename 后补目录 fsync（对齐 M2 durable-fs 纪律）；
+3. 安装版 lifecycle 场景补 `host.lock` 释放断言（对齐 dev 版与 conversation 场景）；
+4. `cli-version` 场景从"输出非空"加强为"输出含 compatibility.json 钉住的 DSH 版本号"；
+5. `verify-artifacts` 的 hdiutil detach 失败改为显式告警（不再静默留挂载）。
+
+修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（14/14）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（270+5 单测）。
+
 ## 6. 门禁结果（最终轮次，2026-09-03，全部退出码 0）
 
 | 命令                                    | 退出码 | 摘要                                                                                              |
