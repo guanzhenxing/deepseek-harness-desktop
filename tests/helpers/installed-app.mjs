@@ -214,7 +214,12 @@ export async function runInstalledApp(input) {
   if (exit.code !== 0) {
     throw new Error(`installed app exited with code ${exit.code} signal ${exit.signal}`)
   }
-  const failed = reports.find((report) => report.kind === 'failed')
+  // In recovery mode the poisoned boot settles through the recovery chain by
+  // design: start() rejects (reported as failed/startup) before the scripted
+  // sequence takes over. Only the sequence's own failure flag counts there.
+  const failed = reports.find(
+    (report) => report.kind === 'failed' && !(mode === 'recovery' && report.stage === 'startup'),
+  )
   if (failed !== undefined) {
     throw new Error(`installed app reported failure at ${failed.stage}`)
   }
