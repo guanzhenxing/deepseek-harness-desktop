@@ -109,6 +109,9 @@ async function directorySize(root: string): Promise<number | undefined> {
   let total = 0
   for (const entry of entries) {
     const target = path.join(root, entry.name)
+    if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
+      return undefined
+    }
     if (entry.isDirectory()) {
       const nested = await directorySize(target)
       if (nested === undefined) return undefined
@@ -184,12 +187,14 @@ export async function quarantineProjectionCache(
   const storagesRoot = path.join(input.home, 'storages')
   // Every path component of the fixed layout must be a real directory: a
   // symlinked `storages/` or `session_projcache/` must never be moved.
+  const parentIdentities: { path: string; dev: number; ino: number }[] = []
   for (const component of [storagesRoot, storagesDir]) {
     const identity = await lstat(component).catch(() => undefined)
     if (identity === undefined) return { kind: 'unchanged' }
     if (identity.isSymbolicLink() || !identity.isDirectory()) {
       return { kind: 'unknown-layout' }
     }
+    parentIdentities.push({ path: component, dev: identity.dev, ino: identity.ino })
   }
   const sourceIdentity = await lstat(sourceDir).catch(() => undefined)
   if (sourceIdentity === undefined) return { kind: 'unchanged' }
@@ -215,6 +220,18 @@ export async function quarantineProjectionCache(
     rescanned.ino !== sourceIdentity.ino
   ) {
     return { kind: 'unknown-layout' }
+  }
+  for (const expected of parentIdentities) {
+    const current = await lstat(expected.path).catch(() => undefined)
+    if (
+      current === undefined ||
+      current.isSymbolicLink() ||
+      !current.isDirectory() ||
+      current.dev !== expected.dev ||
+      current.ino !== expected.ino
+    ) {
+      return { kind: 'unknown-layout' }
+    }
   }
 
   const id = randomUUID()
@@ -262,5 +279,9 @@ export async function quarantineProjectionCache(
 }
 
 export async function cleanupQuarantineJournal(home: string): Promise<void> {
-  await rm(path.join(home, JOURNAL_RELATIVE), { force: true }).catch(() => undefined)
+  await rm(path.join(home, JOURNAL_RELATIVE), { force: true }).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+    },
+  )
 }

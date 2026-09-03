@@ -52,7 +52,10 @@ export function createRecoveryMarkerStore(userData: string, home: string) {
     if (
       record.schemaVersion === 1 &&
       typeof record.transactionId === 'string' &&
-      typeof record.attempt === 'number'
+      record.transactionId.length > 0 &&
+      typeof record.attempt === 'number' &&
+      Number.isSafeInteger(record.attempt) &&
+      record.attempt > 0
     ) {
       return { state: 'known', marker: value as StoredMarker }
     }

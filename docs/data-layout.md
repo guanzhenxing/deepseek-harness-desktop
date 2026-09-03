@@ -135,7 +135,7 @@ DSH credential、settings、sessions 和 storages 不复制到 `<userData>`。
 
 所有涉及 profile、lease、恢复或迁移的自动化测试必须使用 `<testHome>`：
 
-- 测试开始时由 `tests/helpers/isolated-home.ts` 的 `createIsolatedHomeFixture()` 在系统临时目录下创建；创建时拒绝环境 `DSH_HOME` 已设置、仓库目录、filesystem root 与真实 `~/.dsh`，清理前复核 realpath 与 dev/ino 身份；
+- 测试开始时由 `tests/helpers/isolated-home.mjs` 的 `createIsolatedHomeFixture()` 在系统临时目录下创建；创建时拒绝环境 `DSH_HOME` 已设置、仓库目录、filesystem root 与真实 `~/.dsh`，清理前复核 realpath 与 dev/ino 身份；
 - fixture 可以从脱敏数据复制，不能链接到真实 home；
 - 失败时保留路径供诊断，清理命令只能针对已记录且验证过的临时目录；
 - 打包冒烟使用独立临时 macOS userData。

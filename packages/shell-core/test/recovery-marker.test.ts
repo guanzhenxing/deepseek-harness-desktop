@@ -60,4 +60,18 @@ describe('createRecoveryMarkerStore', () => {
     await store.clear()
     expect(await readFile(file, 'utf8')).toBe(future)
   })
+
+  it('treats malformed v1 fields as foreign data', async () => {
+    const { store, file } = await storeWithFile()
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
+    const malformed = `${JSON.stringify({
+      schemaVersion: 1,
+      transactionId: '',
+      attempt: 0.5,
+    })}\n`
+    await writeFile(file, malformed, { mode: 0o600 })
+    expect(await store.read()).toEqual({ schemaVersion: 'unknown' })
+    await store.clear()
+    expect(await readFile(file, 'utf8')).toBe(malformed)
+  })
 })

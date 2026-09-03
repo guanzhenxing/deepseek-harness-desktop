@@ -220,7 +220,7 @@ deepseek-harness-desktop/
 │   └── desktop-launcher/        # Electron 自举入口、应用身份、素材与打包配置
 ├── packages/
 │   ├── desktop-plugin/          # DSH bundle 插件，Desktop 产品集成主体
-│   ├── desktop-recovery-bridge/ # M2 计划交付，也是 E3 前置的 Safe Mode surface bridge
+│   ├── desktop-recovery-bridge/ # M2 已交付，也是 E3 前置的 Safe Mode surface bridge
 │   ├── desktop-contracts/       # 按能力分入口、独立版本的可序列化窄控制契约
 │   ├── host-supervisor/         # 独立 Host 进程、握手、就绪探测、重启与有界关停
 │   ├── profile-manager/         # ProfileRef、reconcile、修订恢复与未来 generation 事务

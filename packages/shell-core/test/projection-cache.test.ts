@@ -174,6 +174,20 @@ describe('quarantineProjectionCache', () => {
     }
   })
 
+  it('refuses a symlink nested in the cache tree', async () => {
+    const dir = await home()
+    const cache = await writeCache(dir, 2048)
+    const external = await home()
+    await writeFile(path.join(external, 'outside.bin'), Buffer.alloc(2048, 2))
+    await symlink(path.join(external, 'outside.bin'), path.join(cache, 'linked.bin'), 'file')
+    const lease = await leaseOf(dir)
+    expect(await quarantineProjectionCache({ home: dir, lease, thresholdBytes: 1 })).toEqual({
+      kind: 'unknown-layout',
+    })
+    expect(await stat(cache)).toBeTruthy()
+    await lease.release()
+  })
+
   it('recognizes an interrupted rename from the journal and never moves the backup', async () => {
     const dir = await home()
     await writeCache(dir, 2048)

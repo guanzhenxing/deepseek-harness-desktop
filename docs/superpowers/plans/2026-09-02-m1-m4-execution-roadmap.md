@@ -14,16 +14,16 @@
 | M3   | 可安装、可日常操作的本机候选 `.app`/DMG    | 托盘/菜单/窗口状态、外链与认证、完整运行时打包、安装后冒烟                   | 脱离源码和开发依赖仍能启动、对话、恢复与退出，CLI 也可运行                 | [M3 计划](2026-09-02-m3-packaged-desktop.md)        |
 | M4   | 版本来源可核对，手动升级有兼容性保护       | 发行清单、依赖闭包、补丁账本、格式预检、升级/重启/拒绝降级演练               | 制品、基线与测试证据一致；不兼容版本在启动写入前拒绝打开 home              | [M4 计划](2026-09-02-m4-release-compatibility.md)   |
 
-执行顺序固定为 `M0 → M1 → M2 → M3 → M4`。每阶段基于上一阶段通过验收的提交开始；跨阶段一起开发会使数据故障、恢复故障和打包故障难以区分。表中的能力是计划目标，不代表当前已经可用。
+执行顺序固定为 `M0 → M1 → M2 → M3 → M4`。每阶段基于上一阶段通过验收的提交开始；跨阶段一起开发会使数据故障、恢复故障和打包故障难以区分。表中的 M1/M2 状态以各自验收记录为准，M3/M4 仍是计划目标。
 
-## 从当前代码得到的实施约束
+## 从 M1 基线代码得到的实施约束（历史）
 
-1. 当前 launcher 使用 `userData/m0-dsh-home`，`ProfileWriteAuthority` 只有隔离模式。M1 必须先接入 lease，再改变默认 home；不能先删掉隔离检查。
-2. 当前 `HostSupervisor` 每实例只能启动一次，`DesktopShellController.start()` 缓存首次 Promise。重试必须创建新的 Host attempt，保留外层 lease，不能重复调用旧 supervisor 的 `start()`。
-3. 当前 Electron 的 `startIdentity` 是随机通道身份。它不能替代重启后 doctor 所需的操作系统进程启动身份；M1 分开存储这两种身份。
-4. 当前 `recovery.html` 是静态“启动中”页面。M2 需要真正的阶段诊断和按钮；只保持窗口存活不算完成恢复。
-5. 当前 Host runner、Electron bootstrap 限定 `mode: 'normal'`；Safe Mode 需要贯穿 bootstrap、profile 解析与 surface purpose。Host-control 已有 `normal/safe`，不需要为 bridge 新建一套 surface 协议。
-6. 当前 profile reconcile 可能创建 `package.json`、`cordis.patch.yml`、`pnpm-workspace.yaml` 三个文件，却只返回 manifest 摘要。M2 要覆盖三个文件的存在性及逐文件摘要。
+1. M1 基线 launcher 使用 `userData/m0-dsh-home`，`ProfileWriteAuthority` 只有隔离模式。M1 必须先接入 lease，再改变默认 home；不能先删掉隔离检查。
+2. M1 基线 `HostSupervisor` 每实例只能启动一次，`DesktopShellController.start()` 缓存首次 Promise。重试必须创建新的 Host attempt，保留外层 lease，不能重复调用旧 supervisor 的 `start()`。
+3. M1 基线 Electron 的 `startIdentity` 是随机通道身份。它不能替代重启后 doctor 所需的操作系统进程启动身份；M1 分开存储这两种身份。
+4. M1 基线 `recovery.html` 是静态“启动中”页面。M2 需要真正的阶段诊断和按钮；只保持窗口存活不算完成恢复。
+5. M1 基线 Host runner、Electron bootstrap 限定 `mode: 'normal'`；Safe Mode 需要贯穿 bootstrap、profile 解析与 surface purpose。Host-control 已有 `normal/safe`，不需要为 bridge 新建一套 surface 协议。
+6. M1 基线 profile reconcile 可能创建 `package.json`、`cordis.patch.yml`、`pnpm-workspace.yaml` 三个文件，却只返回 manifest 摘要。M2 要覆盖三个文件的存在性及逐文件摘要。
 7. 当前 launcher 关窗会退出，没有完整托盘/菜单/窗口状态行为。M3 把这些作为实现任务，不能只增加 smoke 名称。
 8. 当前兼容性检查只对照少量 package 字段。M4 才实现完整闭包、持久化格式与制品校验。
 

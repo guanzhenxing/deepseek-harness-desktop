@@ -75,11 +75,14 @@ const JOURNAL_STATES: readonly RevisionTransactionState[] = [
   'rolled-back',
   'conflict',
 ]
+const TRANSACTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+const SHA256 = /^[0-9a-f]{64}$/iu
 
 export async function readJournal(
   home: string,
   id: string,
 ): Promise<JournalRecord | 'corrupt' | 'missing'> {
+  if (!TRANSACTION_ID.test(id)) return 'corrupt'
   const file = journalPath(home, id)
   try {
     const identity = await lstat(file)
@@ -133,20 +136,27 @@ export async function readJournal(
     return 'corrupt'
   }
   if (!Array.isArray(record.writes)) return 'corrupt'
+  const writePaths = new Set<string>()
   for (const write of record.writes) {
     if (typeof write !== 'object' || write === null) return 'corrupt'
     const entry = write as Record<string, unknown>
+    const before = entry.before as Record<string, unknown>
     if (
       typeof entry.path !== 'string' ||
       !['package.json', 'cordis.patch.yml', 'pnpm-workspace.yaml'].includes(entry.path) ||
       typeof entry.candidateSha256 !== 'string' ||
+      !SHA256.test(entry.candidateSha256) ||
       typeof entry.applied !== 'boolean' ||
       typeof entry.before !== 'object' ||
       entry.before === null ||
-      typeof (entry.before as Record<string, unknown>).exists !== 'boolean'
+      typeof before.exists !== 'boolean' ||
+      (before.exists && (typeof before.sha256 !== 'string' || !SHA256.test(before.sha256))) ||
+      (!before.exists && before.sha256 !== null)
     ) {
       return 'corrupt'
     }
+    if (writePaths.has(entry.path)) return 'corrupt'
+    writePaths.add(entry.path)
   }
   return record as unknown as JournalRecord
 }
@@ -181,18 +191,23 @@ async function writeCandidate(filename: string, bytes: Uint8Array): Promise<void
   await writeAtomicDurable(filename, bytes)
 }
 
-async function currentSha(
-  filename: string,
-): Promise<{ sha: string | null; inode: { dev: number; ino: number } | null }> {
+async function currentSha(filename: string): Promise<{
+  kind: 'missing' | 'file' | 'other'
+  sha: string | null
+  inode: { dev: number; ino: number } | null
+}> {
   try {
     const identity = await lstat(filename)
-    if (!identity.isFile()) return { sha: null, inode: null }
+    if (!identity.isFile()) return { kind: 'other', sha: null, inode: null }
     return {
+      kind: 'file',
       sha: sha256Of(new Uint8Array(await readFile(filename))),
       inode: { dev: identity.dev, ino: identity.ino },
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { sha: null, inode: null }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { kind: 'missing', sha: null, inode: null }
+    }
     throw error
   }
 }
@@ -262,8 +277,9 @@ export async function applyProfileTransaction(
   await writeJournalDurable(home, record)
   await lease.assertHeld()
 
-  await mkdirProfileDirectory(plan.ref)
+  await ensureRealProfileDirectory(plan.ref)
   for (const write of plan.writes) {
+    await ensureRealProfileDirectory(plan.ref)
     const filename = path.join(plan.ref.dir, write.path)
     const { sha } = await currentSha(filename)
     if (sha === write.candidateSha256) {
@@ -300,6 +316,16 @@ export async function applyProfileTransaction(
 
 async function mkdirProfileDirectory(ref: ProfileRef): Promise<void> {
   await mkdir(ref.dir, { recursive: true, mode: 0o700 })
+}
+
+async function ensureRealProfileDirectory(ref: ProfileRef): Promise<void> {
+  const profiles = path.join(ref.home, 'profiles')
+  const profilesExisted = await assertRealDirectory(profiles, 'DSH profiles directory')
+  if (!profilesExisted) await mkdir(profiles, { recursive: true, mode: 0o700 })
+  await assertRealDirectory(profiles, 'DSH profiles directory')
+  const profileExisted = await assertRealDirectory(ref.dir, 'profile directory')
+  if (!profileExisted) await mkdirProfileDirectory(ref)
+  await assertRealDirectory(ref.dir, 'profile directory')
 }
 
 export async function commitProfileTransaction(id: string, lease: HomeLease): Promise<void> {
@@ -372,8 +398,8 @@ export async function rollbackProfileTransaction(
     const filename = path.join(ref.dir, write.path)
     const current = await currentSha(filename)
     const allowed: (string | null)[] = [write.candidateSha256, write.before.sha256]
-    if (write.before.exists === false) allowed.push(null)
-    if (!allowed.includes(current.sha)) {
+    if (write.before.exists === false && current.kind === 'missing') allowed.push(null)
+    if (current.kind === 'other' || !allowed.includes(current.sha)) {
       await writeJournalDurable(lease.home, { ...journal, state: 'conflict' })
       return 'conflict'
     }
@@ -394,7 +420,11 @@ export async function rollbackProfileTransaction(
     }
     const sha = current.sha
     if (write.before.exists === false) {
-      if (sha === null) continue
+      if (current.kind === 'missing') continue
+      if (current.kind !== 'file') {
+        await writeJournalDurable(lease.home, { ...journal, state: 'conflict' })
+        return 'conflict'
+      }
       if (sha === write.candidateSha256) {
         await unlink(filename)
         await syncDirectory(path.dirname(filename))

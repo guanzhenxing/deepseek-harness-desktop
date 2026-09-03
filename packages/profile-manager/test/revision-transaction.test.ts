@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -155,6 +155,22 @@ describe('revision transactions', () => {
     for (const filename of ['package.json', 'cordis.patch.yml', 'pnpm-workspace.yaml']) {
       await expect(stat(path.join(ref.dir, filename))).rejects.toMatchObject({ code: 'ENOENT' })
     }
+    await lease.release()
+  })
+
+  it('treats a created-path symlink as drift instead of absence', async () => {
+    const { ref, lease } = await leasedHome()
+    const plan = await planDesktopReconcile(ref, lease)
+    const tx = await applyProfileTransaction(plan, lease)
+    const outside = path.join(ref.home, '..', 'profile-drift-target')
+    await mkdir(outside, { recursive: true, mode: 0o700 })
+    await unlink(path.join(ref.dir, 'package.json'))
+    await symlink(outside, path.join(ref.dir, 'package.json'), 'file')
+    await expect(rollbackProfileTransaction(tx.id, lease)).resolves.toBe('conflict')
+    const journal = await readJournal(ref.home, tx.id)
+    expect(journal === 'corrupt' || journal === 'missing' ? journal : journal.state).toBe(
+      'conflict',
+    )
     await lease.release()
   })
 
@@ -341,6 +357,21 @@ describe('revision transactions', () => {
     // Nothing escaped: the outside directory stays empty.
     const entries = await (await import('node:fs/promises')).readdir(outside)
     expect(entries).toHaveLength(0)
+    await lease.release()
+  })
+
+  it('refuses a profile parent replaced by a symlink before apply', async () => {
+    const { ref, lease } = await leasedHome()
+    const plan = await planDesktopReconcile(ref, lease)
+    const outside = path.join(ref.home, '..', 'profiles-outside')
+    await mkdir(outside, { recursive: true, mode: 0o700 })
+    await symlink(outside, path.join(ref.home, 'profiles'), 'dir')
+    await expect(applyProfileTransaction(plan, lease)).rejects.toThrow(/symlink/u)
+    await expect(stat(path.join(outside, 'desktop', 'package.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await unlink(path.join(ref.home, 'profiles'))
+    await rm(outside, { recursive: true, force: true })
     await lease.release()
   })
 
