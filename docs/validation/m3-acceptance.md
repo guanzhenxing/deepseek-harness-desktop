@@ -83,6 +83,6 @@
 
 - darwin-x64 未构建未运行；CI 的 macOS job（含 macos-package）未在 GitHub Actions 实际执行。
 - 已知限制（二轮审查记录，不阻塞验收）：`verify-runtime-tree` 的原生插件平台过滤是 fail-open（路径含异平台 token 字样时跳过而非报错，现实误杀概率低）；`smoke:package` 在 `release/artifacts.json` 缺失时只报 ENOENT 未提示先跑 `package:dmg`；`package-smoke.json` 未记录各场景耗时（只有 startedAt）；pnpm 11 对带构建脚本的第三方插件默认警告并跳过构建（不阻塞安装）。
-- Safe Mode 的制品级链为安装闭包 controller 级 + 桩 boot；Electron 会话级 Safe Mode 由 dev `smoke:safe-mode` 覆盖（源码级）。
+- profile-recovery 与 safe-mode 的制品级场景均为安装闭包 controller 级形态（与 M2 dev smoke 同构：真实 controller/profile-manager/home-lease/事务 journal 跑在安装制品的依赖闭包上，Host boot 为受控桩）；Electron 会话级（真实 utilityProcess Host 的失败注入）由 dev `smoke:profile-recovery`/`smoke:safe-mode` 与制品级 `installed-host-crash` 场景共同覆盖。
 - 升级/降级演练、marker writer、完整格式预检、updater、公证与公开发布属 M4，本记录不宣称。
 - 本机自用候选：DMG 未做 Developer ID 签名/公证，首启右键打开或 `xattr -d com.apple.quarantine`（如经传输产生隔离属性）由用户自行处理——测试链路未修改任何 Gatekeeper 设置。
