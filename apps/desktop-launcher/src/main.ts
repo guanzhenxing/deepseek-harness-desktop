@@ -68,6 +68,7 @@ import {
   runLifecycleSequence,
   runNavigationSequence,
   runRecoverySequence,
+  type SmokeSequenceContext,
 } from './smoke-sequence.js'
 import { createWindowOpenGuard, DESKTOP_WEB_PREFERENCES } from './window-policy.js'
 
@@ -370,6 +371,50 @@ function isQuitting(): boolean {
   return shutdownStarted || shutdownComplete
 }
 
+/** Build the scripted-sequence context from the live session state. */
+function sequenceContext(): SmokeSequenceContext {
+  const window = windowPort?.window
+  if (window === undefined) throw new Error('the scripted sequence needs a live window')
+  return {
+    window,
+    showMain: () => nativeUi?.showMain(),
+    simulateDockActivate: () => app.emit('activate', { preventDefault() {} } as never, false),
+    waitForRecoveryView: () => {
+      if (recoveryViewShown === undefined) {
+        throw new Error('startup failed before the recovery signals existed')
+      }
+      return recoveryViewShown
+    },
+    waitForHealthy: () => {
+      if (healthySession === undefined) {
+        throw new Error('startup failed before the recovery signals existed')
+      }
+      return healthySession
+    },
+    enterSafeMode: () => shell?.act('safe-mode') ?? Promise.resolve(),
+    report: (payload: Record<string, unknown>) => smokeReport(payload),
+    quit: () => app.quit(),
+  }
+}
+
+// Hoisted one-shot signals: startApplication creates them eagerly; the
+// recovery sequence may start from the catch path after the recovery view is
+// already up, so the promises must exist independently of who awaits first.
+let recoveryViewShown: Promise<void> | undefined
+let healthySession: Promise<void> | undefined
+let resolveRecoveryViewSignal: (() => void) | undefined
+let resolveHealthySignal: (() => void) | undefined
+
+async function runScriptedSequence(mode: string): Promise<void> {
+  if (mode === 'navigation') {
+    await runNavigationSequence(sequenceContext())
+    return
+  }
+  if (mode === 'lifecycle') {
+    await runLifecycleSequence(sequenceContext())
+  }
+}
+
 async function startApplication(): Promise<void> {
   // Resolve the single shared home from the entry environment before any
   // child environment is derived from it.
@@ -409,13 +454,11 @@ async function startApplication(): Promise<void> {
   nativeUi.initialize('starting')
   let readyHost: HostReady | undefined
   let lastFatal: HostFatalDetail | undefined
-  let resolveRecoveryShown: (() => void) | undefined
-  const recoveryShown = new Promise<void>((resolve) => {
-    resolveRecoveryShown = resolve
+  recoveryViewShown = new Promise<void>((resolve) => {
+    resolveRecoveryViewSignal = resolve
   })
-  let resolveHealthyOnce: (() => void) | undefined
-  const healthyShown = new Promise<void>((resolve) => {
-    resolveHealthyOnce = resolve
+  healthySession = new Promise<void>((resolve) => {
+    resolveHealthySignal = resolve
   })
   // The recovery window is created lazily on first failure: an eagerly
   // created, never-loaded hidden window stalls Electron's quit sequence.
@@ -562,7 +605,7 @@ async function startApplication(): Promise<void> {
     },
     onHealthy: async () => {
       nativeUi?.setStatus('running')
-      resolveHealthyOnce?.()
+      resolveHealthySignal?.()
       // A healthy session spends the relaunch marker and retires the
       // launcher-owned recovery window. Runs after the state flips, so a
       // crash inside it is still a post-ready crash. The two steps are
@@ -584,7 +627,7 @@ async function startApplication(): Promise<void> {
         nativeUi?.setStatus('recovery')
         smokeReport({ kind: 'recovery-view', stage: view.failure.stage, code: view.failure.code })
         await ensureRecoveryWindow().showRecoveryView(view)
-        resolveRecoveryShown?.()
+        resolveRecoveryViewSignal?.()
       },
       destroySurface: () => port.destroySurface(),
     },
@@ -619,21 +662,7 @@ async function startApplication(): Promise<void> {
       process.kill(readyHost.pid, 'SIGKILL')
     } else if (isScriptedSmokeMode(smokeMode)) {
       // Scripted modes run their probe sequence and then quit themselves.
-      const context = {
-        window: port.window,
-        showMain: () => nativeUi?.showMain(),
-        simulateDockActivate: () => app.emit('activate', { preventDefault() {} } as never, false),
-        waitForRecoveryView: () => recoveryShown,
-        waitForHealthy: () => healthyShown,
-        enterSafeMode: () => shell?.act('safe-mode') ?? Promise.resolve(),
-        report: (payload: Record<string, unknown>) => smokeReport(payload),
-        quit: () => app.quit(),
-      }
-      await (smokeMode === 'navigation'
-        ? runNavigationSequence(context)
-        : smokeMode === 'recovery'
-          ? runRecoverySequence(context)
-          : runLifecycleSequence(context))
+      await runScriptedSequence(smokeMode)
     } else if (!driverOwnedModes.includes(smokeMode)) {
       app.quit()
     }
@@ -691,6 +720,22 @@ else {
       if (error instanceof LeaseError) reportLeaseFailure(error)
       else console.error('startup failed:', error instanceof Error ? error.message : error)
       smokeReport({ kind: 'failed', stage: 'startup' })
+      if (smokeMode === 'recovery') {
+        // The recovery chain already surfaced its view (start() rejects by
+        // design once the session settles in recovery); the scripted
+        // sequence takes over from here instead of tearing the view down.
+        void runRecoverySequence(sequenceContext()).catch((sequenceError: unknown) => {
+          console.error(
+            'recovery sequence failed:',
+            sequenceError instanceof Error ? sequenceError.message : sequenceError,
+          )
+          smokeReport({ kind: 'failed', stage: 'recovery-sequence' })
+          shutdownStarted = true
+          recoveryWindow?.destroy()
+          app.exit(1)
+        })
+        return
+      }
       if (smokeMode !== undefined) {
         shutdownStarted = true
         recoveryWindow?.destroy()

@@ -268,11 +268,7 @@ function lifecycleScenario(install) {
           )
           // The full quit must release the home lease (same bar as the dev
           // lifecycle smoke and the conversation scenario).
-          const lockGone = await access(path.join(fixture.home, 'run', 'host.lock')).then(
-            () => false,
-            (error) => error.code === 'ENOENT',
-          )
-          if (!lockGone) throw new Error('home lease survived the installed lifecycle quit')
+          await waitForLeaseGone(fixture.home)
         },
       })
     } finally {
@@ -373,14 +369,7 @@ function conversationScenario(install) {
           await waitForTurns(created.file, 1)
         },
       })
-      const leaseGone = await readFile(
-        path.join(fixture.home, 'run', 'host.lock', 'owner.json'),
-        'utf8',
-      ).then(
-        () => false,
-        (error) => error.code === 'ENOENT',
-      )
-      if (!leaseGone) throw new Error('lease survived the installed app exit')
+      await waitForLeaseGone(fixture.home)
       await runInstalledApp({
         executable: install.executable,
         mode: 'conversation',
@@ -569,11 +558,7 @@ function recoveryScenario(install) {
       )
       if (patchBytes !== poisonPatch) throw new Error('the poisoned user patch was modified')
       // The lease must be gone after the scripted quit.
-      const lockGone = await access(path.join(fixture.home, 'run', 'host.lock')).then(
-        () => false,
-        (error) => error.code === 'ENOENT',
-      )
-      if (!lockGone) throw new Error('home lease survived the recovery quit')
+      await waitForLeaseGone(fixture.home)
     } finally {
       await fixture.dispose()
     }
@@ -655,6 +640,29 @@ function cliPluginScenario(install) {
     } finally {
       await fixture.dispose()
     }
+  }
+}
+
+/**
+ * The app exits 0 only after its quit chain released the lease, but the
+ * lock directory removal lands on disk a moment later; wait briefly and
+ * dump the owner if it truly persists.
+ */
+async function waitForLeaseGone(home, timeoutMs = 10_000) {
+  const lock = path.join(home, 'run', 'host.lock')
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const gone = await access(lock)
+      .then(() => false)
+      .catch((error) => error.code === 'ENOENT')
+    if (gone) return true
+    if (Date.now() > deadline) {
+      const owner = await readFile(path.join(lock, 'owner.json'), 'utf8').catch(
+        () => '<unreadable>',
+      )
+      throw new Error(`home lease survived the app exit; owner: ${owner.slice(0, 300)}`)
+    }
+    await new Promise((resolve) => sleepTimer(resolve, 250))
   }
 }
 
