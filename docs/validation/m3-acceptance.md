@@ -16,12 +16,12 @@
 
 ## 2. 制品与架构
 
-| 项         | 值                                                                                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 候选 DMG   | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64）                                                                                                   |
-| releaseId  | `m3-0.0.0-darwin-arm64-a903288`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 经 SHA 关联；制品构建时的源码快照为 `a903288`，即含 codex 复审全部修复的提交） |
-| DMG SHA256 | `a6c4b101808799702278dab84ceacaa670b9064f1e65dafddcb104b3f0888812`（约 356 MB；外置记录不自嵌，避免自引用哈希）                                                           |
-| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵                                                                                                                                |
+| 项         | 值                                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 候选 DMG   | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64）                                                                                         |
+| releaseId  | `m3-0.0.0-darwin-arm64-0997bca`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 经 SHA 关联；源码快照 `0997bca` 即分支 HEAD——CI 轮修复后的最终候选） |
+| DMG SHA256 | `07341f182e32f5534178bd93ba852af1daa12b81861cee13051a2429552894e6`（约 356 MB；外置记录不自嵌，避免自引用哈希）                                                 |
+| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵                                                                                                                      |
 
 `.app` 布局（全部来自 staging 闭包，经 `hdiutil attach -readonly -nobrowse` → `ditto` 安装到临时目录验证）：
 
@@ -54,7 +54,7 @@
 
 ## 5.5 自查轮（交付前对抗审查）
 
-按对抗清单（I/O 失败、corrupt-not-unknown、TS-vs-runtime、进程重启、UI copy vs state、证据真实性、攻击最新修复）自查后修复并随源码重建重验（自查修复已并入 codex 复审提交链；最终候选源码快照为 `a903288`）：
+按对抗清单（I/O 失败、corrupt-not-unknown、TS-vs-runtime、进程重启、UI copy vs state、证据真实性、攻击最新修复）自查后修复并随源码重建重验（自查修复已并入 codex 复审提交链；最终候选以 §5.9 的 CI 轮修复为准（`0997bca`））：
 
 1. `resolvePackagedCliRuntime` 对内嵌清单损坏给出"reinstall the application"诊断而非裸堆栈（新增 3 条单测覆盖损坏/缺失/缺字段），并把 staging 根 realpath 规范化（消除 /var 与 /private/var 混用导致的 argv needle 不一致）；
 2. `writeWindowState` rename 后补目录 fsync（对齐 M2 durable-fs 纪律）；
@@ -85,6 +85,16 @@
 - **Standards**：修复后有条件通过——架构/ADR/协议/文档链一致，data-layout 已同步；条件项为 §5 第 1 条的真实 home 触碰失误（现场已核查、防再发措施就位，无法追溯消除）。
 - **Spec**：通过——M3 计划逐 Task 核对无缺漏；CLI 无绕过面；制品级 15 场景含真实 Electron 恢复/Safe Mode 链；未完成项（CI 实测、人工观察、x64）均如实记录且不宣称。
 - **安全**：通过（本机自用范围内）——admission fail-closed、外链仅 window-open 受控转发、popup 一律拒绝、fuses 硬化（runAsNode/NODE_OPTIONS/inspect 关闭、onlyLoadAppFromAsar）、IPC 窄通道维持 M2 语义；无 Developer ID/notarization，公开发行需另立 ADR（未做，不宣称）。
+
+## 5.9 CI 首跑轮（2026-09-04，三项发现全部闭合）
+
+GitHub Actions 首次实际运行暴露了三个本地热环境掩盖的缺陷，全部修复：
+
+1. **lockfile 被 deploy 污染**：`pnpm deploy`（配合 `injectWorkspacePackages`）把 deploy 闭包的 workspace 依赖以 `file:` 注入形式写入根 lockfile；任何干净 checkout 的 install 会把这些包解析为 store 里的惰性拷贝（无构建产物），tsc/vitest 全线 TS2307。修复：注入只经 stage-runtime 在 deploy 命令期间临时开启（`withDeployInjection`），staging 后恢复 workspace 文件、lockfile 并重链开发树；lockfile 已按 fc48bdc 基线机械净化（`file:` → `link:`）后重建。
+2. **bridge 依赖破坏 dev 解析面**（fc48bdc 引入）：`desktop-recovery-bridge` 声明为 host-supervisor 依赖后，pnpm 的 `.pnpm/node_modules` hoist 层让它在整个开发树可解析——safe-mode smoke 的"bare home bundle 拒绝"证明失效（CI 首跑发现；本地因 hoist 残留链接同样失效）。修复：依赖声明移除，bridge 由 stage-runtime 显式物化进 runtime-host 闭包（lib+manifest+patch），verify-runtime-tree 继续把它列为必需文件。
+3. **lockfile 基线重建引起 peer 漂移**（中间态）：从 d4068ad 重建使浮动 peer（cordis-plugin-loader 1.0.3→1.0.7）重解析；已改为 fc48bdc 完整 lockfile 机械净化，peer 恢复原解析。
+
+修复后本地全链重验：`check`、dev `smoke:safe-mode/profile-recovery/shared-home`、`package:dir/dmg`、`verify:artifacts`、`smoke:package`（15/15）全部退出码 0；CI 以本节修复后的源码（`0997bca`）重跑。
 
 ## 6. 门禁结果（最终轮次，2026-09-03，全部退出码 0）
 
