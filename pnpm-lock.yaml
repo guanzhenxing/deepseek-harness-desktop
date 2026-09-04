@@ -3,7 +3,6 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
-  injectWorkspacePackages: true
 
 importers:
 
@@ -11958,4 +11957,5 @@ snapshots:
       zod: 4.5.4
 
   zod@4.5.4: {}
+
 
