@@ -33,7 +33,6 @@
     "@deepseek-ai/dsh-util-workspace-path": "0.1.2-alpha.3",
     "@deepseek-ai/dsh-web-app": "0.1.2-alpha.3",
     "@dsh-desktop/desktop-contracts": "workspace:*",
-    "@dsh-desktop/desktop-recovery-bridge": "workspace:*",
     "@dsh-desktop/home-lease": "workspace:*"
   },
   "devDependencies": {
