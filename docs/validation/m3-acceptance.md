@@ -1,6 +1,6 @@
 # M3 验收记录：打包可安装的 macOS Desktop 候选包
 
-- **状态：实现通过，验收有条件通过**（全部门禁与 15/15 制品级场景通过；条件项见 §5 第 1 条真实 home 触碰失误与 §7 未闭环项——CI 实测与人工系统外链。证据：`release/package-smoke.json`、`release/artifacts.json`、`release/SHA256SUMS`）
+- **状态：实现通过，验收有条件通过**（全部门禁与 15/15 制品级场景通过；条件项为 §5 第 1 条真实 home 触碰失误（不可追溯消除）与 CI 的 macOS job 实测（待 push 触发）；人工系统外链检查已按 §6 闭环。证据：`release/package-smoke.json`、`release/artifacts.json`、`release/SHA256SUMS`）
 - 日期：2026-09-03
 - 基线：`main` @ `32e9c3e`（M2 验收合并后）
 - 结果分支：`codex/m3-packaged-desktop`
@@ -62,7 +62,7 @@
 4. `cli-version` 场景从"输出非空"加强为"输出含 compatibility.json 钉住的 DSH 版本号"；
 5. `verify-artifacts` 的 hdiutil detach 失败改为显式告警（不再静默留挂载）。
 
-修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（15/15）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（276+5 单测）。
+修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（15/15）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（276 个 Vitest + 14 个 Node 测试）。
 
 ## 5.7 codex 复审轮（9 项发现，全部处置）
 
@@ -76,7 +76,7 @@
 | 6   | P1   | 非用户触发的主 frame/重定向可打开系统浏览器（`location.assign` 可触发） | 主 frame 导航（含重定向）一律只拦不开；external 仅经 window-open（用户手势 target=_blank）；smoke 断言改为"脚本导航不得进入 external 路径"                                                                                                          |
 | 7   | P2   | 固定 minWidth 900 与"屏幕不足限制到 workArea"矛盾                       | `minWindowSizeFor` 纯函数 + 单测：恢复态小于标准最小值时 BrowserWindow 最小值随之放松                                                                                                                                                               |
 | 8   | P2   | 内嵌清单缺闭包摘要                                                      | staging 写入 `closureDigest`（watched singleton 精确版本 + 虚拟 store 条目 SHA-256），供 M4 预检比对                                                                                                                                                |
-| 9   | P2   | 人工系统外链未做                                                        | 事实项，保留为人工使用周期待办（见 §7）                                                                                                                                                                                                             |
+| 9   | P2   | 人工系统外链未做                                                        | 已闭环：受控真实 `shell.openExternal` 检查通过（§6，`OPEN_EXTERNAL_RESOLVED`、退出码 0）；浏览器窗口可见性由维护者对标记 URL 顺手确认                                                                                                               |
 
 修复后按门禁顺序对最终制品重建重验（见 §6）。外链语义变化已在协议外链行为处同步：普通无 target 外链点击会被静默拦截（不做浏览器转发），受控转发仅 target=_blank 链接——记录该取舍。
 
@@ -90,7 +90,7 @@
 
 | 命令                                    | 退出码 | 摘要                                                                                              |
 | --------------------------------------- | ------ | ------------------------------------------------------------------------------------------------- |
-| `corepack pnpm@11.7.0 check`            | 0      | 格式/lint/边界/类型/单测 276（29 文件）+ verify-runtime-tree 单测 5 + docs 校验（33 文件）        |
+| `corepack pnpm@11.7.0 check`            | 0      | 格式/lint/边界/类型/单测 276 Vitest（29 文件）+ 14 个 Node 测试 + docs 校验（33 文件）            |
 | `corepack pnpm@11.7.0 test:integration` | 0      | 33 集成（8 文件）                                                                                 |
 | `corepack pnpm@11.7.0 test:shared-home` | 0      | 4 场景                                                                                            |
 | `corepack pnpm@11.7.0 package:dir`      | 0      | icons→staging→runtime-tree 校验（4 host + 5 cli 原生插件 ABI）→未打包 .app（ad-hoc 签名校验通过） |
