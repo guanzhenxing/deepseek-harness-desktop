@@ -42,9 +42,14 @@ const downloads = path.join(root, 'release', 'downloads')
 const requireFromRoot = createRequire(path.join(root, 'package.json'))
 const rootManifest = requireFromRoot('./package.json')
 const launcherManifest = requireFromRoot('./apps/desktop-launcher/package.json')
+let product
 // Node >= 22.12 require(esm): read the compiled product facts without
-// duplicating PRODUCT.appId/name in this script.
-const product = requireFromRoot('./packages/product-config/lib/index.js').PRODUCT
+// duplicating PRODUCT.appId/name. Deferred to main(): this module top level
+// runs before the workspace build, and product-config/lib only exists after
+// it (a clean checkout — like CI — would fail at import time otherwise).
+function loadProduct() {
+  product = requireFromRoot('./packages/product-config/lib/index.js').PRODUCT
+}
 
 const compatibilityDoc = JSON.parse(
   await readFile(path.join(root, 'docs', 'compatibility.json'), 'utf8'),
@@ -354,6 +359,7 @@ async function main() {
   console.log('stage-runtime: building workspace')
   run('corepack', [`pnpm@${PNPM_VERSION}`, 'run', 'build'], { cwd: root })
   run('corepack', [`pnpm@${PNPM_VERSION}`, 'run', 'build:native'], { cwd: root })
+  loadProduct()
 
   await mkdir(staging, { recursive: true })
   await rm(staging, { recursive: true, force: true })
