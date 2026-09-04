@@ -83,6 +83,7 @@ module.exports = {
       copyPreserving(path.join(staging, entry), resources)
     }
     mkdirSync(path.join(resources, 'icons'), { recursive: true })
+    copyPreserving(path.join(icons, 'dock-icon.png'), resources)
     copyPreserving(path.join(icons, 'trayTemplate.png'), path.join(resources, 'icons'))
     copyPreserving(path.join(icons, 'trayTemplate@2x.png'), path.join(resources, 'icons'))
   },

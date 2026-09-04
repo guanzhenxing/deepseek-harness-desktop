@@ -364,7 +364,7 @@ async function stageRecoveryAssets() {
 
 async function assertIcons() {
   const icons = path.join(root, 'release', 'icons')
-  for (const name of ['icon.icns', 'trayTemplate.png', 'trayTemplate@2x.png']) {
+  for (const name of ['icon.icns', 'dock-icon.png', 'trayTemplate.png', 'trayTemplate@2x.png']) {
     const identity = await stat(path.join(icons, name)).catch(() => undefined)
     if (identity === undefined) {
       throw new Error(

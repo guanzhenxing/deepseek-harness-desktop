@@ -1,5 +1,5 @@
 import os from 'node:os'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -85,6 +85,18 @@ const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_D
 if (userDataOverride !== undefined) app.setPath('userData', path.resolve(userDataOverride))
 
 app.setName(PRODUCT.name)
+// Set the Dock icon as a PNG via nativeImage: Dock/LaunchServices icon caching
+// for ad-hoc rebuilds is unreliable, and nativeImage guarantees display.
+if (process.platform === 'darwin') {
+  void app.whenReady().then(() => {
+    const pngPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'dock-icon.png')
+      : path.join(import.meta.dirname, '..', '..', '..', 'release', 'icons', 'dock-icon.png')
+    if (existsSync(pngPath) && app.dock) {
+      app.dock.setIcon(pngPath)
+    }
+  })
+}
 app.setAboutPanelOptions(
   buildAboutPanelOptions({
     productName: PRODUCT.name,

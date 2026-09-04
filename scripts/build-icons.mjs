@@ -6,6 +6,7 @@
 //
 // Outputs (under release/icons/, gitignored and reproducible):
 //   icon.icns            — application icon
+//   dock-icon.png        — explicit Dock image used to avoid stale icon caches
 //   trayTemplate.png     — 16x16 tray template image
 //   trayTemplate@2x.png  — 32x32 tray template image
 import { spawnSync } from 'node:child_process'
@@ -78,6 +79,7 @@ async function main() {
     }
     const icns = path.join(outputDirectory, 'icon.icns')
     run('iconutil', ['-c', 'icns', iconset, '-o', icns], 'iconutil icns')
+    resize(master, 512, 512, path.join(outputDirectory, 'dock-icon.png'))
 
     // Tray template: SVG → 32px master → 16px @1x and 32px @2x (black +
     // alpha template images; Electron picks the template treatment from the
