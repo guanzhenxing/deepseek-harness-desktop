@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Generate the packaged-app icon set from the original SVG sources in
-// build/assets. Rasterization uses macOS Quick Look (qlmanage), resizing uses
-// sips, and the ICNS is assembled by iconutil — no third-party dependencies.
+// build/assets. Rasterization and resizing use macOS sips, and the ICNS is
+// assembled by iconutil — no third-party dependencies.
 // The exact commands are recorded in build/assets/README.md.
 //
 // Outputs (under release/icons/, gitignored and reproducible):
@@ -10,7 +10,7 @@
 //   trayTemplate.png     — 16x16 tray template image
 //   trayTemplate@2x.png  — 32x32 tray template image
 import { spawnSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,16 +28,12 @@ function run(command, args, label) {
 }
 
 async function renderSvg(source, size, workDirectory) {
-  run(
-    'qlmanage',
-    ['-t', '-s', String(size), '-o', workDirectory, source],
-    `qlmanage ${path.basename(source)}`,
-  )
   const produced = path.join(workDirectory, `${path.basename(source)}.png`)
-  const entries = await readdir(workDirectory)
-  if (!entries.includes(`${path.basename(source)}.png`)) {
-    throw new Error(`qlmanage did not produce a thumbnail for ${source}: ${entries.join(', ')}`)
-  }
+  run(
+    'sips',
+    ['-s', 'format', 'png', '-z', String(size), String(size), source, '--out', produced],
+    `sips ${path.basename(source)}`,
+  )
   return produced
 }
 

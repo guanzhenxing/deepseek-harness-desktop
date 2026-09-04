@@ -553,6 +553,9 @@ async function startApplication(): Promise<void> {
     },
     readRecoveryMarker: () => marker.read(),
     writeRecoveryMarker: (entry) => marker.write(entry),
+    // Dock and tray Quit must complete promptly; the Host is force-terminated
+    // after a short grace period and the lease is released only afterward.
+    shutdownDeadlineMs: 1_000,
     createAttempt: (lease, mode) => {
       const attemptSupervisor = new HostSupervisor({
         factory: createElectronHostProcessFactory(hostEntryPath),
