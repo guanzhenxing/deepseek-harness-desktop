@@ -24,14 +24,6 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Diagnose workspace links
-        run: |
-          ls -la node_modules/@dsh-desktop/ || true
-          ls -la packages/shell-core/node_modules/@dsh-desktop/ || true
-          ls packages/host-supervisor/ || true
-          head -30 packages/host-supervisor/package.json
-      - name: Build workspace
-        run: pnpm build
       - name: Run repository checks
         run: pnpm check
 
@@ -114,4 +106,5 @@ jobs:
             release/SHA256SUMS
             release/package-smoke.json
           retention-days: 14
+
 

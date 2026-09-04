@@ -16,6 +16,7 @@
 // official checksums), the native helper, and the recovery assets. Nothing
 // resolves through the repository, the pnpm store, or system Node/pnpm.
 import { Buffer } from 'node:buffer'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -172,9 +173,32 @@ async function stagePnpm() {
   }
 }
 
+// `injectWorkspacePackages` must NOT live in the workspace file permanently:
+// a regular install under that flag rewrites every workspace dependency as a
+// file: injection (an inert store copy without build output), which breaks
+// tsc/vitest/eslint on any clean checkout. stage-runtime enables it only for
+// the deploy commands and restores the workspace file afterwards; the tail of
+// main() restores the lockfile and re-links the developer tree.
+const WORKSPACE_FILE = path.join(root, 'pnpm-workspace.yaml')
+const INJECT_LINE = 'injectWorkspacePackages: true\n'
+
+function withDeployInjection(mutate) {
+  const original = readFileSync(WORKSPACE_FILE, 'utf8')
+  if (!original.includes('injectWorkspacePackages')) {
+    writeFileSync(WORKSPACE_FILE, original + INJECT_LINE)
+  }
+  try {
+    mutate()
+  } finally {
+    writeFileSync(WORKSPACE_FILE, original)
+  }
+}
+
 async function deployPackage(filter, target) {
   await rm(target, { recursive: true, force: true })
-  run('corepack', [`pnpm@${PNPM_VERSION}`, '--filter', filter, '--prod', 'deploy', target])
+  withDeployInjection(() => {
+    run('corepack', [`pnpm@${PNPM_VERSION}`, '--filter', filter, '--prod', 'deploy', target])
+  })
 }
 
 async function pruneDevelopmentArtifacts(target) {
@@ -391,6 +415,19 @@ async function main() {
 
   const entries = await readdir(staging)
   console.log(`stage-runtime: staged ${entries.join(', ')} (releaseId ${releaseId})`)
+
+  // `pnpm deploy` rewrites the root lockfile with file: injections for the
+  // deployed closure; a clean checkout would then resolve those packages to
+  // inert store copies (no build output) and break tsc/vitest. Restore the
+  // committed lockfile and re-link the workspace so the developer tree stays
+  // clean after every staging run.
+  if (process.env.DSH_STAGE_SKIP_RESTORE !== '1') {
+    const restore = spawnSync('git', ['checkout', '--', 'pnpm-lock.yaml'], { cwd: root })
+    if (restore.status === 0) {
+      console.log('stage-runtime: restored pnpm-lock.yaml after deploy')
+      run('corepack', [`pnpm@${PNPM_VERSION}`, 'install', '--frozen-lockfile'])
+    }
+  }
 }
 
 await main()
