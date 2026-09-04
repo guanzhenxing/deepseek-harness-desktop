@@ -102,7 +102,11 @@ try {
               bundles: [
                 '@deepseek-ai/dsh-base',
                 '@deepseek-ai/dsh-web-app',
-                '@dsh-desktop/desktop-recovery-bridge',
+                // A bundle that resolves nowhere: pnpm hoists every
+                // workspace package into .pnpm/node_modules on a fresh
+                // install, so the real bridge IS resolvable in dev — the
+                // installed-app recovery scenario covers the real bridge.
+                '@fixture/bridge-not-installed',
               ],
               patchReload: 'startup',
             },
