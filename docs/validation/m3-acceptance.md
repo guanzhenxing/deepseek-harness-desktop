@@ -1,6 +1,6 @@
 # M3 验收记录：打包可安装的 macOS Desktop 候选包
 
-- **状态：实现通过，验收有条件通过**（全部门禁与 15/15 制品级场景通过；条件项为 §5 第 1 条真实 home 触碰失误（不可追溯消除）与 CI 的 macOS job 实测（待 push 触发）；人工系统外链检查已按 §6 闭环。证据：`release/package-smoke.json`、`release/artifacts.json`、`release/SHA256SUMS`）
+- **状态：实现通过，验收有条件通过**（全部门禁与 15/15 制品级场景通过；条件项仅剩 §5 第 1 条真实 home 触碰失误（不可追溯消除）；CI 三 job（check / macos / macos-package）已于 2026-09-04 在 GitHub Actions 实际运行全部通过（run 33834608370，制品作为私有任务产物上传，未建公开 Release）；人工系统外链检查已按 §6 闭环。证据：`release/package-smoke.json`、`release/artifacts.json`、`release/SHA256SUMS`）
 - 日期：2026-09-03
 - 基线：`main` @ `32e9c3e`（M2 验收合并后）
 - 结果分支：`codex/m3-packaged-desktop`
@@ -113,7 +113,7 @@ GitHub Actions 首次实际运行暴露了三个本地热环境掩盖的缺陷�
 
 ## 7. 未验证项与剩余风险
 
-- darwin-x64 未构建未运行；CI 的 macOS job（含 macos-package）未在 GitHub Actions 实际执行。
+- darwin-x64 未构建未运行。（CI 的 macOS job 与 macos-package 已于 2026-09-04 实际运行通过。）
 - 已知限制（二轮审查记录，不阻塞验收）：`verify-runtime-tree` 的原生插件平台过滤是 fail-open（路径含异平台 token 字样时跳过而非报错，现实误杀概率低）；`smoke:package` 在 `release/artifacts.json` 缺失时只报 ENOENT 未提示先跑 `package:dmg`；`package-smoke.json` 未记录各场景耗时（只有 startedAt）；pnpm 11 对带构建脚本的第三方插件默认警告并跳过构建（不阻塞安装）。
 - safe-mode 与 profile-recovery 的制品级覆盖分两层：`installed-recovery` 是安装应用上的真实 Electron 会话链（毒 profile patch → 真实 Host boot 失败 → 真实恢复页 → Safe Mode 真实 utilityProcess Host boot 至 healthy；毒 patch 字节不变、恰一次 relaunch、lease 释放），随 codex 复审轮交付；controller 级场景（stub boot）保留为深层不变量测试。该轮同时修复了 safe profile 第三 bundle（`desktop-recovery-bridge`）不在 Host 生产闭包的缺陷——此前 dev 环境靠 workspace 全集泄漏解析，独立部署闭包下真实 Safe Mode boot 从未运行过。
 - 升级/降级演练、marker writer、完整格式预检、updater、公证与公开发布属 M4，本记录不宣称。
