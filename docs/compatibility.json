@@ -38,7 +38,7 @@
       "os": "darwin",
       "arch": "arm64",
       "artifact": "dmg",
-      "releaseId": "m3-0.0.0-darwin-arm64-0997bca",
+      "releaseId": "m3-0.0.0-darwin-arm64-fa65b48",
       "smokes": [
         "dsh-ui",
         "host-crash",

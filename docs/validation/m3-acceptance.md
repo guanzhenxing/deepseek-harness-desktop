@@ -16,12 +16,12 @@
 
 ## 2. 制品与架构
 
-| 项         | 值                                                                                                                                                              |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 候选 DMG   | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64）                                                                                         |
-| releaseId  | `m3-0.0.0-darwin-arm64-0997bca`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 经 SHA 关联；源码快照 `0997bca` 即分支 HEAD——CI 轮修复后的最终候选） |
-| DMG SHA256 | `07341f182e32f5534178bd93ba852af1daa12b81861cee13051a2429552894e6`（约 356 MB；外置记录不自嵌，避免自引用哈希）                                                 |
-| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵                                                                                                                      |
+| 项         | 值                                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 候选 DMG   | `release/dist/DeepSeek Harness Desktop-0.0.0-arm64.dmg`（darwin-arm64）                                                                                                   |
+| releaseId  | `m3-0.0.0-darwin-arm64-fa65b48`（内嵌 `compatibility.json` 与外置 `release/artifacts.json` 经 SHA 关联；源码快照 `fa65b48` 即分支 HEAD——lockfile 彻底重生成后的最终候选） |
+| DMG SHA256 | `ade446a2237150cfcd4eefcb6977bf068d7503178a592b82b171b721bad8f26b`（约 356 MB；外置记录不自嵌，避免自引用哈希）                                                           |
+| 未验证架构 | darwin-x64：未构建、未运行，不进入支持矩阵                                                                                                                                |
 
 `.app` 布局（全部来自 staging 闭包，经 `hdiutil attach -readonly -nobrowse` → `ditto` 安装到临时目录验证）：
 
@@ -54,7 +54,7 @@
 
 ## 5.5 自查轮（交付前对抗审查）
 
-按对抗清单（I/O 失败、corrupt-not-unknown、TS-vs-runtime、进程重启、UI copy vs state、证据真实性、攻击最新修复）自查后修复并随源码重建重验（自查修复已并入 codex 复审提交链；最终候选以 §5.9 的 CI 轮修复为准（`0997bca`））：
+按对抗清单（I/O 失败、corrupt-not-unknown、TS-vs-runtime、进程重启、UI copy vs state、证据真实性、攻击最新修复）自查后修复并随源码重建重验（自查修复已并入 codex 复审提交链；最终候选以 §5.9 的 CI 轮收敛为准（`fa65b48`））：
 
 1. `resolvePackagedCliRuntime` 对内嵌清单损坏给出"reinstall the application"诊断而非裸堆栈（新增 3 条单测覆盖损坏/缺失/缺字段），并把 staging 根 realpath 规范化（消除 /var 与 /private/var 混用导致的 argv needle 不一致）；
 2. `writeWindowState` rename 后补目录 fsync（对齐 M2 durable-fs 纪律）；
@@ -94,7 +94,7 @@ GitHub Actions 首次实际运行暴露了三个本地热环境掩盖的缺陷�
 2. **bridge 依赖破坏 dev 解析面**（fc48bdc 引入）：`desktop-recovery-bridge` 声明为 host-supervisor 依赖后，pnpm 的 `.pnpm/node_modules` hoist 层让它在整个开发树可解析——safe-mode smoke 的"bare home bundle 拒绝"证明失效（CI 首跑发现；本地因 hoist 残留链接同样失效）。修复：依赖声明移除，bridge 由 stage-runtime 显式物化进 runtime-host 闭包（lib+manifest+patch），verify-runtime-tree 继续把它列为必需文件。
 3. **lockfile 基线重建引起 peer 漂移**（中间态）：从 d4068ad 重建使浮动 peer（cordis-plugin-loader 1.0.3→1.0.7）重解析；已改为 fc48bdc 完整 lockfile 机械净化，peer 恢复原解析。
 
-修复后本地全链重验：`check`、dev `smoke:safe-mode/profile-recovery/shared-home`、`package:dir/dmg`、`verify:artifacts`、`smoke:package`（15/15）全部退出码 0；CI 以本节修复后的源码（`0997bca`）重跑。
+修复后最终收敛（lockfile 删除后由 pnpm 从当前 manifests 完整重生成，不再手编）：全新 clone 的严格 `--frozen-lockfile` 安装、`build`、`check` 与 CI check job 逐字等价验证通过；主工作树 `check`、dev `smoke:safe-mode/dsh-ui`、`package:dir/dmg`、`verify:artifacts`、`smoke:package`（15/15）全部退出码 0。CI 的 macos/macos-package job 以最终提交（`fa65b48`）运行。
 
 ## 6. 门禁结果（最终轮次，2026-09-03，全部退出码 0）
 
