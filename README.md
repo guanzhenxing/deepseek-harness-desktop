@@ -6,7 +6,7 @@ DeepSeek Harness Desktop 是面向 macOS 个人本机使用的原生 DSH 桌面�
 
 M1 共享 home 已完成源码级验收：Desktop 与配套 CLI `dsh-native` 顺序共享同一 DSH home，任何 Host boot、profile 写入前都必须先取得整 home lease（原子 `mkdir` 锁 + OS 进程启动身份 + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）。CLI 子进程在 lease 上登记 OS 身份并等待授权后才 import 官方 `@deepseek-ai/dsh` 入口；`dsh-native doctor --unlock` 在确认没有活跃 owner 后清理残留锁，不提供 force 绕过。双向会话接续（CLI 创建→Desktop 继续、Desktop 创建→CLI 继续）有真实官方 DSH 图 + mock LLM 的集成与冒烟证据。
 
-Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M3 打包候选已完成制品级验收：托盘/菜单/窗口生命周期、受控外链、home 兼容性准入门（ADR-0009）、自含 Host/CLI 运行时候选 DMG（ad-hoc 签名、未公证）与 14 场景安装级冒烟；M2 非破坏性恢复（10 类失败分类、修订事务、恢复窗口、Safe Mode）与 M1 共享 home/lease 见 [验收记录](docs/validation/)。验收详情：[M3 验收](docs/validation/m3-acceptance.md)。
+Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M3 打包候选已完成制品级验收：托盘/菜单/窗口生命周期、受控外链、home 兼容性准入门（ADR-0009）、自含 Host/CLI 运行时候选 DMG（ad-hoc 签名、未公证）与 15 场景安装级冒烟（含安装应用上的真实恢复/Safe Mode 链）；M2 非破坏性恢复（10 类失败分类、修订事务、恢复窗口、Safe Mode）与 M1 共享 home/lease 见 [验收记录](docs/validation/)。验收详情：[M3 验收](docs/validation/m3-acceptance.md)。
 
 v1 目标：
 
@@ -68,7 +68,7 @@ corepack pnpm@11.7.0 smoke:safe-mode          # M2：Safe Mode 隔离
   corepack pnpm@11.7.0 package:dir              # M3：staging 校验 + 未打包 .app
   corepack pnpm@11.7.0 package:dmg              # M3：候选 DMG + 制品清单
   corepack pnpm@11.7.0 verify:artifacts         # M3：DMG SHA 与内嵌清单校验
-  corepack pnpm@11.7.0 smoke:package            # M3：安装级 14 场景验收
+  corepack pnpm@11.7.0 smoke:package            # M3：安装级 15 场景验收
 corepack pnpm@11.7.0 dsh-native -- --profile headless "..."   # 开发入口（持 lease）
 ```
 

@@ -1,6 +1,6 @@
 # 数据布局与所有权
 
-- 状态：M2 已完成源码级验收（非破坏性恢复、Safe Mode；M1 共享 home/lease/dsh-native 已合并）
+- 状态：M3 已完成制品级验收（候选 DMG + 安装级冒烟，`codex/m3-packaged-desktop` 待合并；M1/M2 已合并）
 - 日期：2026-09-02
 - 关联架构：[架构](architecture.md)
 

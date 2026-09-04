@@ -1,6 +1,6 @@
 # M3 验收记录：打包可安装的 macOS Desktop 候选包
 
-- **状态：完成，全部门禁与 14/14 制品级场景通过**（证据：`release/package-smoke.json`、`release/artifacts.json`、`release/SHA256SUMS`；本分支合并后即视为 M3 验收）
+- **状态：实现通过，验收有条件通过**（全部门禁与 15/15 制品级场景通过；条件项见 §5 第 1 条真实 home 触碰失误与 §7 未闭环项——CI 实测与人工系统外链。证据：`release/package-smoke.json`、`release/artifacts.json`、`release/SHA256SUMS`）
 - 日期：2026-09-03
 - 基线：`main` @ `32e9c3e`（M2 验收合并后）
 - 结果分支：`codex/m3-packaged-desktop`
@@ -38,11 +38,11 @@
 - **ad-hoc 签名，无 Developer ID，未公证**。fuse 翻转使 Electron 上游 ad-hoc 签名失效（内核会 SIGKILL），构建链在 `--dir` 构建后 `codesign --force --deep --sign -` 重签并 `--verify --deep --strict` 校验；DMG 用 `hdiutil create` 直接封装已签名 `.app`（electron-builder 的 dmg target 会在封装后重跑 fuses，使 DMG 内变成未签名副本，已弃用）。
 - 未修改 Gatekeeper / 系统 CrashReporter 等任何系统设置。公开发行需另立 ADR 补 Developer ID、hardened runtime、notarization（M4+，未做）。
 
-## 4. 制品级冒烟（`smoke:package`，14 场景）
+## 4. 制品级冒烟（`smoke:package`，15 场景）
 
 安装方式：`hdiutil attach -readonly -nobrowse` → `ditto` 复制 `.app` 到临时目录 → detach → 启动副本；应用以 `env` 清理环境（`PATH=/usr/bin:/bin`、无 `NODE_PATH/NODE_OPTIONS`、继承 TMPDIR、空临时 cwd）运行；profile-recovery/safe-mode/admission 经安装闭包内的 controller driver（staged Node）执行。结果文件：`release/package-smoke.json`。
 
-最终一轮（对最终 DMG 制品）14/14 通过，全部场景均在临时安装目录与显式临时 home 上执行：
+最终一轮（对最终 DMG 制品）15/15 通过，全部场景均在临时安装目录与显式临时 home 上执行：
 
 `dsh-ui`、`host-crash`、`navigation`（记录型 openExternal adapter）、`lifecycle`、`recovery`（安装应用上毒 profile patch → 真实 Host boot 失败 → 恢复页 → Safe Mode 真实 Host boot 至 healthy）关窗隐藏/托盘与 Dock 唤出/重复启动聚焦/renderer 崩溃恰一次重载后进恢复页/退出释放 lease）、`auth`（无凭据拒绝、握手 cookie 授权、重启轮换后旧凭据拒绝）、`conversation`（一轮对话→完全退出→重启续接同一 session，两轮落盘）、`shared-home`（安装版 desktop 与安装版 CLI 续接同一会话）、`cli-version`、`cli-busy`（desktop 持锁时 CLI exit 3 + doctor 拒清活锁）、`cli-doctor`（空闲 home 清理报告）、`cli-plugin`（本地 fixture bundle 经内置 Node/pnpm 安装并登记进 profile bundles）、`controller-recovery`（M2 失败链不变量在安装闭包上复验）、`controller-admission`（epoch 2 marker fail-closed、零 Host 尝试、marker 字节不变）、`controller-safemode`（Safe Mode 准备三 bundle first-party 集并 healthy，不改正常 profile）。
 
@@ -62,7 +62,7 @@
 4. `cli-version` 场景从"输出非空"加强为"输出含 compatibility.json 钉住的 DSH 版本号"；
 5. `verify-artifacts` 的 hdiutil detach 失败改为显式告警（不再静默留挂载）。
 
-修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（14/14）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（276+5 单测）。
+修复后按门禁顺序重跑：`package:dir`、`package:dmg`、`verify:artifacts`、`smoke:package`（15/15）、`git diff --check` 全部退出码 0；`check` 于自查修复后全绿（276+5 单测）。
 
 ## 5.7 codex 复审轮（9 项发现，全部处置）
 
@@ -99,7 +99,7 @@
 | `corepack pnpm@11.7.0 verify:artifacts` | 0      | DMG SHA + 内嵌清单 SHA/releaseId 关联校验（挂载只读）                                             |
 | `git diff --check`                      | 0      | 无空白错误                                                                                        |
 
-人工观察项（本机桌面）：Dock/托盘图标与模板渲染、标准菜单、输入与复制粘贴、多显示器窗口恢复、恢复页文案——由本机人工启动候选包观察（开发态同一 UI 链已由 smoke 驱动）；系统外链的真实 `shell.openExternal` 未在自动测试中执行（自动测试使用记录型 adapter），留待人工使用周期确认。
+系统外链已做受控真实检查（2026-09-04）：以产品同一 `shell.openExternal` 代码路径（Electron 44.1.0）真实调用打开 `https://example.com/?dsh-m3-external-check`，返回 resolved、退出码 0——系统浏览器链路真实可用（页面可见性由维护者顺手确认，该 URL 含标记）。其余人工观察项（Dock/托盘图标、菜单、输入复制粘贴、多显示器恢复、恢复页文案）仍留待人工使用周期。
 
 ## 7. 未验证项与剩余风险
 
