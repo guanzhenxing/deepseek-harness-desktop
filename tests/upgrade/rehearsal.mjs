@@ -447,10 +447,13 @@ export async function runUpgradeRehearsal(input) {
         return []
       })
       const refused =
-        reports.some((report) => report.kind === 'failed' && report.stage === 'home-admission') ||
-        reports.some(
-          (report) => report.kind === 'recovery' && report.step === 'recovery-view-reached',
-        )
+        (reports.some((report) => report.kind === 'failed' && report.stage === 'home-admission') ||
+          reports.some(
+            (report) => report.kind === 'recovery' && report.step === 'recovery-view-reached',
+          )) &&
+        // The refusal must never reach a booted surface: a recovery view that
+        // follows a ui-ready would be a different failure wearing this label.
+        !reports.some((report) => report.kind === 'ui-ready')
       if (!refused) {
         fail('desktop downgrade refusal', 'admission refusal was not observed')
       }

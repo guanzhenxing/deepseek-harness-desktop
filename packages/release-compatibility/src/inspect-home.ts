@@ -88,6 +88,21 @@ type SlotResult =
   | { state: 'known'; formatId: string }
   | { state: 'unknown'; relative: string }
 
+/**
+ * Fail-closed directory listing: ENOENT means no directory, every other
+ * failure (EACCES, EMFILE, EISDIR-on-non-dir, ...) surfaces as 'unreadable'
+ * so the slot can be refused instead of silently treated as empty.
+ */
+async function readdirSafe(directory: string): Promise<readonly string[] | 'unreadable'> {
+  try {
+    return await readdir(directory)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return []
+    return 'unreadable'
+  }
+}
+
 async function safeLstat(file: string) {
   return lstat(file).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined
@@ -104,7 +119,11 @@ async function regularFile(file: string): Promise<boolean> {
  * pre-release flat layout is a foreign shape, not this baseline's format. */
 async function credentialsFormatId(file: string): Promise<SlotResult> {
   const relative = path.basename(file)
-  if (!(await regularFile(file))) return { state: 'absent' }
+  const identity = await safeLstat(file)
+  if (identity === undefined) return { state: 'absent' }
+  if (identity.isSymbolicLink() || !identity.isFile()) {
+    return { state: 'unknown', relative }
+  }
   const text = await readFile(file, 'utf8').catch(() => '')
   const header = /^version:[ \t]*(\d+)[ \t]*$/m.exec(text)
   // The baseline credentials file carries `version: 1` plus one or both of
@@ -150,15 +169,22 @@ async function sessionsFormatId(
   const unknown: string[] = []
   let sawAny = false
   let sawAllKnown = true
-  const projects = (await readdir(sessionsDir).catch(() => [])).slice(0, MAX_SESSION_PROJECTS)
+  const projectsAll = await readdirSafe(sessionsDir)
+  if (projectsAll === 'unreadable') {
+    return { state: 'known', formatId: SESSION_JSONL_FORMAT_ID, unknown: ['sessions'] }
+  }
+  const projects = projectsAll.slice(0, MAX_SESSION_PROJECTS)
   for (const project of projects) {
     const projectDir = path.join(sessionsDir, project)
     const projectIdentity = await safeLstat(projectDir)
     if (projectIdentity === undefined || !projectIdentity.isDirectory()) continue
-    const sessionIds = (await readdir(projectDir).catch(() => [])).slice(
-      0,
-      MAX_SESSIONS_PER_PROJECT,
-    )
+    const sessionIdsAll = await readdirSafe(projectDir)
+    if (sessionIdsAll === 'unreadable') {
+      sawAllKnown = false
+      unknown.push(path.relative(home, projectDir))
+      continue
+    }
+    const sessionIds = sessionIdsAll.slice(0, MAX_SESSIONS_PER_PROJECT)
     for (const sessionId of sessionIds) {
       const sessionDir = path.join(projectDir, sessionId)
       const plain = path.join(sessionDir, 'session.jsonl')
@@ -249,7 +275,16 @@ async function storagesFormatId(home: string): Promise<
   let projcache: 4 | 'foreign' | 'none' = 'none'
   let projcacheFromSingleFile: number | undefined
   let projcacheFromDirectory: number | undefined
-  const entries = (await readdir(storagesDir).catch(() => [])).slice(0, MAX_STORAGE_ENTRIES)
+  const entriesAll = await readdirSafe(storagesDir)
+  if (entriesAll === 'unreadable') {
+    return {
+      state: 'known',
+      formatId: STORAGE_UNIT_FORMAT_ID,
+      unknown: ['storages'],
+      projcache: 'none',
+    }
+  }
+  const entries = entriesAll.slice(0, MAX_STORAGE_ENTRIES)
   for (const entry of entries) {
     const target = path.join(storagesDir, entry)
     const identity = await safeLstat(target)
@@ -329,15 +364,19 @@ async function readUnitHeader(
  * its version stamp. Bounded to one level and a handful of files.
  */
 async function sampleRecordStamp(unitDirectory: string): Promise<number | undefined> {
-  const tables = (await readdir(unitDirectory, { withFileTypes: true }).catch(() => [])).filter(
-    (entry) => entry.isDirectory(),
-  )
-  for (const table of tables.slice(0, 4)) {
-    const records = (
-      await readdir(path.join(unitDirectory, table.name), { withFileTypes: true }).catch(() => [])
-    ).filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    for (const record of records.slice(0, 2)) {
-      const stamp = await readRecordStamp(path.join(unitDirectory, table.name, record.name))
+  const names = await readdirSafe(unitDirectory)
+  if (names === 'unreadable') return undefined
+  const tableDirs: string[] = []
+  for (const name of names.slice(0, 4)) {
+    const identity = await safeLstat(path.join(unitDirectory, name))
+    if (identity !== undefined && identity.isDirectory()) tableDirs.push(name)
+  }
+  for (const table of tableDirs) {
+    const tableDir = path.join(unitDirectory, table)
+    const names = await readdirSafe(tableDir)
+    if (names === 'unreadable') continue
+    for (const name of names.filter((entry) => entry.endsWith('.json')).slice(0, 2)) {
+      const stamp = await readRecordStamp(path.join(tableDir, name))
       if (stamp !== undefined) return stamp
     }
   }
@@ -378,7 +417,11 @@ async function profilesFormatId(
   const unknown: string[] = []
   let sawAny = false
   let sawUnknownManifest = false
-  const entries = (await readdir(profilesDir).catch(() => [])).slice(0, MAX_PROFILE_ENTRIES)
+  const entriesAll = await readdirSafe(profilesDir)
+  if (entriesAll === 'unreadable') {
+    return { state: 'known', formatId: PROFILE_FORMAT_ID, unknown: ['profiles'] }
+  }
+  const entries = entriesAll.slice(0, MAX_PROFILE_ENTRIES)
   for (const entry of entries) {
     if (entry.startsWith('.')) continue // runtime launch roots are not data
     const manifest = path.join(profilesDir, entry, 'package.json')

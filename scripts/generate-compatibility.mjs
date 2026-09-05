@@ -49,24 +49,30 @@ export function closureRecordsFromLockfile(lockfileText) {
   if (packagesHeader === -1) {
     throw new CompatibilityInputError('lockfile has no packages: section')
   }
+  // pnpm v9 suffixes keys with their peer resolutions —
+  // `name@version(peer@version)(...)`. The suffix must be stripped before the
+  // name/version split, or suffixed keys parse into garbage names and (for
+  // @deepseek-ai/dsh* keys) silently escape the baseline drift check. The
+  // same name@version can appear both plain and suffixed; both describe one
+  // installed package, so the records are deduplicated by name@version.
   const records = []
+  const seen = new Set()
   let current = undefined
   for (const line of lines.slice(packagesHeader + 1)) {
     if (/^\S/.test(line)) break // next top-level section
     const entry = /^ {2}('(.*)'|[^:\s]+):$/.exec(line)
     if (entry !== null) {
       if (current !== undefined) records.push(current)
-      const key = entry[2] ?? entry[1]
+      const rawKey = entry[2] ?? entry[1]
+      const paren = rawKey.indexOf('(')
+      const key = paren >= 0 ? rawKey.slice(0, paren) : rawKey
       const separator = key.lastIndexOf('@')
       if (separator <= 0) {
-        throw new CompatibilityInputError(`lockfile package key has no version split: ${key}`)
+        throw new CompatibilityInputError(`lockfile package key has no version split: ${rawKey}`)
       }
-      current = {
-        name: key.slice(0, separator),
-        version: key.slice(separator + 1),
-        integrity: undefined,
-        relativePath: `node_modules/.pnpm/${key}/node_modules/${key.slice(0, separator)}`,
-      }
+      const name = key.slice(0, separator)
+      const version = key.slice(separator + 1)
+      current = { name, version, seenKey: `${name}@${version}`, integrity: undefined }
       continue
     }
     if (current === undefined) continue
@@ -74,6 +80,18 @@ export function closureRecordsFromLockfile(lockfileText) {
     if (integrity !== null) current.integrity = integrity[1]
   }
   if (current !== undefined) records.push(current)
+  const complete = []
+  for (const record of records) {
+    if (record.integrity === undefined) continue // reported below via the deduped view
+    if (seen.has(record.seenKey)) continue
+    seen.add(record.seenKey)
+    complete.push({
+      name: record.name,
+      version: record.version,
+      integrity: record.integrity,
+      relativePath: `node_modules/.pnpm/${record.name.replace('/', '+')}@${record.version}/node_modules/${record.name}`,
+    })
+  }
   const incomplete = records.filter((record) => record.integrity === undefined)
   if (incomplete.length > 0) {
     throw new CompatibilityInputError(
@@ -83,7 +101,7 @@ export function closureRecordsFromLockfile(lockfileText) {
         .join(', ')}`,
     )
   }
-  return records.sort(
+  return complete.sort(
     (left, right) =>
       left.name.localeCompare(right.name) || left.version.localeCompare(right.version),
   )

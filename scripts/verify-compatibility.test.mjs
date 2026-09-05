@@ -89,13 +89,46 @@ test('closure records come out sorted with virtual-store relative paths', () => 
       version: '0.1.2-alpha.3',
       integrity: 'sha512-aaa',
       relativePath:
-        'node_modules/.pnpm/@deepseek-ai/dsh@0.1.2-alpha.3/node_modules/@deepseek-ai/dsh',
+        'node_modules/.pnpm/@deepseek-ai+dsh@0.1.2-alpha.3/node_modules/@deepseek-ai/dsh',
     },
     {
       name: 'zod',
       version: '3.25.0',
       integrity: 'sha512-zzz',
       relativePath: 'node_modules/.pnpm/zod@3.25.0/node_modules/zod',
+    },
+  ])
+})
+
+test('closure extraction strips peer-suffix keys and deduplicates them', () => {
+  const lockfile = [
+    'packages:',
+    '',
+    "  '@deepseek-ai/dsh@0.1.2-alpha.3':",
+    '    resolution: {integrity: sha512-aaa}',
+    '',
+    "  '@deepseek-ai/dsh-cordis-host-runner@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)':",
+    '    resolution: {integrity: sha512-bbb}',
+    '',
+    "  '@deepseek-ai/dsh@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)':",
+    '    resolution: {integrity: sha512-aaa}',
+    '',
+  ].join('\n')
+  const records = closureRecordsFromLockfile(lockfile)
+  assert.deepEqual(records, [
+    {
+      name: '@deepseek-ai/dsh',
+      version: '0.1.2-alpha.3',
+      integrity: 'sha512-aaa',
+      relativePath:
+        'node_modules/.pnpm/@deepseek-ai+dsh@0.1.2-alpha.3/node_modules/@deepseek-ai/dsh',
+    },
+    {
+      name: '@deepseek-ai/dsh-cordis-host-runner',
+      version: '0.1.2-alpha.3',
+      integrity: 'sha512-bbb',
+      relativePath:
+        'node_modules/.pnpm/@deepseek-ai+dsh-cordis-host-runner@0.1.2-alpha.3/node_modules/@deepseek-ai/dsh-cordis-host-runner',
     },
   ])
 })
