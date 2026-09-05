@@ -8,7 +8,20 @@
 //     --candidate release/candidate/artifacts.json
 import process from 'node:process'
 
+import { assertAcceptanceRuntime } from '../tests/helpers/acceptance-runtime.mjs'
+import { emergencyCleanup } from '../tests/helpers/installed-app.mjs'
 import { runUpgradeRehearsal } from '../tests/upgrade/rehearsal.mjs'
+
+assertAcceptanceRuntime('rehearse:upgrade')
+
+// An interrupted rehearsal (Ctrl-C, CI cancel) must never leave installed-app
+// process groups, temp install trees, or DMG mounts behind: leftovers raise
+// system load and surface as unrelated probe flakiness in the NEXT run.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    void emergencyCleanup().finally(() => process.exit(130))
+  })
+}
 
 function argumentValue(flag) {
   const index = process.argv.indexOf(flag)

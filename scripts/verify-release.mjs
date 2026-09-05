@@ -20,6 +20,10 @@ import {
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { assertAcceptanceRuntime } from '../tests/helpers/acceptance-runtime.mjs'
+
+assertAcceptanceRuntime('verify:release')
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 

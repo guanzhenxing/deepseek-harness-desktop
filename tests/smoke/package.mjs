@@ -12,6 +12,7 @@ import path from 'node:path'
 import { setTimeout as sleepTimer } from 'node:timers'
 import { fileURLToPath } from 'node:url'
 
+import { assertAcceptanceRuntime } from '../helpers/acceptance-runtime.mjs'
 import {
   emergencyCleanup,
   installFromDmg,
@@ -37,6 +38,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     void emergencyCleanup().finally(() => process.exit(130))
   })
 }
+
+assertAcceptanceRuntime('smoke:package')
 
 const results = []
 

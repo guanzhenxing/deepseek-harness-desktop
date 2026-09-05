@@ -50,6 +50,17 @@ export async function installFromDmg(dmgPath, productName) {
     throw new Error(`could not parse hdiutil mount point from: ${output}`)
   }
   const installDirectory = await mkdtemp(path.join(tmpdir(), 'dsh-installed-app-'))
+  // The mount must also be reachable from the emergency registry: an
+  // interrupted run between attach and detach would otherwise leave the DMG
+  // mounted on the user's machine.
+  const detachMount = () => {
+    try {
+      execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+    } catch {
+      /* the mount may already be gone */
+    }
+  }
+  const unregisterMount = registerCleanup(detachMount)
   try {
     const appBundle = path.join(mountPoint, `${productName}.app`)
     const identity = await lstat(appBundle)
@@ -60,11 +71,12 @@ export async function installFromDmg(dmgPath, productName) {
     // invalid signature, which the kernel then kills at launch.
     execFileSync('/usr/bin/ditto', [appBundle, path.join(installDirectory, `${productName}.app`)])
   } catch (error) {
-    execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
     await rm(installDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     throw error
+  } finally {
+    unregisterMount()
+    detachMount()
   }
-  execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
   const appPath = path.join(installDirectory, `${productName}.app`)
   const resources = path.join(appPath, 'Contents', 'Resources')
   const unregister = registerCleanup(() => rm(installDirectory, { recursive: true, force: true }))
