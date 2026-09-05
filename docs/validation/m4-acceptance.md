@@ -58,11 +58,25 @@
    - **P1 演练虚证**：`corrupt-candidate-refused` 原实现把 DMG 文件当索引进 JSON.parse——只证明了"DMG 不是 JSON"。修复：负例索引钉住**原始 SHA** 指向损坏文件，断言必须命中 `digest mismatch`；桌面降级拒绝补 `ui-ready` 反证（恢复视图不得跟在成功启动后）。
    - **链排序缺陷**：verify:release 原来直接 `package:dmg`，会把陈旧 staging 打进 DMG（首跑被 verify:compatibility 抓住）。修复：`package:dir`（重建 staging）先行。教训：门禁链运行期间不得修改工作树（一次中途编辑导致同链两阶段解析器不一致，作废重跑）。
 
+## 5.7 五轮独立代码审查（2026-09-05，jesen 指定，交付后）
+
+按对抗审查协议执行五轮（每轮独立攻击者模型、优先攻击最新修复），共 8 项发现全部修复并过门禁：
+
+| 轮  | 攻击面                        | 发现                                                                                                                                                                                                  | 修复                                                                                   |
+| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 1   | 最新修复（0abc7cf/3d55e69）   | sessions 槽位在 `sawAny=false` 时丢弃已记录的 unknown 路径（chmod 000 子目录 → 放行）；演练桌面拒绝断言把 throw 路径的真拒绝误判为失败                                                                | `ef0c21b`（含 chmod 000 回归测试）                                                     |
+| 2   | I/O 失败 + corrupt-vs-unknown | marker/credentials/storage/记录戳/profile 五处全文无界读取（植入巨型文件 → 启动路径内存 DoS）；writeAtomicDurable rename 失败泄漏 temp                                                                | 有界读取（64KiB marker/1MiB 凭据与记录/16MiB 单元，超出即 fail-closed）+ temp 失败清理 |
+| 3   | TS-vs-runtime + 生命周期      | controller 三个新拒绝码映射零测试（打错字直进恢复页）；reserveHomeWrite 只比对 lease.home 不验证仍持有                                                                                                | 三个码的映射测试（28/28）+ `lease.assertHeld()`                                        |
+| 4   | 证据真实性                    | manifest 解析器两分支（空 singletons/epochs 非升序）与 policy 证据 4 个失败分支（npm 缺失/upstream 不符/repo 缺失/未知 scheme）无测试——删除对应检查测试仍绿；foreign-storage 负例描述声称未证明的对比 | 补 6 个测试；描述改为结构性论证的如实表述                                              |
+| 5   | 计划严格对照                  | verify:release 缺计划门禁清单里的 `git diff --check`；协议文档 credentials 描述漏 `records:` 段                                                                                                       | 链补第 13 步；协议更新                                                                 |
+
+审查过程中链式重跑另暴露一项**主线产品 bug**（非 M4 引入）：lease 释放把探测 helper 的瞬态 `unknown` 当 `LEASE_CHANGED` 拒绝 → 退出偶发留 stale lock 需 doctor（M3/M4 应用均复现，4 轮链中 3 轮出现）。修复：`inspectWithRetry`（`unknown` 有界重试 3 次×100ms，确定性 `absent`/`different` 仍立即拒绝；21/21 单测含两个新语义测试）`e487138`。M3 previous 制品已冻结无法修复，演练对其 stale lock 走它自带的 `doctor --unlock` 容差（candidate 保持严格）`dc0e2b8`。
+
 ## 6. 门禁结果
 
-`pnpm verify:release` 聚合链（`scripts/verify-release.mjs`）于最终 HEAD `0abc7cf` 实跑，**12 步全部退出码 0**（2026-09-05）：
+`pnpm verify:release` 聚合链（`scripts/verify-release.mjs`）于最终 HEAD `e487138` 实跑，**13 步全部退出码 0**（2026-09-05，含收尾 `git diff --check`）：
 
-1. `check`（prettier/eslint+boundaries/tsc/304 Vitest 单测/Node test 组/36 文档校验）
+1. `check`（prettier/eslint+boundaries/tsc/311 Vitest 单测/Node test 组/36 文档校验）
 2. `generate:compatibility` → 3. `verify:dsh-closure`（921 条去重闭包记录）→ 4. `verify:patches`（显式空账本）
 3. `test:integration`（54 测试，9 文件）→ 6. `test:shared-home`（真实 DSH 图双向会话）
 4. `package:dir`（当前 HEAD 重建 staging + 内联门禁）→ 8. `verify:compatibility`（fresh staging 字节一致）
