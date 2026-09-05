@@ -8,7 +8,7 @@ import {
   type LeaseOwner,
   type ProcessIdentity,
 } from './owner.js'
-import type { ProcessProbe } from './process-probe.js'
+import type { ProcessProbe, ProcessStatus } from './process-probe.js'
 import {
   createNativeGuardLock,
   resolveLeaseHelperPath,
@@ -88,6 +88,32 @@ function validateProfile(profile: string): string {
  * advisory-lock guard so two doctors can never race an acquiring wrapper.
  * Stale or unreadable owners are reported, never auto-recovered.
  */
+/**
+ * Bounded retry for identity probes: 'unknown' means the helper could not
+ * look the process up (transient — e.g. system under load), unlike the
+ * determinate 'same'/'absent'/'different'. Retrying a handful of times with
+ * a short pause turns quit-path transients into successful releases without
+ * weakening the determinate refusals.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function inspectWithRetry(
+  probe: ProcessProbe,
+  identity: Parameters<ProcessProbe['inspect']>[0],
+  attempts = 3,
+  pauseMs = 100,
+): Promise<ProcessStatus> {
+  let status: ProcessStatus = 'unknown'
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    status = await probe.inspect(identity)
+    if (status !== 'unknown') return status
+    if (attempt < attempts - 1) await sleep(pauseMs)
+  }
+  return status
+}
+
 export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<HomeLease> {
   const home = validateHome(input.home)
   let profile = validateProfile(input.profile)
@@ -310,8 +336,13 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
           )
         }
         // Re-verify the supervisor identity inside the guard: a matching
-        // generation alone must never authorize removal.
-        if ((await probe.inspect(current.owner.supervisor)) !== 'same') {
+        // generation alone must never authorize removal. A determinate
+        // non-match refuses; a transient 'unknown' (the helper cannot look
+        // the process up under load) is retried a bounded number of times —
+        // refusing on a transient would strand a perfectly healthy session
+        // with a stale lock.
+        const supervisorStatus = await inspectWithRetry(probe, current.owner.supervisor)
+        if (supervisorStatus !== 'same') {
           throw new LeaseError(
             'LEASE_CHANGED',
             'the recorded supervisor identity is not this process',
@@ -319,7 +350,7 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
           )
         }
         if (current.owner.host !== null) {
-          const status = await probe.inspect(current.owner.host)
+          const status = await inspectWithRetry(probe, current.owner.host)
           if (status === 'same') {
             throw new LeaseError(
               'HOST_ACTIVE',

@@ -29,6 +29,12 @@ class FakeProbe implements ProcessProbe {
   readonly processes = new Map<number, { startIdentity: string; status: ProcessStatus }>()
   #currentIdentity: ProcessIdentity = { pid: 4242, startIdentity: 'boot-1' }
   scanResult: ProcessScanResult = 'none'
+  /** Scripted transient failures: the next N inspect calls return 'unknown'. */
+  #transientUnknowns = 0
+
+  scriptTransientUnknowns(count: number): void {
+    this.#transientUnknowns = count
+  }
 
   constructor() {
     this.processes.set(this.#currentIdentity.pid, {
@@ -58,6 +64,10 @@ class FakeProbe implements ProcessProbe {
   }
 
   async inspect(identity: ProcessIdentity): Promise<ProcessStatus> {
+    if (this.#transientUnknowns > 0) {
+      this.#transientUnknowns -= 1
+      return 'unknown'
+    }
     const process = this.processes.get(identity.pid)
     if (process === undefined) return 'unknown'
     if (process.startIdentity !== identity.startIdentity) return 'different'
@@ -179,6 +189,30 @@ describe('home lease lifecycle', () => {
     const second = await acquireHomeLease(acquireInput(home, probe))
     expect(second.generation).not.toBe(lease.generation)
     await second.release()
+  })
+
+  it('releases through transient unknown probes without stranding a stale lock', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    // The helper transiently cannot look the supervisor up (twice) — the
+    // bounded retry must absorb this and release cleanly.
+    probe.scriptTransientUnknowns(2)
+    await lease.release()
+    await expect(stat(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('still refuses release when the probe stays unknown beyond the retry budget', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    probe.scriptTransientUnknowns(99)
+    await expect(lease.release()).rejects.toMatchObject({ code: 'LEASE_CHANGED' })
+    // The lock stays for doctor exactly as before — the retry never weakens
+    // the determinate refusal semantics.
+    await expect(stat(path.join(home, 'run', 'host.lock'))).resolves.toBeTruthy()
   })
 
   it('refuses to release a lock whose generation moved on', async () => {
