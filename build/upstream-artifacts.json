@@ -18,7 +18,27 @@
         "tarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.2-alpha.3.tgz"
       }
     ],
-    "closurePolicy": "every @deepseek-ai/dsh* package in the lockfile must resolve to this exact npmVersion; verify:dsh-closure enforces it against the lockfile and the staged trees"
+    "closurePolicy": "every @deepseek-ai/dsh* package in the lockfile must resolve to this exact npmVersion; verify:dsh-closure enforces it against the lockfile and the staged trees",
+    "watchedSingletons": [
+      {
+        "name": "react",
+        "note": "one React instance per Host runtime — a second copy forks the Cordis component tree"
+      },
+      { "name": "@deepseek-ai/cordis", "note": "one Cordis kernel per Host runtime" },
+      { "name": "@deepseek-ai/dsh", "note": "one DSH runtime per Host/CLI process" }
+    ],
+    "independentPackages": [
+      {
+        "name": "@deepseek-ai/cordis",
+        "version": "4.0.2",
+        "note": "Cordis versioning is independent of DSH releases; it is classified separately and never inferred from the @deepseek-ai scope"
+      },
+      {
+        "name": "react",
+        "version": "18.3.1",
+        "note": "third-party UI singleton; version recorded for provenance and verified per lockfile"
+      }
+    ]
   },
   "toolchain": [
     {

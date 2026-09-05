@@ -24,6 +24,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify the DSH dependency closure and patch ledger
+        run: |
+          pnpm verify:dsh-closure
+          pnpm verify:patches
       - name: Run repository checks
         run: pnpm check
 
@@ -87,6 +91,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Generate the release compatibility manifest
+        run: pnpm generate:compatibility
       - name: Build the packaged candidate (dir + dmg)
         run: |
           pnpm package:dir

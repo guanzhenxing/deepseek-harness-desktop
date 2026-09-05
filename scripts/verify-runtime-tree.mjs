@@ -32,6 +32,7 @@ export const REQUIRED_STAGING_FILES = [
   'runtime-host/node_modules/@dsh-desktop/shell-core/lib/index.js',
   'runtime-host/node_modules/.pnpm/node_modules/@deepseek-ai/dsh/package.json',
   'runtime-host/node_modules/.pnpm/node_modules/@deepseek-ai/dsh-web-frontend/package.json',
+  'runtime-host/node_modules/.pnpm/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
   'runtime-host/node_modules/@dsh-desktop/desktop-recovery-bridge/package.json',
   'runtime-host/node_modules/@dsh-desktop/desktop-recovery-bridge/cordis.patch.yml',
   'runtime-cli/package.json',
@@ -279,18 +280,26 @@ async function main() {
 
   // Watched singletons: the Host process must see exactly one Cordis/React/
   // DSH runtime; the headless CLI closure only needs the DSH runtime itself.
-  // Uniqueness comes from the pnpm store scan; resolvability is proven from a
-  // package that actually depends on the singleton (realpathed anchor).
+  // Uniqueness comes from the pnpm store scan; resolvability is proven from
+  // every runtime anchor that Node-imports the singletons itself — the Host
+  // runner (host-supervisor) and the normal bundle (desktop-plugin). The Safe
+  // Mode bundle (desktop-recovery-bridge, staged as a real directory) is
+  // loaded by the Host's cordis loader and Node-imports nothing, so its
+  // singleton guarantee is the closure-level uniqueness check plus the
+  // required staging files, not a resolution probe.
   const closureSingletons = {
     'runtime-host': {
       unique: ['react', '@deepseek-ai/cordis', '@deepseek-ai/dsh'],
       resolve: ['@deepseek-ai/cordis', '@deepseek-ai/dsh'],
-      anchor: 'node_modules/@dsh-desktop/host-supervisor/package.json',
+      anchors: [
+        'node_modules/@dsh-desktop/host-supervisor/package.json',
+        'node_modules/@dsh-desktop/desktop-plugin/package.json',
+      ],
     },
     'runtime-cli': {
       unique: ['@deepseek-ai/dsh'],
       resolve: ['@deepseek-ai/dsh'],
-      anchor: 'package.json',
+      anchors: ['package.json'],
     },
   }
   for (const [closure, config] of Object.entries(closureSingletons)) {
@@ -300,12 +309,12 @@ async function main() {
         `singleton ${duplicate.name} has multiple versions: ${duplicate.versions.join(', ')}`,
       )
     }
-    for (const failure of await findUnresolvableSingletons(
-      closureRoot,
-      config.resolve,
-      config.anchor,
-    )) {
-      errors.push(`singleton ${failure.name} did not resolve in ${closure}: ${failure.reason}`)
+    for (const anchor of config.anchors) {
+      for (const failure of await findUnresolvableSingletons(closureRoot, config.resolve, anchor)) {
+        errors.push(
+          `singleton ${failure.name} did not resolve in ${closure} (anchor ${path.basename(path.dirname(anchor))}): ${failure.reason}`,
+        )
+      }
     }
   }
 
@@ -332,6 +341,13 @@ async function main() {
     const product = createRequire(path.join(root, 'package.json'))(
       './packages/product-config/lib/index.js',
     ).PRODUCT
+    if (manifest.schemaVersion !== 2) {
+      errors.push('compatibility.json is not the schema-2 release manifest')
+    }
+    const docsCompatibility = await readJson(path.join(root, 'docs', 'compatibility.json'))
+    if (JSON.stringify(manifest.dsh) !== JSON.stringify(docsCompatibility.dsh)) {
+      errors.push('compatibility.json dsh facts diverge from docs/compatibility.json')
+    }
     if (manifest.desktopVersion !== rootManifest.version) {
       errors.push('compatibility.json desktopVersion does not match the root package version')
     }
