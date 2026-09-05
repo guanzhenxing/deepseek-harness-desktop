@@ -99,6 +99,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Determinate-verdict confirmation for acquisition: a single read that does
+ * not say 'same' is re-read once after a pause; only two agreeing non-'same'
+ * reads (or an immediate 'different', which encodes a real identity mismatch)
+ * are believed. This never weakens refusals — a genuinely dead owner stays
+ * 'absent' across both reads — it only absorbs one-sample misreads of a
+ * live owner.
+ */
+async function inspectConfirmed(
+  probe: ProcessProbe,
+  identity: Parameters<ProcessProbe['inspect']>[0],
+  pauseMs = 100,
+): Promise<ProcessStatus> {
+  const first = await inspectWithRetry(probe, identity)
+  if (first === 'same' || first === 'different') return first
+  await sleep(pauseMs)
+  return inspectWithRetry(probe, identity)
+}
+
 async function inspectWithRetry(
   probe: ProcessProbe,
   identity: Parameters<ProcessProbe['inspect']>[0],
@@ -154,8 +173,15 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
           : 'home lock owner file is corrupt',
       )
     }
-    const supervisor = await probe.inspect(current.owner.supervisor)
-    const host = current.owner.host === null ? 'absent' : await probe.inspect(current.owner.host)
+    // A live owner can be transiently misread (proc_pidinfo failures under
+    // load surface as 'unknown', and in rarer windows as 'absent'). Declaring
+    // a live home stale on one bad read would strand the user behind a lock
+    // that doctor would happily "clean" while the app is still running, so
+    // every non-'same' verdict is confirmed by a second read after a short
+    // pause before it is believed. 'same' is trusted immediately.
+    const supervisor = await inspectConfirmed(probe, current.owner.supervisor)
+    const host =
+      current.owner.host === null ? 'absent' : await inspectConfirmed(probe, current.owner.host)
     const summary = describeLeaseOwner(current.owner)
     if (supervisor === 'same' || host === 'same') {
       throw new LeaseError('HOME_BUSY', 'another supported entrypoint holds this home', summary)

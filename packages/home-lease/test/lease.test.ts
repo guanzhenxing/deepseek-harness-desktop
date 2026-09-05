@@ -204,6 +204,27 @@ describe('home lease lifecycle', () => {
     })
   })
 
+  it('confirms stale verdicts with a second read before believing them', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const holder = await acquireHomeLease(acquireInput(home, probe))
+    // Simulate the transient misread of a live owner: one 'absent' then the
+    // truth ('same') — acquisition must report BUSY, not STALE.
+    const originalInspect = probe.inspect.bind(probe)
+    let misreadOnce = false
+    probe.inspect = async (identity) => {
+      if (!misreadOnce) {
+        misreadOnce = true
+        return 'absent'
+      }
+      return originalInspect(identity)
+    }
+    await expect(
+      acquireHomeLease({ ...acquireInput(home, probe), profile: 'headless' }),
+    ).rejects.toMatchObject({ code: 'HOME_BUSY' })
+    await holder.release()
+  })
+
   it('still refuses release when the probe stays unknown beyond the retry budget', async () => {
     const home = await isolatedHome()
     const probe = new FakeProbe()
