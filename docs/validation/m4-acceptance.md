@@ -52,18 +52,24 @@
 3. **candidate 首轮"升级通过"是虚的**：smoke 模式下 Desktop home 解析为 `<userData>/home`（M0 遗产，`main.ts` resolveSmokeHome），忽略 DSH_HOME——candidate 实际在空 home 上自举。处置：home 放进 candidate 的 smoke userData，并加"candidate 亲写 marker 断言"防虚（`dd4799f`）。
 4. **Host 写出的 credentials 被 inspector 误判**：desktop profile 的 Host 写 `.credentials.yaml` 的 `records:` 段（connection grants），inspector 只认 `refs:`。处置：两种段落都属 baseline 格式（fixture + 单测固化）。
 5. **lease 释放竞态**：app 退出偶发释放失败（M1 语义：不阻塞退出，留 HOME_STALE）。处置：桌面轮与 CLI 轮之间加 `waitForLeaseGone`（与 M3 package smoke 同法）。
+6. **自审第 1 轮发现（对抗协议，交付后、验收记录前）**：
+   - **P1 闭包解析缺口**：pnpm v9 lockfile 有 277 个 peer 后缀 key（`name@ver(peer@ver)`，其中 218 个 `@deepseek-ai/dsh*`），原解析器对它们产出垃圾 name——这些 DSH 包完全绕过 baseline 漂移检查。修复：剥离后缀 + name@version 去重 + 真实 store 的 `+` 编码 relativePath（带回归测试；真实 lockfile 现覆盖 215 个 DSH 包、0 漂移）。
+   - **P2 勘察 fail-open**：目录 `readdir` 的 EACCES 等失败曾被吞成"空目录"（权限异常的 sessions/ 会被当作无会话放行）；credentials 为 symlink/FIFO 时被当作缺失。修复：全部改为 fail-closed（unreadable → 槽位 unknown）。
+   - **P1 演练虚证**：`corrupt-candidate-refused` 原实现把 DMG 文件当索引进 JSON.parse——只证明了"DMG 不是 JSON"。修复：负例索引钉住**原始 SHA** 指向损坏文件，断言必须命中 `digest mismatch`；桌面降级拒绝补 `ui-ready` 反证（恢复视图不得跟在成功启动后）。
+   - **链排序缺陷**：verify:release 原来直接 `package:dmg`，会把陈旧 staging 打进 DMG（首跑被 verify:compatibility 抓住）。修复：`package:dir`（重建 staging）先行。教训：门禁链运行期间不得修改工作树（一次中途编辑导致同链两阶段解析器不一致，作废重跑）。
 
 ## 6. 门禁结果
 
-`pnpm verify:release` 聚合链（`scripts/verify-release.mjs`）于最终 HEAD 实跑，12 步退出码 0：
+`pnpm verify:release` 聚合链（`scripts/verify-release.mjs`）于最终 HEAD `0abc7cf` 实跑，**12 步全部退出码 0**（2026-09-05）：
 
-1. `check`（prettier/eslint+boundaries/tsc/296+ Vitest 单测/Node test 组/文档校验）
-2. `generate:compatibility` → 3. `verify:compatibility`（再生成字节一致 + staged 一致）
-3. `verify:dsh-closure`（921 条记录）→ 5. `verify:patches`（显式空账本）
-4. `test:integration`（54 测试）→ 7. `test:shared-home`（真实 DSH 图双向会话）
-5. `package:dmg` → 9. `verify:artifacts` → 10. `smoke:package`（15 场景安装级冒烟）
+1. `check`（prettier/eslint+boundaries/tsc/304 Vitest 单测/Node test 组/36 文档校验）
+2. `generate:compatibility` → 3. `verify:dsh-closure`（921 条去重闭包记录）→ 4. `verify:patches`（显式空账本）
+3. `test:integration`（54 测试，9 文件）→ 6. `test:shared-home`（真实 DSH 图双向会话）
+4. `package:dir`（当前 HEAD 重建 staging + 内联门禁）→ 8. `verify:compatibility`（fresh staging 字节一致）
+5. `package:dmg` → 10. `verify:artifacts` → 11. `smoke:package`（15 场景安装级冒烟）
 6. candidate 归档 + `rehearse:upgrade`（15/15 步）
-7. 链内每步失败即中止
+
+链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
 最终轮数字（制品 SHA、releaseId、测试计数）见 §7；单测/集成确切计数以 `verify:release` 日志为准。
 
