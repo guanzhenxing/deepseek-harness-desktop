@@ -302,10 +302,20 @@ export async function listSessions(home) {
       const file = path.join(root, project.name, session.name, 'session.jsonl')
       const content = await readFile(file, 'utf8').catch(() => undefined)
       if (content === undefined) continue
-      const lines = content
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line))
+      const nonEmpty = content.split('\n').filter(Boolean)
+      const lines = nonEmpty
+        .map((line, index) => {
+          try {
+            return JSON.parse(line)
+          } catch {
+            // A trailing line still being appended (no closing newline) can
+            // be torn mid-write; anything else is real corruption and must
+            // fail loudly instead of vanishing into a count mismatch.
+            if (index === nonEmpty.length - 1 && !content.endsWith('\n')) return undefined
+            throw new Error(`session jsonl corrupt at ${file}: ${line.slice(0, 120)}`)
+          }
+        })
+        .filter((line) => line !== undefined)
       sessions.push({
         file,
         header: lines.find((line) => line.type === 'session'),
