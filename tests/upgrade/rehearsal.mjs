@@ -109,6 +109,11 @@ function isLeaseCoordination(relative) {
  * launcher never blocks quit on a failed release (M1 semantics), so a slow
  * or retried release briefly leaves run/host.lock behind — the M3 package
  * smoke waits the same way before any CLI round.
+ *
+ * The frozen M3 previous artifact also has a flaky release (its probe can
+ * fail during quit, leaving a genuinely stale lock whose owner is gone);
+ * there `doctor --unlock` — its own designed remediation — cleans up. The
+ * M4 candidate gets no such tolerance: its release path must be clean.
  */
 async function waitForLeaseGone(home, timeoutMs = 30_000) {
   const { stat } = await import('node:fs/promises')
@@ -125,6 +130,24 @@ async function waitForLeaseGone(home, timeoutMs = 30_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
+}
+
+async function waitForPreviousLeaseGone(cliEntry, home, cwd) {
+  try {
+    await waitForLeaseGone(home)
+    return
+  } catch {
+    // The previous app left a stale lock (owner gone). Clean it through the
+    // previous CLI's own doctor path, exactly as a user would.
+  }
+  const doctor = await runInstalledCli(cliEntry, ['doctor', '--unlock'], { home, cwd })
+  if (doctor.code !== 0) {
+    fail(
+      'lease release',
+      `previous app left a stale lock and doctor refused: ${doctor.output.slice(-200)}`,
+    )
+  }
+  await waitForLeaseGone(home, 10_000)
 }
 
 async function assertOnlyCoordinationChanged(step, home, before) {
@@ -241,7 +264,7 @@ export async function runUpgradeRehearsal(input) {
         await driveOneTurn(client, { cwd: fixture.cwd, text: 'previous desktop seeds the home' })
       },
     })
-    await waitForLeaseGone(fixture.home)
+    await waitForPreviousLeaseGone(previousInstall.cliEntry, fixture.home, fixture.cwd)
     record(
       'previous-desktop-boot',
       true,
@@ -452,13 +475,13 @@ export async function runUpgradeRehearsal(input) {
       })
       const refused =
         threwRefusal ||
-        (reports.some((report) => report.kind === 'failed' && report.stage === 'home-admission') ||
+        ((reports.some((report) => report.kind === 'failed' && report.stage === 'home-admission') ||
           reports.some(
             (report) => report.kind === 'recovery' && report.step === 'recovery-view-reached',
           )) &&
-        // The refusal must never reach a booted surface: a recovery view that
-        // follows a ui-ready would be a different failure wearing this label.
-        !reports.some((report) => report.kind === 'ui-ready')
+          // The refusal must never reach a booted surface: a recovery view that
+          // follows a ui-ready would be a different failure wearing this label.
+          !reports.some((report) => report.kind === 'ui-ready'))
       if (!refused) {
         fail('desktop downgrade refusal', 'admission refusal was not observed')
       }
