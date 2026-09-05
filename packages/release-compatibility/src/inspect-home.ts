@@ -25,6 +25,8 @@ const MAX_SESSION_PROJECTS = 32
 const MAX_SESSIONS_PER_PROJECT = 32
 const MAX_STORAGE_ENTRIES = 64
 const MAX_PROFILE_ENTRIES = 32
+/** Per-unit interior walk budget: linear, fail-closed on overflow. */
+const MAX_UNIT_INTERIOR_ENTRIES = 512
 const FIRST_LINE_BYTES = 4096
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
@@ -373,7 +375,11 @@ async function storagesFormatId(home: string): Promise<
     if (identity.isDirectory()) {
       // Per-record units take their identity from the directory name; the
       // version stamp lives in global.json when the domain has a global slot,
-      // otherwise in the record documents themselves.
+      // otherwise in the record documents themselves. The interior is walked
+      // in full (bounded): the inspection's containment promise — a planted
+      // symlink at an inspected data path is unknown, never followed —
+      // covers the record paths this release writes, not just the unit
+      // envelope.
       const global = path.join(target, 'global.json')
       if (await regularFile(global)) {
         const stamp = await readRecordStamp(global)
@@ -382,11 +388,13 @@ async function storagesFormatId(home: string): Promise<
           continue
         }
         if (entry === 'session_projcache') projcacheFromDirectory = stamp
+        await auditUnitInterior(target, home, unknown)
         continue
       }
       if (entry === 'session_projcache') {
         projcacheFromDirectory = await sampleRecordStamp(target)
       }
+      await auditUnitInterior(target, home, unknown)
       continue
     }
     // present but neither file nor directory (fifo, socket, ...)
@@ -403,6 +411,70 @@ async function storagesFormatId(home: string): Promise<
   }
   if (!sawAny) return { state: 'absent' }
   return { state: 'known', formatId: STORAGE_UNIT_FORMAT_ID, unknown, projcache }
+}
+
+/**
+ * Containment walk of a per-record storage unit's interior: every entry must
+ * be a real directory (a table) or a real regular file, within the bounded
+ * budget. A symlink, FIFO, socket, or any other shape anywhere inside the
+ * unit — including a swapped global.json or a symlinked table/record — is
+ * surfaced as an unknown path: the runtime reads and writes these exact
+ * paths, so a planted link must never ride through admission hidden inside
+ * the unit envelope. Overflowing the budget flags the unit instead of
+ * silently leaving the tail uninspected.
+ */
+async function auditUnitInterior(
+  unitDirectory: string,
+  home: string,
+  unknown: string[],
+): Promise<void> {
+  let walked = 0
+  const tables = await readdirSafe(unitDirectory)
+  if (tables === 'unreadable') {
+    unknown.push(path.relative(home, unitDirectory))
+    return
+  }
+  for (const table of tables) {
+    walked += 1
+    if (walked > MAX_UNIT_INTERIOR_ENTRIES) {
+      unknown.push(path.relative(home, unitDirectory))
+      return
+    }
+    const tableDir = path.join(unitDirectory, table)
+    const tableIdentity = await safeLstat(tableDir)
+    if (tableIdentity === undefined) continue
+    if (tableIdentity.isSymbolicLink()) {
+      unknown.push(path.relative(home, tableDir))
+      continue
+    }
+    if (!tableIdentity.isDirectory()) {
+      // The domain-global document is the one regular file allowed at unit
+      // level (its content is classified separately); any other file — or a
+      // non-regular global.json — is not part of the per-record layout.
+      if (!(table === 'global.json' && tableIdentity.isFile())) {
+        unknown.push(path.relative(home, tableDir))
+      }
+      continue
+    }
+    const records = await readdirSafe(tableDir)
+    if (records === 'unreadable') {
+      unknown.push(path.relative(home, tableDir))
+      continue
+    }
+    for (const record of records) {
+      walked += 1
+      if (walked > MAX_UNIT_INTERIOR_ENTRIES) {
+        unknown.push(path.relative(home, unitDirectory))
+        return
+      }
+      const recordPath = path.join(tableDir, record)
+      const recordIdentity = await safeLstat(recordPath)
+      if (recordIdentity === undefined) continue
+      if (recordIdentity.isSymbolicLink() || !recordIdentity.isFile()) {
+        unknown.push(path.relative(home, recordPath))
+      }
+    }
+  }
 }
 
 /**

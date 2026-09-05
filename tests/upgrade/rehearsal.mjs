@@ -448,6 +448,18 @@ export async function runUpgradeRehearsal(input) {
         if (items.length < 3) {
           fail('candidate restart', `restart lists ${items.length} sessions, expected at least 3`)
         }
+        // Listing proves headers only. Continuing the seeded session forces
+        // the restarted Host to load the full prior history through its real
+        // providers — the restart-round equivalent of the upgrade round's
+        // API-level readability proof.
+        const continued = await driveOneTurn(client, {
+          cwd: fixture.cwd,
+          sessionId: seededSessionId,
+          text: 'candidate restart re-reads the seeded history',
+        })
+        if (continued !== seededSessionId) {
+          fail('candidate restart', `restart continuation drifted to a new session ${continued}`)
+        }
       },
     })
     await waitForLeaseGone(candidateHome)
@@ -455,8 +467,31 @@ export async function runUpgradeRehearsal(input) {
     if (restartedSessions.length !== 3) {
       fail('candidate restart', `restart lost sessions: found ${restartedSessions.length}`)
     }
+    const restartedSeeded = restartedSessions.find(
+      (session) => session.header.id === seededSessionId,
+    )
+    if (restartedSeeded === undefined) {
+      fail('candidate restart', 'seeded session vanished across the restart round')
+    }
+    const restartedBytes = await readFile(restartedSeeded.file, 'utf8')
+    if ((await waitForTurns(restartedSeeded.file, 3)) < 3) {
+      fail('candidate restart', 'seeded session did not gain the restart-round turn')
+    }
+    for (const marker of [
+      'previous desktop seeds the home',
+      'candidate continues the seeded session',
+      'candidate restart re-reads the seeded history',
+    ]) {
+      if (!restartedBytes.includes(marker)) {
+        fail('candidate restart', `seeded history lost the turn text ${JSON.stringify(marker)}`)
+      }
+    }
     await assertThirdPartyBundleUnchanged(bundle)
-    record('candidate-restart', true, 'restart re-reads history and new content')
+    record(
+      'candidate-restart',
+      true,
+      'restart re-reads the seeded history (continued in place, all three rounds preserved)',
+    )
 
     // -- Step 7: refusal negatives against the real installed artifacts. ----
     const cases = JSON.parse(
@@ -488,6 +523,15 @@ export async function runUpgradeRehearsal(input) {
           await writeFile(
             path.join(negativeHome, refusalCase.foreignFile.path),
             refusalCase.foreignFile.content,
+          )
+        } else if (refusalCase.foreignSymlink !== undefined) {
+          await mkdir(path.dirname(path.join(negativeHome, refusalCase.foreignSymlink.path)), {
+            recursive: true,
+          })
+          const { symlink } = await import('node:fs/promises')
+          await symlink(
+            refusalCase.foreignSymlink.target,
+            path.join(negativeHome, refusalCase.foreignSymlink.path),
           )
         }
         const before = await dataDigests(negativeHome)

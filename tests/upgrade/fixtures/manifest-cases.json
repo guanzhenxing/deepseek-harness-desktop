@@ -42,6 +42,16 @@
       },
       "appliesTo": ["candidate"],
       "expectedRefusal": ["cli-exit-5"]
+    },
+    {
+      "id": "storage-inner-symlink",
+      "description": "a symlink planted INSIDE a per-record storage unit (record file → outside the home): the interior containment walk must refuse it, not adopt the unit envelope and write through the link",
+      "foreignSymlink": {
+        "path": "storages/fixture-domain/sessions/session-1.json",
+        "target": "../../../../../../../../etc/hostname"
+      },
+      "appliesTo": ["candidate"],
+      "expectedRefusal": ["cli-exit-5"]
     }
   ]
 }

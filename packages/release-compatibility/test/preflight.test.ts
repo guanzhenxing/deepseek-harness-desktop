@@ -397,6 +397,114 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('flags symlinks planted INSIDE a per-record storage unit, not only at its top level', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await writeFile(path.join(outside, 'escape.json'), '{"version":1,"record":null}')
+        await mkdir(path.join(outside, 'escape-table'), { recursive: true })
+
+        const domain = path.join(home, 'storages', 'fixture-domain')
+        await mkdir(path.join(domain, 'sessions'), { recursive: true })
+        await writeFile(
+          path.join(domain, 'sessions', 'session-1.json'),
+          '{"version":1,"record":null}',
+        )
+        // global.json swapped for a symlink out of the home.
+        await symlink(path.join(outside, 'escape.json'), path.join(domain, 'global.json'))
+        const observed = await inspectHomeFormats(home)
+        expect(observed.unknownPaths).toContain('storages/fixture-domain/global.json')
+        expect(observed.formats.storages).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlinked table directory inside a storage unit', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await mkdir(path.join(outside, 'escape-table'), { recursive: true })
+        await writeFile(
+          path.join(outside, 'escape-table', 'record.json'),
+          '{"version":1,"record":null}',
+        )
+        const domain = path.join(home, 'storages', 'fixture-domain')
+        await mkdir(domain, { recursive: true })
+        await symlink(path.join(outside, 'escape-table'), path.join(domain, 'sessions'))
+        const observed = await inspectHomeFormats(home)
+        expect(observed.unknownPaths).toContain('storages/fixture-domain/sessions')
+        expect(observed.formats.storages).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlinked record file inside a storage unit table', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await writeFile(path.join(outside, 'escape-record.json'), '{"version":1,"record":null}')
+        const table = path.join(home, 'storages', 'fixture-domain', 'sessions')
+        await mkdir(table, { recursive: true })
+        await symlink(path.join(outside, 'escape-record.json'), path.join(table, 'session-1.json'))
+        const observed = await inspectHomeFormats(home)
+        expect(observed.unknownPaths).toContain('storages/fixture-domain/sessions/session-1.json')
+        expect(observed.formats.storages).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a named pipe planted inside a storage unit directory', async () => {
+    const home = await tempHome()
+    try {
+      const domain = path.join(home, 'storages', 'fixture-domain')
+      await mkdir(domain, { recursive: true })
+      mkfifoSync(path.join(domain, 'global.json'))
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('storages/fixture-domain/global.json')
+      expect(observed.formats.storages).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlink inside the projcache domain instead of silently sampling nothing', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await writeFile(path.join(outside, 'escape-record.json'), '{"version":4,"record":null}')
+        const table = path.join(home, 'storages', 'session_projcache', 'sessions')
+        await mkdir(table, { recursive: true })
+        await symlink(path.join(outside, 'escape-record.json'), path.join(table, 'session-1.json'))
+        const observed = await inspectHomeFormats(home)
+        expect(observed.unknownPaths).toContain(
+          'storages/session_projcache/sessions/session-1.json',
+        )
+        expect(observed.formats.storages).toBeUndefined()
+        expect(observed.formats.projcache).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('flags a pre-release flat credentials file as an unknown path', async () => {
     const home = await tempHome()
     try {
