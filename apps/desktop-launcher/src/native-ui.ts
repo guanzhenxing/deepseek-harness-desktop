@@ -95,17 +95,26 @@ export function buildTrayMenuSpec(status: TrayStatus): MenuItemSpec[] {
 /**
  * About-panel facts from the version chain the compatibility manifest also
  * reads (Electron's own app version + process.versions), never hand-maintained
- * per-document strings.
+ * per-document strings. The DSH line — when the embedded release manifest can
+ * be read — goes into the credits text so the About panel shows exactly what
+ * the artifact embedded, not a separately maintained copy.
  */
 export function buildAboutPanelOptions(input: {
   productName: string
   desktopVersion: string
   electronVersion: string
-}): Readonly<{ applicationName: string; applicationVersion: string; version: string }> {
+  dshLine?: string
+}): Readonly<{
+  applicationName: string
+  applicationVersion: string
+  version: string
+  credits?: string
+}> {
   return Object.freeze({
     applicationName: input.productName,
     applicationVersion: input.desktopVersion,
     version: `Electron ${input.electronVersion}`,
+    ...(input.dshLine === undefined ? {} : { credits: input.dshLine }),
   })
 }
 

@@ -85,6 +85,17 @@ describe('buildAboutPanelOptions', () => {
       version: 'Electron 44.1.0',
     })
   })
+
+  it('surfaces the embedded release manifest facts as credits when present', () => {
+    const options = buildAboutPanelOptions({
+      productName: 'DeepSeek Harness Desktop',
+      desktopVersion: '1.2.3',
+      electronVersion: '44.1.0',
+      dshLine: 'DSH dsh-v0.1.2-alpha.3 (npm 0.1.2-alpha.3) · m4-1.2.3-darwin-arm64-98af342',
+    })
+    expect(options.credits).toContain('dsh-v0.1.2-alpha.3')
+    expect(options.credits).toContain('m4-1.2.3-darwin-arm64-98af342')
+  })
 })
 
 describe('NativeUiSession', () => {

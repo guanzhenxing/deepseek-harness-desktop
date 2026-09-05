@@ -5,7 +5,7 @@ import {
   type ProcessProbe,
 } from '@dsh-desktop/home-lease'
 
-import { resolveCliRuntime } from './runtime-paths.js'
+import { resolveCliRuntime, resolveReleaseFactsLine } from './runtime-paths.js'
 
 export type RunDoctorUnlockInput = Readonly<{
   home: string
@@ -43,5 +43,9 @@ export async function runDoctorUnlock(input: RunDoctorUnlockInput): Promise<numb
     return 2
   }
   stderr.write(`dsh-native: ${result.status}: ${result.detail ?? 'home lock state'}\n`)
+  const releaseFacts = resolveReleaseFactsLine()
+  if (releaseFacts !== undefined) {
+    stderr.write(`dsh-native: ${releaseFacts}\n`)
+  }
   return 0
 }

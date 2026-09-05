@@ -25,6 +25,14 @@
     "schemaVersion": 1,
     "m0HomePolicy": "electron-userData-isolated"
   },
+  "release": {
+    "manifestSchemaVersion": 2,
+    "dataEpoch": 1,
+    "policy": "build/compatibility-policy.json",
+    "upstreamArtifacts": "build/upstream-artifacts.json",
+    "patchLedger": "patches/manifest.json",
+    "$comment": "Mapping to the schema-2 embedded release manifest. The facts above stay the source baseline; the manifest is generated from them plus the policy/upstream/lockfile inputs (pnpm generate:compatibility) and never duplicates artifact SHAs — those stay external in release/artifacts.json."
+  },
   "verification": [
     {
       "date": "2026-09-02",

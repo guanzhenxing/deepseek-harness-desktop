@@ -97,11 +97,44 @@ if (process.platform === 'darwin') {
     }
   })
 }
+/**
+ * DSH release facts for the About panel, read from the embedded release
+ * manifest (packaged) or the repository baseline document (development).
+ * A missing or corrupt manifest degrades to no DSH line — the About panel
+ * never invents version facts and startup never depends on it.
+ */
+function loadReleaseDshLine(): string | undefined {
+  const manifestPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'compatibility.json')
+    : path.join(import.meta.dirname, '..', '..', '..', 'docs', 'compatibility.json')
+  try {
+    const facts: {
+      releaseId?: unknown
+      dataEpoch?: unknown
+      dsh?: { tag?: unknown; npmVersion?: unknown }
+      release?: { dataEpoch?: unknown }
+    } = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    const { dsh } = facts
+    if (typeof dsh?.tag !== 'string' || typeof dsh?.npmVersion !== 'string') return undefined
+    const epoch = [facts.dataEpoch, facts.release?.dataEpoch].find(
+      (value) => typeof value === 'number',
+    )
+    const release =
+      typeof facts.releaseId === 'string' ? ` ${facts.releaseId}` : ' development source'
+    return `DSH ${dsh.tag} (npm ${dsh.npmVersion}) ·${release}${
+      epoch === undefined ? '' : ` · data epoch ${epoch}`
+    }`
+  } catch {
+    return undefined
+  }
+}
+const releaseDshLine = loadReleaseDshLine()
 app.setAboutPanelOptions(
   buildAboutPanelOptions({
     productName: PRODUCT.name,
     desktopVersion: app.getVersion(),
     electronVersion: process.versions.electron,
+    ...(releaseDshLine === undefined ? {} : { dshLine: releaseDshLine }),
   }),
 )
 

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "$comment": "Provenance of the pinned upstream runtime artifacts shipped in a DeepSeek Harness Desktop candidate. The DSH runtime is consumed as official npm publishes of the pinned upstream tag — no forks, no local patches (see docs/upstream-baseline.md once Task 2 lands).",
+  "dsh": {
+    "tag": "dsh-v0.1.2-alpha.3",
+    "commit": "dd6322d604e00eec1ba5e0c8541159906a21094a",
+    "npmVersion": "0.1.2-alpha.3",
+    "source": "npm-registry",
+    "evidence": [
+      "https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.3",
+      "https://github.com/deepseek-ai/deepseek-harness/commit/dd6322d604e00eec1ba5e0c8541159906a21094a"
+    ],
+    "packages": [
+      {
+        "name": "@deepseek-ai/dsh",
+        "version": "0.1.2-alpha.3",
+        "integrity": "sha512-VvATzYmQ4LMJREJ9e2POKksSHRfqP3y9pghplLBaQBuw2BqfbC0mQUVsaPwxe4wlcpj+riEgn8OJB01YnpF+3A==",
+        "tarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.2-alpha.3.tgz"
+      }
+    ],
+    "closurePolicy": "every @deepseek-ai/dsh* package in the lockfile must resolve to this exact npmVersion; verify:dsh-closure enforces it against the lockfile and the staged trees"
+  },
+  "toolchain": [
+    {
+      "name": "node",
+      "version": "24.11.1",
+      "source": "https://nodejs.org/dist/v24.11.1/SHASUMS256.txt",
+      "verification": "tarball digest checked against the official SHASUMS256.txt entry at staging time"
+    },
+    {
+      "name": "pnpm",
+      "version": "11.7.0",
+      "source": "https://registry.npmjs.org/pnpm/-/pnpm-11.7.0.tgz",
+      "integrity": "sha512-GcyFLBIMcSV2DyRD7mvgyltA+fUFmN4aCaHxd1A+AQ5Xwjx3ZG4B52HeWb+HT7IqM5jDOrlpH8E+uUa28PTWIA=="
+    },
+    {
+      "name": "electron",
+      "version": "44.1.0",
+      "source": "apps/desktop-launcher/package.json devDependencies.electron, resolved through pnpm-lock.yaml integrity records"
+    }
+  ]
+}

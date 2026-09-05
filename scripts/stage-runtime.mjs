@@ -17,7 +17,7 @@
 // resolves through the repository, the pnpm store, or system Node/pnpm.
 import { Buffer } from 'node:buffer'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   chmod,
@@ -35,6 +35,8 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { embedRuntimeFacts, generateReleaseManifest } from './generate-compatibility.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const staging = path.join(root, 'release', 'staging')
@@ -79,13 +81,6 @@ function verifyIntegrity(bytes, expected, label) {
   if (`${algorithm}-${digest}` !== expected) {
     throw new Error(`${label} integrity mismatch: expected ${expected}, got ${algorithm}-${digest}`)
   }
-}
-
-async function gitCommitShort() {
-  return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-    cwd: root,
-    encoding: 'utf8',
-  }).trim()
 }
 
 async function fetchChecked(url, target, expectedSha256Hex) {
@@ -323,30 +318,26 @@ async function closureDigest(closureRoot) {
 }
 
 async function writeCompatibilityManifest(arch) {
-  const releaseId = `m3-${rootManifest.version}-${process.platform}-${arch}-${await gitCommitShort()}`
-  const manifest = {
-    schemaVersion: 1,
-    releaseId,
-    desktopVersion: rootManifest.version,
+  // The release facts (schema 2) come from the same generator as
+  // `generate:compatibility` — staging must never synthesize its own version
+  // truth. Runtime facts gathered from the staged tree wrap around that core.
+  const releaseManifest = await generateReleaseManifest({ arch })
+  const manifest = embedRuntimeFacts(releaseManifest, {
     productExecutableName: product.name,
     appId: product.appId,
-    dsh: compatibilityDoc.dsh,
     electron: launcherManifest.devDependencies.electron,
     node: NODE_BASELINE,
     pnpm: PNPM_VERSION,
-    platform: process.platform,
-    arch,
-    generatedAt: new Date().toISOString(),
     closureDigest: {
       'runtime-host': await closureDigest(path.join(staging, 'runtime-host')),
       'runtime-cli': await closureDigest(path.join(staging, 'runtime-cli')),
     },
-  }
+  })
   await writeFile(
     path.join(staging, 'compatibility.json'),
     `${JSON.stringify(manifest, undefined, 2)}\n`,
   )
-  return { releaseId }
+  return { releaseId: releaseManifest.releaseId }
 }
 
 async function stageRecoveryAssets() {

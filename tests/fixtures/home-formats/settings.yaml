@@ -1,0 +1,5 @@
+# Fixture: the settings.yaml document shape read by
+# @deepseek-ai/dsh-settings-file@0.1.2-alpha.3 (no upstream numeric schema
+# version — the provider build is the format identity).
+llm-deepseek:
+  baseURL: https://api.deepseek.example

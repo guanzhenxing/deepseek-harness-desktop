@@ -26,6 +26,45 @@ export type CliRuntimePaths = Readonly<{
   scanArgvNeedles: readonly string[]
 }>
 
+/**
+ * One-line release facts for diagnostics, read from the embedded release
+ * manifest (installed `.app`) or the repository baseline document
+ * (development). Undefined when no manifest can be read — diagnostics
+ * degrade, they never invent version facts.
+ */
+export function resolveReleaseFactsLine(): string | undefined {
+  const candidates = [
+    // packaged: <Contents/Resources>/compatibility.json next to runtime-cli/
+    path.join(packageRoot, '..', 'compatibility.json'),
+    // development: <repo>/docs/compatibility.json
+    path.join(packageRoot, '..', '..', 'docs', 'compatibility.json'),
+  ]
+  for (const candidate of candidates) {
+    let facts: {
+      releaseId?: unknown
+      dataEpoch?: unknown
+      release?: { dataEpoch?: unknown }
+      dsh?: { tag?: unknown; npmVersion?: unknown }
+    }
+    try {
+      facts = JSON.parse(readFileSync(candidate, 'utf8'))
+    } catch {
+      continue
+    }
+    const dsh = facts.dsh
+    if (typeof dsh?.tag !== 'string' || typeof dsh?.npmVersion !== 'string') continue
+    const epoch = [facts.dataEpoch, facts.release?.dataEpoch].find(
+      (value) => typeof value === 'number',
+    )
+    const release =
+      typeof facts.releaseId === 'string' ? ` ${facts.releaseId}` : ' development source'
+    return `DSH ${dsh.tag} (npm ${dsh.npmVersion}) ·${release}${
+      epoch === undefined ? '' : ` · data epoch ${epoch}`
+    }`
+  }
+  return undefined
+}
+
 /** Resolve the official `dsh` bin through the package manifest only. */
 export function resolveOfficialDshBin(): string {
   const requireHere = createRequire(path.join(packageRoot, 'package.json'))

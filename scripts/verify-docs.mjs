@@ -69,6 +69,36 @@ async function verifyCompatibilityManifest() {
   }
 }
 
+async function verifyReleaseMapping(compatibility) {
+  const release = compatibility.release
+  if (release === undefined) return
+  if (release.manifestSchemaVersion !== 2) {
+    errors.push('docs/compatibility.json: release.manifestSchemaVersion must be 2')
+  }
+  for (const key of ['policy', 'upstreamArtifacts', 'patchLedger']) {
+    const relative = release[key]
+    if (typeof relative !== 'string') {
+      errors.push(`docs/compatibility.json: release.${key} must name a repository file`)
+      continue
+    }
+    if (!(await exists(path.join(repositoryRoot, relative)))) {
+      errors.push(`docs/compatibility.json: release.${key} points at missing file ${relative}`)
+    }
+  }
+  try {
+    if (typeof release.policy === 'string') {
+      const policy = JSON.parse(await readFile(path.join(repositoryRoot, release.policy), 'utf8'))
+      if (policy.dataEpoch !== release.dataEpoch) {
+        errors.push(
+          `docs/compatibility.json: release.dataEpoch ${release.dataEpoch} differs from policy epoch ${policy.dataEpoch}`,
+        )
+      }
+    }
+  } catch (error) {
+    errors.push(`docs/compatibility.json: cannot read release policy: ${error.message}`)
+  }
+}
+
 async function exists(filePath) {
   try {
     await access(filePath)
@@ -156,6 +186,14 @@ for (const relativePath of requiredDocuments) {
 const markdownFiles = await collectMarkdownFiles(repositoryRoot)
 await Promise.all(markdownFiles.map(verifyMarkdownFile))
 await verifyCompatibilityManifest()
+
+try {
+  await verifyReleaseMapping(
+    JSON.parse(await readFile(path.join(repositoryRoot, 'docs', 'compatibility.json'), 'utf8')),
+  )
+} catch {
+  // unreadable compatibility.json is already reported by verifyCompatibilityManifest
+}
 
 if (errors.length > 0) {
   console.error(`Documentation check failed with ${errors.length} error(s):`)
