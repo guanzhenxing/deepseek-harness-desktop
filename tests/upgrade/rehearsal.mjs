@@ -226,7 +226,9 @@ export async function runUpgradeRehearsal(input) {
   // accident on the DMG bytes.
   const corrupt = await makeCorruptDmgCopy(candidate.dmgPath)
   let corruptRejected = false
-  const corruptIndexDir = await mkdtemp(path.join(tmpdir(), 'dsh-corrupt-index-'))
+  // The negative index lives NEXT TO the corrupted DMG so its index-relative
+  // file reference resolves to the corrupted bytes.
+  const corruptIndexDir = path.dirname(corrupt.file)
   try {
     const corruptIndex = path.join(corruptIndexDir, 'artifacts.json')
     await writeFile(
@@ -250,7 +252,6 @@ export async function runUpgradeRehearsal(input) {
     corruptRejected = /digest mismatch/.test(String(error.message))
     if (!corruptRejected) throw error
   } finally {
-    await rm(corruptIndexDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     await corrupt.dispose()
   }
   record(
