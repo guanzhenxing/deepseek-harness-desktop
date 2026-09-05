@@ -588,7 +588,7 @@ v1 是本机自用构建，不实现自动更新。构建输出包含：
 
 ## 10. 实施里程碑
 
-M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。这些计划以 M0 验收提交 `2f84e04` 为起点；M1、M2 已实施验收并合并 `main`；M3 已实施并通过 codex 复审与制品级验收（`codex/m3-packaged-desktop`，合并待定，见 [M3 验收记录](validation/m3-acceptance.md)）；M4 尚未实施。
+M1–M4 已拆成可交给 zcode 的逐任务文档，见 [执行路线与交接](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。这些计划以 M0 验收提交 `2f84e04` 为起点；M1、M2 已实施验收并合并 `main`；M3 已实施、通过 codex 复审与制品级验收并合并 `main`；M4 已实施并通过制品级演练验收（`codex/m4-release-compatibility`，见 [M4 验收记录](validation/m4-acceptance.md)）。
 
 ### M0：独立最小闭环（2026-09-02 完成源码级验收）
 

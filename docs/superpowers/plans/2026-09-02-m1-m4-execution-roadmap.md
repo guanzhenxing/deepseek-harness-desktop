@@ -1,7 +1,7 @@
 # M1–M4：zcode 执行路线与交接
 
 - 日期：2026-09-02
-- 状态：M1 已实施、审查与验收完成（2026-09-02 合并 `main` @ `6d7a19e`，验收记录见 [M1 验收](../../validation/m1-acceptance.md)）；M2 已实施、通过六轮审查与源码级验收并合并 `main`（2026-09-03 @ `fc54de8`，见 [M2 验收](../../validation/m2-acceptance.md)）；M3 已实施并通过 codex 两轮复审与制品级验收（`codex/m3-packaged-desktop` 待合并，见 [M3 验收](../../validation/m3-acceptance.md)）；M4 未实施
+- 状态：M1 已实施、审查与验收完成（2026-09-02 合并 `main` @ `6d7a19e`，验收记录见 [M1 验收](../../validation/m1-acceptance.md)）；M2 已实施、通过六轮审查与源码级验收并合并 `main`（2026-09-03 @ `fc54de8`，见 [M2 验收](../../validation/m2-acceptance.md)）；M3 已实施、通过 codex 两轮复审与制品级验收并合并 `main`（见 [M3 验收](../../validation/m3-acceptance.md)）；M4 已实施并通过制品级演练验收（`codex/m4-release-compatibility`，见 [M4 验收](../../validation/m4-acceptance.md)）
 - 代码基线：`main`，`2f84e04`（M0 验收记录）；本次只修改文档
 - 需求权威：[实施方案](../../native-dsh-desktop-plan.md)、[架构](../../architecture.md)、[数据布局](../../data-layout.md)、[安全策略](../../../SECURITY.md)
 

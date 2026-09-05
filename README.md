@@ -6,7 +6,7 @@ DeepSeek Harness Desktop 是面向 macOS 个人本机使用的原生 DSH 桌面�
 
 M1 共享 home 已完成源码级验收：Desktop 与配套 CLI `dsh-native` 顺序共享同一 DSH home，任何 Host boot、profile 写入前都必须先取得整 home lease（原子 `mkdir` 锁 + OS 进程启动身份 + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）。CLI 子进程在 lease 上登记 OS 身份并等待授权后才 import 官方 `@deepseek-ai/dsh` 入口；`dsh-native doctor --unlock` 在确认没有活跃 owner 后清理残留锁，不提供 force 绕过。双向会话接续（CLI 创建→Desktop 继续、Desktop 创建→CLI 继续）有真实官方 DSH 图 + mock LLM 的集成与冒烟证据。
 
-Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M3 打包候选已完成制品级验收：托盘/菜单/窗口生命周期、受控外链、home 兼容性准入门（ADR-0009）、自含 Host/CLI 运行时候选 DMG（ad-hoc 签名、未公证）与 15 场景安装级冒烟（含安装应用上的真实恢复/Safe Mode 链）；M2 非破坏性恢复（10 类失败分类、修订事务、恢复窗口、Safe Mode）与 M1 共享 home/lease 见 [验收记录](docs/validation/)。验收详情：[M3 验收](docs/validation/m3-acceptance.md)。
+Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M4 发布兼容性已完成制品级演练验收：schema-2 发行清单（闭包/补丁/格式证据可机检，`generate:compatibility` + `verify:dsh-closure`/`verify:patches`）、home 格式勘察 + 预检 + marker 写入预约（未知格式/更高 epoch/需迁移数据在写入前拒绝，`HOME_FORMAT_*`/`HOME_MIGRATION_REQUIRED`）、以及真实制品升级演练（M3 DMG → M4 candidate：历史保留、第三方 bundle 不被触碰、降级/未知格式拒绝 15/15 步通过）。手动升级与回退流程见 [升级指南](docs/upgrade-guide.md)；上游基线与补丁对账见 [upstream-baseline](docs/upstream-baseline.md)。M3 打包（托盘/菜单/窗口生命周期、受控外链、自含 Host/CLI 运行时 DMG）与 M2 非破坏性恢复、M1 共享 home/lease 见 [验收记录](docs/validation/)；验收详情：[M4 验收](docs/validation/m4-acceptance.md)、[M3 验收](docs/validation/m3-acceptance.md)。
 
 v1 目标：
 
@@ -74,7 +74,7 @@ corepack pnpm@11.7.0 dsh-native -- --profile headless "..."   # 开发入口（�
 
 ## 文档
 
-- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1、M2 已合并 `main`；M3 已完成制品级验收（`codex/m3-packaged-desktop`，含 codex 复审修复，合并待定）；M4 待执行；
+- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1、M2、M3 已合并 `main`；M4 已实施并通过制品级演练验收（`codex/m4-release-compatibility`，见 [M4 验收](docs/validation/m4-acceptance.md)）；
 - [实施方案](docs/native-dsh-desktop-plan.md)：v1 范围、里程碑、测试和扩展路线；
 - [架构](docs/architecture.md)：组件、进程、信任边界和依赖方向；
 - [Host-control 1.0](docs/protocols/host-control.md)：launcher/Host normative 协议；

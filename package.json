@@ -41,7 +41,8 @@
     "typecheck": "tsc -b --force --pretty false",
     "smoke:package": "node tests/smoke/package.mjs",
     "rehearse:upgrade": "node scripts/rehearse-upgrade.mjs",
-    "verify:artifacts": "node scripts/verify-artifacts.mjs"
+    "verify:artifacts": "node scripts/verify-artifacts.mjs",
+    "verify:release": "node scripts/verify-release.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
