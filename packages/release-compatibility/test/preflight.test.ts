@@ -303,6 +303,27 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('prefers the live per-record domain layout over a stale single-unit file', async () => {
+    const home = await tempHome()
+    try {
+      const domain = path.join(home, 'storages', 'session_projcache', 'sessions')
+      await mkdir(domain, { recursive: true })
+      await writeFile(path.join(domain, 'session-1.json'), '{"version":4,"record":{"watermark":7}}')
+      // A migrated home keeps the old single-unit document around; the live
+      // layout is the per-record directory.
+      await writeFile(
+        path.join(home, 'storages', 'session_projcache.json'),
+        '{"unit":{"name":"session_projcache","version":3},"global":null,"tables":{}}',
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.projcache).toBe('dsh-session-projcache-4')
+      expect(observed.formats.storages).toBe('dsh-storage-unit-0.1.2-alpha.3')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('flags a pre-release flat credentials file as an unknown path', async () => {
     const home = await tempHome()
     try {

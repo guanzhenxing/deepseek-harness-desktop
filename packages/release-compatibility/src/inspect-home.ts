@@ -243,6 +243,8 @@ async function storagesFormatId(home: string): Promise<
   const unknown: string[] = []
   let sawAny = false
   let projcache: 4 | 'foreign' | 'none' = 'none'
+  let projcacheFromSingleFile: number | undefined
+  let projcacheFromDirectory: number | undefined
   const entries = (await readdir(storagesDir).catch(() => [])).slice(0, MAX_STORAGE_ENTRIES)
   for (const entry of entries) {
     const target = path.join(storagesDir, entry)
@@ -256,21 +258,37 @@ async function storagesFormatId(home: string): Promise<
         continue
       }
       if (unit.name === 'session_projcache') {
-        projcache = unit.version === 4 ? 4 : 'foreign'
+        projcacheFromSingleFile = unit.version
       }
       continue
     }
     if (identity.isDirectory()) {
+      // Per-record units take their identity from the directory name; the
+      // version stamp lives in global.json when the domain has a global slot,
+      // otherwise in the record documents themselves.
       const global = path.join(target, 'global.json')
       if (await regularFile(global)) {
         const stamp = await readRecordStamp(global)
         if (stamp === undefined) {
           unknown.push(path.relative(home, global))
-        } else if (entry === 'session_projcache') {
-          projcache = stamp === 4 ? 4 : 'foreign'
+          continue
         }
+        if (entry === 'session_projcache') projcacheFromDirectory = stamp
+        continue
+      }
+      if (entry === 'session_projcache') {
+        projcacheFromDirectory = await sampleRecordStamp(target)
       }
     }
+  }
+  // The projection-cache domain's live layout wins: a migrated home keeps a
+  // stale single-unit file from an older domain version next to the current
+  // per-record directory, and that leftover must not flip the slot to
+  // foreign. The single file decides only when no directory exists.
+  if (projcacheFromDirectory !== undefined) {
+    projcache = projcacheFromDirectory === 4 ? 4 : 'foreign'
+  } else if (projcacheFromSingleFile !== undefined) {
+    projcache = projcacheFromSingleFile === 4 ? 4 : 'foreign'
   }
   if (!sawAny) return { state: 'absent' }
   return { state: 'known', formatId: STORAGE_UNIT_FORMAT_ID, unknown, projcache }
@@ -300,6 +318,26 @@ async function readUnitHeader(
   } catch {
     return undefined
   }
+}
+
+/**
+ * Sample the first record document of a per-record unit's first table to read
+ * its version stamp. Bounded to one level and a handful of files.
+ */
+async function sampleRecordStamp(unitDirectory: string): Promise<number | undefined> {
+  const tables = (await readdir(unitDirectory, { withFileTypes: true }).catch(() => [])).filter(
+    (entry) => entry.isDirectory(),
+  )
+  for (const table of tables.slice(0, 4)) {
+    const records = (
+      await readdir(path.join(unitDirectory, table.name), { withFileTypes: true }).catch(() => [])
+    ).filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    for (const record of records.slice(0, 2)) {
+      const stamp = await readRecordStamp(path.join(unitDirectory, table.name, record.name))
+      if (stamp !== undefined) return stamp
+    }
+  }
+  return undefined
 }
 
 /**

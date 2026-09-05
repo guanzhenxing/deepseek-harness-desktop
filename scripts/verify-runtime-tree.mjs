@@ -15,8 +15,9 @@
 //
 // Usage: node scripts/verify-runtime-tree.mjs [--staging <dir>]
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { access, constants, readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { access, constants, mkdtemp, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -378,13 +379,17 @@ async function main() {
   // NODE_PATH/NODE_OPTIONS, and a neutral cwd outside the repository.
   const shim = path.join(stagingRoot, 'runtime-cli', 'bin', 'dsh-native')
   await access(shim, constants.X_OK).catch(() => errors.push('dsh-native shim is not executable'))
+  const isolatedHome = await mkdtemp(path.join(tmpdir(), 'dsh-shim-home-'))
   const shimRun = spawnSync(shim, ['--version'], {
     encoding: 'utf8',
     cwd: '/tmp',
     env: {
       PATH: '/usr/bin:/bin',
       HOME: process.env.HOME,
-      // No DSH_HOME: the version path takes no lease and writes no home.
+      // The compatibility chain inspects whatever home the CLI targets; the
+      // gate must depend on machine-independent state only, so it points the
+      // shim at an empty isolated home (never the developer's real ~/.dsh).
+      DSH_HOME: isolatedHome,
     },
   })
   if (shimRun.status !== 0) {
@@ -392,6 +397,7 @@ async function main() {
       `dsh-native shim failed under a scrubbed environment (status ${shimRun.status}): ${shimRun.stderr}`,
     )
   }
+  await rm(isolatedHome, { recursive: true, force: true })
 
   // Native addon ABI verification needs the development Electron binary.
   const electronBinary = createRequire(path.join(root, 'apps', 'desktop-launcher', 'package.json'))(
