@@ -107,6 +107,19 @@ async function readdirSafe(directory: string): Promise<readonly string[] | 'unre
   }
 }
 
+/**
+ * Classification for a directory the inspection wants to descend into:
+ * 'real-dir' (safe to follow), 'absent', or 'foreign' (a symlink or
+ * non-directory planted where data lives — never followed, surfaced as
+ * unknown data).
+ */
+async function directoryKind(directory: string): Promise<'real-dir' | 'absent' | 'foreign'> {
+  const identity = await safeLstat(directory)
+  if (identity === undefined) return 'absent'
+  if (identity.isSymbolicLink() || !identity.isDirectory()) return 'foreign'
+  return 'real-dir'
+}
+
 async function safeLstat(file: string) {
   return lstat(file).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined
@@ -151,6 +164,14 @@ async function readBoundedText(
   file: string,
   capBytes: number,
 ): Promise<string | 'too-large' | 'unreadable'> {
+  // Opening a FIFO for reading blocks until a writer appears — a planted
+  // named pipe would hang the boot path forever. Symlinks are followed by
+  // open(), letting planted links read outside the home. Both are refused
+  // before open: only real regular files are ever opened.
+  const identity = await safeLstat(file)
+  if (identity === undefined || identity.isSymbolicLink() || !identity.isFile()) {
+    return 'unreadable'
+  }
   const handle = await openFile(file)
   if (handle === undefined) return 'unreadable'
   try {
@@ -205,8 +226,13 @@ async function sessionsFormatId(
   const projects = projectsAll.slice(0, MAX_SESSION_PROJECTS)
   for (const project of projects) {
     const projectDir = path.join(sessionsDir, project)
-    const projectIdentity = await safeLstat(projectDir)
-    if (projectIdentity === undefined || !projectIdentity.isDirectory()) continue
+    const projectKind = await directoryKind(projectDir)
+    if (projectKind === 'absent') continue
+    if (projectKind === 'foreign') {
+      sawAllKnown = false
+      unknown.push(path.relative(home, projectDir))
+      continue
+    }
     const sessionIdsAll = await readdirSafe(projectDir)
     if (sessionIdsAll === 'unreadable') {
       sawAllKnown = false
@@ -216,6 +242,13 @@ async function sessionsFormatId(
     const sessionIds = sessionIdsAll.slice(0, MAX_SESSIONS_PER_PROJECT)
     for (const sessionId of sessionIds) {
       const sessionDir = path.join(projectDir, sessionId)
+      const sessionKind = await directoryKind(sessionDir)
+      if (sessionKind === 'foreign') {
+        sawAllKnown = false
+        unknown.push(path.relative(home, sessionDir))
+        continue
+      }
+      if (sessionKind === 'absent') continue
       const plain = path.join(sessionDir, 'session.jsonl')
       const zstd = path.join(sessionDir, 'session.jsonl.zstd')
       if (await regularFile(plain)) {
@@ -322,6 +355,10 @@ async function storagesFormatId(home: string): Promise<
     const identity = await safeLstat(target)
     if (identity === undefined) continue
     sawAny = true
+    if (identity.isSymbolicLink()) {
+      unknown.push(path.relative(home, target))
+      continue
+    }
     if (identity.isFile()) {
       const unit = await readUnitHeader(target)
       if (unit === undefined) {
@@ -350,7 +387,10 @@ async function storagesFormatId(home: string): Promise<
       if (entry === 'session_projcache') {
         projcacheFromDirectory = await sampleRecordStamp(target)
       }
+      continue
     }
+    // present but neither file nor directory (fifo, socket, ...)
+    unknown.push(path.relative(home, target))
   }
   // The projection-cache domain's live layout wins: a migrated home keeps a
   // stale single-unit file from an older domain version next to the current
@@ -456,10 +496,24 @@ async function profilesFormatId(
   const entries = entriesAll.slice(0, MAX_PROFILE_ENTRIES)
   for (const entry of entries) {
     if (entry.startsWith('.')) continue // runtime launch roots are not data
-    const manifest = path.join(profilesDir, entry, 'package.json')
+    const profileDir = path.join(profilesDir, entry)
+    const profileKind = await directoryKind(profileDir)
+    if (profileKind === 'absent') continue
+    if (profileKind === 'foreign') {
+      sawAny = true
+      sawUnknownManifest = true
+      unknown.push(path.relative(home, profileDir))
+      continue
+    }
+    const manifest = path.join(profileDir, 'package.json')
     const identity = await safeLstat(manifest)
     if (identity === undefined) continue
     sawAny = true
+    if (identity.isSymbolicLink() || !identity.isFile()) {
+      sawUnknownManifest = true
+      unknown.push(path.relative(home, manifest))
+      continue
+    }
     const text = await readBoundedText(manifest, PROFILE_READ_CAP)
     if (text === 'unreadable' || text === 'too-large') {
       sawUnknownManifest = true

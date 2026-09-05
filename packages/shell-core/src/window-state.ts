@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { open, readFile, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -131,9 +132,12 @@ export async function writeWindowState(file: string, state: SavedWindowState): P
     undefined,
     2,
   )}\n`
-  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`)
+  // Random exclusive temp name: a predictable `<file>.<pid>.tmp` path with
+  // 'w' lets a pre-planted symlink at that path redirect the write (and
+  // truncate its target). 'wx' + randomUUID never follows or clobbers.
+  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`)
   try {
-    const handle = await open(temporary, 'w')
+    const handle = await open(temporary, 'wx', 0o600)
     try {
       await handle.writeFile(payload, 'utf8')
       await handle.sync()

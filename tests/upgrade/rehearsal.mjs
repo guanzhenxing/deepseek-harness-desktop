@@ -32,6 +32,7 @@ import {
   createWebApiClient,
   driveOneTurn,
   listSessions,
+  waitForTurns,
 } from '../helpers/shared-home-driver.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -219,19 +220,43 @@ export async function runUpgradeRehearsal(input) {
     `previous ${previous.record.releaseId}, candidate ${candidate.record.releaseId}`,
   )
 
+  // A byte-flipped DMG must fail the DIGEST check specifically: the negative
+  // index is valid JSON pinning the PRISTINE sha256 while pointing at the
+  // corrupted file, so this step proves the digest gate — not a JSON parse
+  // accident on the DMG bytes.
   const corrupt = await makeCorruptDmgCopy(candidate.dmgPath)
   let corruptRejected = false
+  const corruptIndexDir = await mkdtemp(path.join(tmpdir(), 'dsh-corrupt-index-'))
   try {
-    await loadArtifactIndex('candidate (corrupt negative)', corrupt.file)
-  } catch {
-    corruptRejected = true
+    const corruptIndex = path.join(corruptIndexDir, 'artifacts.json')
+    await writeFile(
+      corruptIndex,
+      `${JSON.stringify(
+        [
+          {
+            file: path.basename(corrupt.file),
+            sha256: candidate.record.sha256,
+            platform: candidate.record.platform,
+            arch: candidate.record.arch,
+            releaseId: candidate.record.releaseId,
+          },
+        ],
+        undefined,
+        2,
+      )}\n`,
+    )
+    await loadArtifactIndex('candidate (corrupt negative)', corruptIndex)
+  } catch (error) {
+    corruptRejected = /digest mismatch/.test(String(error.message))
+    if (!corruptRejected) throw error
   } finally {
+    await rm(corruptIndexDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     await corrupt.dispose()
   }
   record(
     'corrupt-candidate-refused',
     corruptRejected,
-    'a byte-flipped DMG is rejected before install',
+    'a byte-flipped DMG is rejected by the digest gate before install',
   )
 
   // -- Step 2: install both candidates; verify embedded manifests. ----------
@@ -252,6 +277,7 @@ export async function runUpgradeRehearsal(input) {
     fixture = await createSharedHomeFixture()
     const bundle = await seedThirdPartyBundle(fixture.home)
 
+    let seededSessionId
     await runInstalledApp({
       executable: previousInstall.executable,
       mode: 'conversation',
@@ -261,7 +287,10 @@ export async function runUpgradeRehearsal(input) {
       async action({ waitFor }) {
         const ready = await waitFor((report) => report.kind === 'ui-ready', 'ui-ready')
         const client = await createWebApiClient(ready.surfaceUrl)
-        await driveOneTurn(client, { cwd: fixture.cwd, text: 'previous desktop seeds the home' })
+        seededSessionId = await driveOneTurn(client, {
+          cwd: fixture.cwd,
+          text: 'previous desktop seeds the home',
+        })
       },
     })
     await waitForPreviousLeaseGone(previousInstall.cliEntry, fixture.home, fixture.cwd)
@@ -302,13 +331,46 @@ export async function runUpgradeRehearsal(input) {
       cwd: fixture.cwd,
       timeoutMs: 300_000,
       async action({ waitFor }) {
-        await waitFor(
+        const ready = await waitFor(
           (report) => report.kind === 'ui-ready',
           'candidate ui-ready on the upgraded home',
         )
+        // API-level history proof: the upgraded candidate must list the OLD
+        // session through its real providers and continue THAT session —
+        // counting files proves nothing about readability.
+        const client = await createWebApiClient(ready.surfaceUrl)
+        const listed = await client.rpc('session/list', { _request: {} })
+        const items = listed.items ?? []
+        const oldItem = items.find((item) => item.sessionId === seededSessionId)
+        if (oldItem === undefined) {
+          fail(
+            'candidate upgrade',
+            `session/list after upgrade does not include the seeded session ${seededSessionId}`,
+          )
+        }
+        const continued = await driveOneTurn(client, {
+          cwd: fixture.cwd,
+          sessionId: seededSessionId,
+          text: 'candidate continues the seeded session',
+        })
+        if (continued !== seededSessionId) {
+          fail('candidate upgrade', `continuation drifted to a new session ${continued}`)
+        }
       },
     })
     await waitForLeaseGone(candidateHome)
+    const seededFile = (await listSessions(candidateHome)).find(
+      (session) => session.header.id === seededSessionId,
+    )
+    if (seededFile === undefined) fail('candidate upgrade', 'seeded session file vanished')
+    const seededTurns = await waitForTurns(seededFile.file, 2)
+    if (seededTurns < 2) {
+      fail('candidate upgrade', `seeded session holds ${seededTurns} turns after continuation`)
+    }
+    const seededBytes = await readFile(seededFile.file, 'utf8')
+    if (!seededBytes.includes('previous desktop seeds the home')) {
+      fail('candidate upgrade', 'seeded history content was rewritten or lost')
+    }
     const afterUpgrade = await dataDigests(candidateHome)
     const seededSessionFiles = [...beforeUpgrade.keys()].filter((file) =>
       file.startsWith('sessions/'),
@@ -347,7 +409,22 @@ export async function runUpgradeRehearsal(input) {
     if (continuedSessions.length !== 3) {
       fail('candidate continuation', `expected three sessions, found ${continuedSessions.length}`)
     }
-    record('candidate-continuation', true, 'candidate reads history and appends new content')
+    const continuedSeededFile = continuedSessions.find(
+      (session) => session.header.id === seededSessionId,
+    )
+    const stillSeeded = await readFile(continuedSeededFile.file, 'utf8')
+    if (
+      (await waitForTurns(continuedSeededFile.file, 2)) < 2 ||
+      !stillSeeded.includes('previous desktop seeds the home') ||
+      !stillSeeded.includes('candidate continues the seeded session')
+    ) {
+      fail('candidate continuation', 'seeded session history changed across the CLI round')
+    }
+    record(
+      'candidate-continuation',
+      true,
+      'seeded session still holds both turns; the CLI round appended a third session',
+    )
 
     // -- Step 6: restart the candidate on the same home. --------------------
     await runInstalledApp({
@@ -357,7 +434,19 @@ export async function runUpgradeRehearsal(input) {
       cwd: fixture.cwd,
       timeoutMs: 300_000,
       async action({ waitFor }) {
-        await waitFor((report) => report.kind === 'ui-ready', 'candidate restart ui-ready')
+        const ready = await waitFor(
+          (report) => report.kind === 'ui-ready',
+          'candidate restart ui-ready',
+        )
+        const client = await createWebApiClient(ready.surfaceUrl)
+        const listed = await client.rpc('session/list', { _request: {} })
+        const items = listed.items ?? []
+        if (!items.some((item) => item.sessionId === seededSessionId)) {
+          fail('candidate restart', `restart cannot list the seeded session ${seededSessionId}`)
+        }
+        if (items.length < 3) {
+          fail('candidate restart', `restart lists ${items.length} sessions, expected at least 3`)
+        }
       },
     })
     await waitForLeaseGone(candidateHome)

@@ -1,4 +1,5 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -81,6 +82,10 @@ export const BASELINE_MANIFEST: ReleaseManifest = {
   supportedDataEpochs: [1],
   dependencyClosureSha256: 'c'.repeat(64),
   patchManifestSha256: 'd'.repeat(64),
+}
+
+function mkfifoSync(file: string): void {
+  execFileSync('mkfifo', [file])
 }
 
 async function tempHome(): Promise<string> {
@@ -350,6 +355,44 @@ describe('inspectHomeFormats', () => {
       expect(observed.formats.sessions).toBeUndefined()
     } finally {
       await chmod(path.join(home, 'sessions', '--locked--'), 0o700).catch(() => undefined)
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('never follows or opens planted symlinks and named pipes', async () => {
+    const home = await tempHome()
+    try {
+      // A symlinked profile directory pointing at a valid manifest outside
+      // the home must not be followed.
+      const outside = await tempHome()
+      try {
+        const outsideProfile = path.join(outside, 'profiles', 'imposter')
+        await mkdir(outsideProfile, { recursive: true })
+        await writeFile(
+          path.join(outsideProfile, 'package.json'),
+          JSON.stringify({ name: 'imposter' }),
+        )
+        const profilesDir = path.join(home, 'profiles')
+        await mkdir(profilesDir, { recursive: true })
+        await symlink(outsideProfile, path.join(profilesDir, 'imposter'))
+        // A named pipe where a profile manifest belongs must not hang the
+        // inspection (open on a FIFO blocks): it surfaces as unknown.
+        const fifoProfile = path.join(profilesDir, 'piped')
+        await mkdir(fifoProfile, { recursive: true })
+        mkfifoSync(path.join(fifoProfile, 'package.json'))
+        // A symlinked storage entry is unknown, never silently skipped.
+        await mkdir(path.join(home, 'storages'), { recursive: true })
+        await symlink(outside, path.join(home, 'storages', 'linked-unit'))
+        const observed = await inspectHomeFormats(home)
+        expect(observed.unknownPaths).toContain('profiles/imposter')
+        expect(observed.unknownPaths).toContain('profiles/piped/package.json')
+        expect(observed.unknownPaths).toContain('storages/linked-unit')
+        expect(observed.formats.profiles).toBeUndefined()
+        expect(observed.formats.storages).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
       await rm(home, { recursive: true, force: true })
     }
   })

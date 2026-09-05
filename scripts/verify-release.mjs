@@ -7,6 +7,7 @@
 // Steps run sequentially; the first failure stops the chain (later steps
 // depend on earlier artifacts).
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
@@ -62,9 +63,25 @@ const steps = [
         rmSync(path.join(candidateDir, file), { force: true, recursive: true })
       }
       copyFileSync(path.join(dist, dmg), path.join(candidateDir, dmg))
+      // The archived index must pin the ARCHIVED copy (index-relative), never
+      // the shared release/dist path — a later build would silently overwrite
+      // it. The copy's digest is re-verified against the just-built artifact
+      // record before the index is written, so the rehearsal that follows
+      // proves the archived bytes, not the dist bytes.
+      const expected = JSON.parse(
+        readFileSync(path.join(repositoryRoot, 'release', 'artifacts.json'), 'utf8'),
+      ).find((record) => record.arch === process.arch)
+      const copied = createHash('sha256')
+        .update(readFileSync(path.join(candidateDir, dmg)))
+        .digest('hex')
+      if (copied !== expected.sha256) {
+        throw new Error(
+          `archived candidate copy digest ${copied} does not match the built artifact ${expected.sha256}`,
+        )
+      }
       writeFileSync(
         candidateIndex,
-        `${JSON.stringify(JSON.parse(readFileSync(path.join(repositoryRoot, 'release', 'artifacts.json'), 'utf8')), undefined, 2)}\n`,
+        `${JSON.stringify([{ ...expected, file: dmg }], undefined, 2)}\n`,
       )
       spawnPnpm([
         'run',
