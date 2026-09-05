@@ -80,7 +80,14 @@ function fixture(
   options: {
     attemptStart?: () => Promise<HostReady>
     attemptStop?: (reason: 'quit' | 'restart', deadlineMs: number) => Promise<void>
-    admitHome?: () => Promise<'allow' | 'unknown-schema' | 'unsupported-data'>
+    admitHome?: () => Promise<
+      | 'allow'
+      | 'unknown-schema'
+      | 'unsupported-data'
+      | 'unknown-format'
+      | 'unreadable-format'
+      | 'migration-required'
+    >
   } = {},
 ) {
   const lease = new RecordingLease()
@@ -190,6 +197,29 @@ describe('RecoverySessionController', () => {
     expect(setup.controller.state).toBe('stopped')
     expect(setup.lease.calls).toContain('release')
   })
+
+  it.each([
+    ['unknown-format', 'HOME_FORMAT_UNKNOWN', /无法识别的数据形态/],
+    ['unreadable-format', 'HOME_FORMAT_UNREADABLE', /无法读取的格式版本/],
+    ['migration-required', 'HOME_MIGRATION_REQUIRED', /不会自动执行的数据迁移/],
+  ] as const)(
+    'maps the %s preflight refusal to %s with honest copy',
+    async (verdict, code, summary) => {
+      const setup = fixture({ admitHome: () => Promise.resolve(verdict) })
+      await expect(setup.controller.start()).rejects.toBeInstanceOf(StartupFailureError)
+      expect(setup.attempts).toHaveLength(0)
+      const view = setup.views[0] as {
+        failure: StartupFailure
+        retryAllowed: boolean
+        safeModeAllowed: boolean
+      }
+      expect(view.failure.code).toBe(code)
+      expect(view.failure.stage).toBe('home-admission')
+      expect(view.failure.summary).toMatch(summary)
+      expect(view.retryAllowed).toBe(false)
+      expect(view.safeModeAllowed).toBe(false)
+    },
+  )
 
   it('treats an unreadable marker as a fail-closed admission denial', async () => {
     const setup = fixture({

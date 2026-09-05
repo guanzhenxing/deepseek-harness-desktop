@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile } from 'node:fs/promises'
+import { lstat, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
 export type HomeFormatState = Readonly<{
@@ -17,6 +17,10 @@ const PROJCACHE_FORMAT_ID = 'dsh-session-projcache-4'
 const PROFILE_FORMAT_ID = 'dsh-profile-manifest-0.1.2-alpha.3'
 
 /** Bounds keep the read-only inspection linear and cheap on large homes. */
+const CREDENTIALS_READ_CAP = 1024 * 1024
+const STORAGE_READ_CAP = 16 * 1024 * 1024
+const RECORD_READ_CAP = 1024 * 1024
+const PROFILE_READ_CAP = 1024 * 1024
 const MAX_SESSION_PROJECTS = 32
 const MAX_SESSIONS_PER_PROJECT = 32
 const MAX_STORAGE_ENTRIES = 64
@@ -124,7 +128,8 @@ async function credentialsFormatId(file: string): Promise<SlotResult> {
   if (identity.isSymbolicLink() || !identity.isFile()) {
     return { state: 'unknown', relative }
   }
-  const text = await readFile(file, 'utf8').catch(() => '')
+  const text = await readBoundedText(file, CREDENTIALS_READ_CAP)
+  if (text === 'unreadable' || text === 'too-large') return { state: 'unknown', relative }
   const header = /^version:[ \t]*(\d+)[ \t]*$/m.exec(text)
   // The baseline credentials file carries `version: 1` plus one or both of
   // the two sections this release knows: `refs:` (API-key references via
@@ -134,6 +139,30 @@ async function credentialsFormatId(file: string): Promise<SlotResult> {
     return { state: 'known', formatId: `dsh-credentials-file-${header[1]}` }
   }
   return { state: 'unknown', relative }
+}
+
+/**
+ * Bounded text read: at most `capBytes` bytes are ever buffered, so a
+ * planted huge file cannot DoS the inspection. Reading past the cap reports
+ * 'too-large' (fail-closed callers classify it as unknown data); a failed
+ * open/read reports 'unreadable'.
+ */
+async function readBoundedText(
+  file: string,
+  capBytes: number,
+): Promise<string | 'too-large' | 'unreadable'> {
+  const handle = await openFile(file)
+  if (handle === undefined) return 'unreadable'
+  try {
+    const buffer = Buffer.alloc(capBytes + 1)
+    const { bytesRead } = await handle.read(buffer, 0, capBytes + 1, 0)
+    if (bytesRead > capBytes) return 'too-large'
+    return buffer.subarray(0, bytesRead).toString('utf8')
+  } catch {
+    return 'unreadable'
+  } finally {
+    await handle.close()
+  }
 }
 
 /** `settings.yaml` / `settings.json`: the provider build is the format
@@ -209,7 +238,10 @@ async function sessionsFormatId(
       }
     }
   }
-  if (!sawAny) return { state: 'absent' }
+  // Absent only when nothing was seen AND nothing was flagged: an unreadable
+  // project directory with no other sessions must surface its unknown path,
+  // not silently count as "no sessions".
+  if (!sawAny && unknown.length === 0) return { state: 'absent' }
   if (sawAllKnown) return { state: 'known', formatId: SESSION_JSONL_FORMAT_ID, unknown: [] }
   return { state: 'known', formatId: SESSION_JSONL_FORMAT_ID, unknown }
 }
@@ -340,8 +372,8 @@ async function storagesFormatId(home: string): Promise<
 async function readUnitHeader(
   file: string,
 ): Promise<{ name: string; version: number } | undefined> {
-  const text = await readFile(file, 'utf8').catch(() => undefined)
-  if (text === undefined) return undefined
+  const text = await readBoundedText(file, STORAGE_READ_CAP)
+  if (text === 'unreadable' || text === 'too-large') return undefined
   try {
     const parsed: unknown = JSON.parse(text)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
@@ -388,8 +420,8 @@ async function sampleRecordStamp(unitDirectory: string): Promise<number | undefi
  * serializeRecord()); the unit identity is the containing directory name.
  */
 async function readRecordStamp(file: string): Promise<number | undefined> {
-  const text = await readFile(file, 'utf8').catch(() => undefined)
-  if (text === undefined) return undefined
+  const text = await readBoundedText(file, RECORD_READ_CAP)
+  if (text === 'unreadable' || text === 'too-large') return undefined
   try {
     const parsed: unknown = JSON.parse(text)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
@@ -428,7 +460,12 @@ async function profilesFormatId(
     const identity = await safeLstat(manifest)
     if (identity === undefined) continue
     sawAny = true
-    const text = await readFile(manifest, 'utf8').catch(() => '')
+    const text = await readBoundedText(manifest, PROFILE_READ_CAP)
+    if (text === 'unreadable' || text === 'too-large') {
+      sawUnknownManifest = true
+      unknown.push(path.relative(home, manifest))
+      continue
+    }
     try {
       const parsed: unknown = JSON.parse(text)
       // The upstream profile manifest shape is a JSON object with an OPTIONAL

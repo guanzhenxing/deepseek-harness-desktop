@@ -53,14 +53,19 @@ async function writeAtomicDurable(filename: string, bytes: Uint8Array): Promise<
   } finally {
     await handle.close()
   }
-  await rename(temporary, filename)
+  try {
+    await rename(temporary, filename)
+  } catch (error) {
+    // Never leak the temp file when the atomic swap itself fails.
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  }
   const written = await open(filename, 'r')
   try {
     await written.sync()
   } finally {
     await written.close()
   }
-  await unlink(temporary).catch(() => undefined)
   await syncDirectory(path.dirname(filename))
 }
 
@@ -87,6 +92,10 @@ export async function reserveHomeWrite(input: {
       'write reservation requires the lease of the same home',
     )
   }
+  // A matching home path alone must not authorize the reservation: the lease
+  // must still be held by this session (a released handle predates the
+  // current owner and must not write).
+  await input.lease.assertHeld()
   const run = path.join(input.home, 'run')
   const runIdentity = await lstat(run).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined

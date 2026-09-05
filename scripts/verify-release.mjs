@@ -86,6 +86,19 @@ function spawnPnpm(args) {
   }
 }
 
+// The plan's gate list closes with a whitespace/conflict-marker sweep over
+// the working tree — appended as a final inline step rather than a pnpm
+// script because it checks git state, not a build.
+steps.push({
+  name: 'git diff --check',
+  run() {
+    const result = spawnSync('git', ['diff', '--check'], { cwd: repositoryRoot })
+    if (result.status !== 0) {
+      throw new Error(`git diff --check exited with ${result.status}`)
+    }
+  },
+})
+
 const results = []
 for (const step of steps) {
   console.log(`\n=== verify:release — ${step.name} ===`)

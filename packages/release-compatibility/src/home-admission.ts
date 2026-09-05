@@ -1,4 +1,4 @@
-import { lstat, readFile } from 'node:fs/promises'
+import { lstat, open } from 'node:fs/promises'
 import path from 'node:path'
 
 export type HomeCompatibilityMarker = Readonly<{
@@ -86,12 +86,36 @@ export async function readHomeCompatibilityMarker(home: string): Promise<unknown
   if (!identity.isFile()) {
     throw new HomeAdmissionError('MARKER_UNREADABLE', 'compatibility marker is not a regular file')
   }
-  const bytes = await readFile(file, 'utf8').catch((error: unknown) => {
+  // Bounded read: the marker is always tiny; an implausibly large file at the
+  // marker path is not our marker and refuses fail-closed instead of
+  // buffering arbitrary bytes into the boot path.
+  const MARKER_READ_CAP = 64 * 1024
+  const handle = await open(file, 'r').catch((error: unknown) => {
     throw new HomeAdmissionError(
       'MARKER_UNREADABLE',
       `compatibility marker cannot be read: ${String(error)}`,
     )
   })
+  let bytes: string
+  try {
+    const buffer = Buffer.alloc(MARKER_READ_CAP + 1)
+    const { bytesRead } = await handle.read(buffer, 0, MARKER_READ_CAP + 1, 0)
+    if (bytesRead > MARKER_READ_CAP) {
+      throw new HomeAdmissionError(
+        'MARKER_CORRUPT',
+        'compatibility marker is implausibly large; refusing',
+      )
+    }
+    bytes = buffer.subarray(0, bytesRead).toString('utf8')
+  } catch (error) {
+    if (error instanceof HomeAdmissionError) throw error
+    throw new HomeAdmissionError(
+      'MARKER_UNREADABLE',
+      `compatibility marker cannot be read: ${String(error)}`,
+    )
+  } finally {
+    await handle.close()
+  }
   try {
     const parsed: unknown = JSON.parse(bytes)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

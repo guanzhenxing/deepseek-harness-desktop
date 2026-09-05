@@ -119,6 +119,22 @@ describe('parseReleaseManifest', () => {
     ).toThrow()
   })
 
+  it('rejects an empty pluginApi singleton list and non-ascending supported epochs', () => {
+    const emptySingletons = validManifestInput()
+    ;(emptySingletons.pluginApi as Record<string, unknown>).singletonPackages = []
+    expect(() => parseReleaseManifest(emptySingletons)).toThrow(/singletonPackages/)
+
+    const duplicate = validManifestInput()
+    duplicate.supportedDataEpochs = [1, 1, 2]
+    duplicate.dataEpoch = 2
+    expect(() => parseReleaseManifest(duplicate)).toThrow(/ascending/)
+
+    const descending = validManifestInput()
+    descending.supportedDataEpochs = [1, 0]
+    descending.dataEpoch = 1
+    expect(() => parseReleaseManifest(descending)).toThrow(/ascending/)
+  })
+
   it('rejects non-object and array inputs', () => {
     expect(() => parseReleaseManifest(null)).toThrow()
     expect(() => parseReleaseManifest('manifest')).toThrow()

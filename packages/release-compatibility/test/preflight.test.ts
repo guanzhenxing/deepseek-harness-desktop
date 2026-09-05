@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -335,6 +335,21 @@ describe('inspectHomeFormats', () => {
       expect(observed.unknownPaths).toEqual([])
       expect(observed.formats.credentials).toBe('dsh-credentials-file-1')
     } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('surfaces an unreadable sessions project directory instead of counting it absent', async () => {
+    const home = await tempHome()
+    try {
+      const projectDir = path.join(home, 'sessions', '--locked--')
+      await mkdir(projectDir, { recursive: true })
+      await chmod(projectDir, 0o000)
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--locked--')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await chmod(path.join(home, 'sessions', '--locked--'), 0o700).catch(() => undefined)
       await rm(home, { recursive: true, force: true })
     }
   })

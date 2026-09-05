@@ -35,7 +35,7 @@
     },
     {
       "id": "foreign-storage-domain",
-      "description": "a storage document this release cannot classify: the M4 preflight must refuse where the M3 reader (marker-only) would pass — proves the format inspection on the real installed candidate",
+      "description": "a storage document this release cannot classify: the M4 preflight refuses it on the real installed candidate (the marker-only M3 reader is structurally blind to on-disk formats — the delta is the format inspection itself)",
       "foreignFile": {
         "path": "storages/mystery-provider.json",
         "content": "{\"format\":\"mystery-v9\",\"data\":{\"payload\":\"fixture\"}}"

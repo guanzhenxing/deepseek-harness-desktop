@@ -201,7 +201,7 @@ test('policy evidence verification accepts the committed policy', async () => {
 })
 
 test('policy evidence verification refuses a tampered fixture hash', async () => {
-  const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+  const { mkdtemp, rm, writeFile } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
   const work = await mkdtemp(join(tmpdir(), 'compat-evidence-'))
@@ -229,6 +229,41 @@ test('policy evidence verification refuses a tampered fixture hash', async () =>
     await rm(work, { recursive: true, force: true })
   }
 })
+
+test('policy evidence verification refuses every unsupported or missing claim', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const work = await mkdtemp(join(tmpdir(), 'compat-evidence-neg-'))
+  try {
+    const base = {
+      provider: 'p',
+      providerVersion: '1',
+      formatId: 'f',
+      readable: ['f'],
+      writable: 'f',
+    }
+    const run = (evidence) =>
+      verifyPolicyEvidence(
+        { ...policyFixtureForEvidence(), formats: [{ ...base, evidence }] },
+        { upstreamCommit: 'dd6322d604e00eec1ba5e0c8541159906a21094a', root: work },
+      )
+    await assert.rejects(run(['npm:@deepseek-ai/dsh@9.9.9:lib/index.js']), /not installed/)
+    await assert.rejects(
+      run(['upstream:4e84901e6471b79ec0338099867ebb4606d12bb5']),
+      /baseline is dd6322d/,
+    )
+    await assert.rejects(run(['repo:missing-file.ts']), /repo evidence missing/)
+    await assert.rejects(run(['gopher://whatever']), /unknown evidence scheme/)
+    await assert.rejects(run(['fixture:nope.txt#' + '0'.repeat(64)]), /fixture evidence missing/)
+  } finally {
+    await rm(work, { recursive: true, force: true })
+  }
+})
+
+function policyFixtureForEvidence() {
+  return { formats: [] }
+}
 
 test('runtime facts wrap around the release core without displacing it', () => {
   const base = buildReleaseManifest(inputsFixture())

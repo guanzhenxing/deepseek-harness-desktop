@@ -66,7 +66,7 @@ parse marker → inspectHomeFormats（只读） → preflightHome（纯判定）
 6. marker 记录的槽位与磁盘观察不一致 → `UNKNOWN_FORMAT`（保守拒绝）；
 7. 其余 → allow（携带本 release 将写入的 epoch 与格式证据）。
 
-格式勘察（`inspectHomeFormats`）只解析已知文件头/布局，不加载 DSH 或用户插件、不启动 provider：credentials 的 `version:` 头、settings 的存在性（provider build 即格式身份）、session JSONL 首行 `{type:'session',version:0}`（`.zstd` 按扩展名归类，本文 baseline 写入）、storage 单元信封（single：`{unit:{name,version}}`；per-record：`global.json` 为 `{version,record}`，域名取自目录名）、`session_projcache` 域固定 v4、profile manifest 的 `dsh.profile` 形状。枚举有界（≤32 项目目录 ×32 会话、≤64 storage 项、≤32 profile）；被植入的 symlink 计入 unknown。`storages` 槽位固定为信封身份（域内增长不翻转槽位值），`projcache` 是独立槽位。
+格式勘察（`inspectHomeFormats`）只解析已知文件头/布局，不加载 DSH 或用户插件、不启动 provider：credentials 的 `version:` 头（`refs:` 与 `records:` 两种段落均为本 baseline 已知形态，前者 API-key 引用、后者桌面 Host 写入的连接授权）、settings 的存在性（provider build 即格式身份）、session JSONL 首行 `{type:'session',version:0}`（`.zstd` 按扩展名归类，本文 baseline 写入）、storage 单元信封（single：`{unit:{name,version}}`；per-record：`global.json` 为 `{version,record}`，域名取自目录名）、`session_projcache` 域固定 v4、profile manifest 的 `dsh.profile` 形状。枚举有界（≤32 项目目录 ×32 会话、≤64 storage 项、≤32 profile）；被植入的 symlink 计入 unknown。`storages` 槽位固定为信封身份（域内增长不翻转槽位值），`projcache` 是独立槽位。
 
 入口对拒绝的映射：
 

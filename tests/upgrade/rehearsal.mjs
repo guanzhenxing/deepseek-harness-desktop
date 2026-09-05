@@ -428,6 +428,7 @@ export async function runUpgradeRehearsal(input) {
       // The recovery smoke mode absorbs a failed startup into its recovery
       // chain by design and exits cleanly, so the refusal is observed from
       // the smoke reports (and from a hard failure's error message).
+      let threwRefusal = false
       const reports = await runInstalledApp({
         executable: previousInstall.executable,
         mode: 'recovery',
@@ -444,9 +445,13 @@ export async function runUpgradeRehearsal(input) {
         },
       }).catch((error) => {
         if (!/home-admission/.test(String(error.message))) throw error
+        // The helper throwing "reported failure at home-admission" IS the
+        // refusal — count it instead of discarding the evidence.
+        threwRefusal = true
         return []
       })
       const refused =
+        threwRefusal ||
         (reports.some((report) => report.kind === 'failed' && report.stage === 'home-admission') ||
           reports.some(
             (report) => report.kind === 'recovery' && report.step === 'recovery-view-reached',
