@@ -9,13 +9,14 @@ import {
   LeaseError,
   resolveDesktopHome,
   type GuardLock,
+  type HomeLease,
   type ProcessProbe,
 } from '@dsh-desktop/home-lease'
 import { PRODUCT } from '@dsh-desktop/product-config'
-import { admitHome as admitHomeMarker } from '@dsh-desktop/release-compatibility'
+import { loadReleaseManifest, runHomeCompatibilityChain } from '@dsh-desktop/release-compatibility'
 
 import { runDoctorUnlock } from './doctor.js'
-import { resolveCliRuntime, type CliRuntimePaths } from './runtime-paths.js'
+import { releaseManifestInput, resolveCliRuntime, type CliRuntimePaths } from './runtime-paths.js'
 
 const childModule = fileURLToPath(new URL('./cli-child.js', import.meta.url))
 
@@ -143,7 +144,26 @@ function forkCliChild(
   }
 }
 
-export type HomeAdmissionOutcome = 'allow' | 'unknown-schema' | 'unsupported-data'
+export type HomeAdmissionOutcome =
+  | 'allow'
+  | 'unknown-schema'
+  | 'unsupported-data'
+  | 'unknown-format'
+  | 'unreadable-format'
+  | 'migration-required'
+
+const ADMISSION_REFUSALS: Record<Exclude<HomeAdmissionOutcome, 'allow'>, string> = {
+  'unknown-schema':
+    'dsh-native: this home has an unknown compatibility marker; refusing to start\n',
+  'unsupported-data':
+    'dsh-native: this home holds data from a newer release; use the release that wrote it\n',
+  'unknown-format':
+    'dsh-native: this home holds data this release cannot classify; refusing to start\n',
+  'unreadable-format':
+    'dsh-native: this home holds data in a format this release cannot read; use the release that wrote it\n',
+  'migration-required':
+    'dsh-native: this home needs a data migration this release does not perform; keeping the data untouched\n',
+}
 
 export type RunBundledCliOptions = Readonly<{
   env?: Readonly<Record<string, string | undefined>>
@@ -155,11 +175,12 @@ export type RunBundledCliOptions = Readonly<{
   appVersion?: string
   stderr?: NodeJS.WritableStream
   /**
-   * Home compatibility admission, run after the lease is acquired and before
-   * any write-home child is spawned. Injectable for tests; the default reads
-   * the release-compatibility marker fail-closed.
+   * Home compatibility chain (M4), run after the lease is acquired and before
+   * any write-home child is spawned. Injectable for tests; the default runs
+   * marker parse → read-only inspection → preflight → write-epoch
+   * reservation fail-closed.
    */
-  admitHome?: (home: string) => Promise<HomeAdmissionOutcome>
+  admitHome?: (home: string, lease?: HomeLease) => Promise<HomeAdmissionOutcome>
   /** Installed-runtime override (`resolvePackagedCliRuntime`); development resolves from the repository. */
   runtime?: CliRuntimePaths
   /** Test hooks for the descendant process-group checks. */
@@ -172,9 +193,16 @@ export type RunBundledCliOptions = Readonly<{
 /** Exit code for a home this release refuses to touch. */
 const EXIT_HOME_INCOMPATIBLE = 5
 
-async function defaultAdmitHome(home: string): Promise<HomeAdmissionOutcome> {
+async function defaultAdmitHome(home: string, lease?: HomeLease): Promise<HomeAdmissionOutcome> {
   try {
-    return await admitHomeMarker({ home })
+    return await runHomeCompatibilityChain({
+      home,
+      release: loadReleaseManifest(releaseManifestInput()),
+      ...(lease !== undefined ? { lease } : {}),
+      // The lease-less passthrough never reserves an epoch: it takes no
+      // lease precisely because nothing provably writes.
+      reserve: lease !== undefined,
+    })
   } catch {
     // Unreadable, symlinked or corrupt markers are all fail-closed refusals.
     return 'unknown-schema'
@@ -297,11 +325,7 @@ export async function runBundledCli(
     // it refuses — admission is read-only and cheap. doctor stays exempt.
     const admission = await (options.admitHome ?? defaultAdmitHome)(home)
     if (admission !== 'allow') {
-      stderr.write(
-        admission === 'unsupported-data'
-          ? 'dsh-native: this home holds data from a newer release; use the release that wrote it\n'
-          : 'dsh-native: this home has an unknown compatibility marker; refusing to start\n',
-      )
+      stderr.write(ADMISSION_REFUSALS[admission])
       return EXIT_HOME_INCOMPATIBLE
     }
     const child = spawnChild({ argv, env: childEnvironment(env, home, options.runtime) })
@@ -341,15 +365,11 @@ export async function runBundledCli(
 
   let leaseKeptForDiagnosis = false
   try {
-    // Home compatibility admission: after the lease, before any write-home
-    // child exists. A refusal exits without a single home write.
-    const admission = await (options.admitHome ?? defaultAdmitHome)(home)
+    // Home compatibility chain: after the lease, before any write-home child
+    // exists. A refusal exits without a single home write.
+    const admission = await (options.admitHome ?? defaultAdmitHome)(home, lease)
     if (admission !== 'allow') {
-      stderr.write(
-        admission === 'unsupported-data'
-          ? 'dsh-native: this home holds data from a newer release; use the release that wrote it\n'
-          : 'dsh-native: this home has an unknown compatibility marker; refusing to start\n',
-      )
+      stderr.write(ADMISSION_REFUSALS[admission])
       return EXIT_HOME_INCOMPATIBLE
     }
     await lease.beforeSpawn(plan.profile)

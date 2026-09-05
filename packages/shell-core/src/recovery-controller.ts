@@ -28,11 +28,23 @@ export type AttemptMode = 'normal' | 'safe'
 export type CreateAttempt = (lease: HomeLease, mode: AttemptMode) => HostAttempt
 
 /**
- * Read-only home compatibility admission, run after the lease is acquired and
- * before any profile/cache/Host write. A refusal lands in the local recovery
- * view with retry and Safe Mode withdrawn.
+ * Home compatibility admission (M4): run after the lease is acquired and
+ * before any profile/cache/Host write. The check receives the lease so the
+ * writer reservation can bind to it, and refuses with a specific reason when
+ * the home's data epoch or persisted formats are not provably compatible.
+ * A refusal lands in the local recovery view with retry and Safe Mode
+ * withdrawn.
  */
-export type HomeAdmissionCheck = () => Promise<'allow' | 'unknown-schema' | 'unsupported-data'>
+export type HomeAdmissionCheck = (
+  lease: HomeLease,
+) => Promise<
+  | 'allow'
+  | 'unknown-schema'
+  | 'unsupported-data'
+  | 'unknown-format'
+  | 'unreadable-format'
+  | 'migration-required'
+>
 
 export type ProfilePrepareResult =
   | Readonly<{ kind: 'ready'; transactionId?: string; changed: boolean }>
@@ -174,7 +186,7 @@ export class RecoverySessionController implements RecoveryController {
     try {
       const lease = await this.#options.acquireLease()
       this.#lease = lease
-      await this.#admitHomeBeforeAnyWrite()
+      await this.#admitHomeBeforeAnyWrite(lease)
       await this.#prepareAndRun(lease)
     } catch (error) {
       if (error instanceof LeaseError) {
@@ -197,13 +209,13 @@ export class RecoverySessionController implements RecoveryController {
    * supported write path may touch a home it cannot prove compatible. The
    * lease stays held for the diagnostic view and is released on quit.
    */
-  async #admitHomeBeforeAnyWrite(): Promise<void> {
+  async #admitHomeBeforeAnyWrite(lease: HomeLease): Promise<void> {
     const check = this.#options.admitHome
     if (check === undefined) return
     this.#safeModeBlocked = true
-    let verdict: 'allow' | 'unknown-schema' | 'unsupported-data'
+    let verdict: Awaited<ReturnType<HomeAdmissionCheck>>
     try {
-      verdict = await check()
+      verdict = await check(lease)
     } catch (error) {
       throw new StartupFailureError({
         stage: 'home-admission',
@@ -220,15 +232,37 @@ export class RecoverySessionController implements RecoveryController {
       this.#safeModeBlocked = false
       return
     }
+    const refusal: Record<
+      Exclude<Awaited<ReturnType<HomeAdmissionCheck>>, 'allow'>,
+      { code: string; summary: string }
+    > = {
+      'unknown-schema': {
+        code: 'HOME_MARKER_UNKNOWN',
+        summary:
+          '这份数据目录的兼容性标记无法识别（缺失字段或来自未知版本）；为避免破坏数据已停止启动。',
+      },
+      'unsupported-data': {
+        code: 'HOME_DATA_UNSUPPORTED',
+        summary: '这份数据目录由更高数据版本写入，当前版本不支持；请使用写入它的版本打开。',
+      },
+      'unknown-format': {
+        code: 'HOME_FORMAT_UNKNOWN',
+        summary: '数据目录中存在当前版本无法识别的数据形态；为避免破坏数据已停止启动。',
+      },
+      'unreadable-format': {
+        code: 'HOME_FORMAT_UNREADABLE',
+        summary: '数据目录中存在当前版本无法读取的格式版本；请使用写入它的版本打开。',
+      },
+      'migration-required': {
+        code: 'HOME_MIGRATION_REQUIRED',
+        summary: '这份数据目录需要本版本不会自动执行的数据迁移；请保留数据并使用兼容版本。',
+      },
+    }
     throw new StartupFailureError({
       stage: 'home-admission',
-      code: verdict === 'unknown-schema' ? 'HOME_MARKER_UNKNOWN' : 'HOME_DATA_UNSUPPORTED',
       category: 'home-config',
-      summary:
-        verdict === 'unknown-schema'
-          ? '这份数据目录的兼容性标记无法识别（缺失字段或来自未知版本）；为避免破坏数据已停止启动。'
-          : '这份数据目录由更高数据版本写入，当前版本不支持；请使用写入它的版本打开。',
       retryable: false,
+      ...refusal[verdict],
     })
   }
 

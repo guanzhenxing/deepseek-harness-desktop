@@ -1,1 +1,8 @@
-{ "name": "fixture-domain", "version": 1, "data": {} }
+{
+  "unit": {
+    "name": "workspace",
+    "version": 2
+  },
+  "global": null,
+  "tables": {}
+}

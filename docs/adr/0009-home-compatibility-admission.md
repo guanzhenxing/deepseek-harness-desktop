@@ -33,3 +33,13 @@ M3 起，`packages/release-compatibility` 提供固定于 `<home>/run/compatibil
 - `dataEpoch` 是本项目的兼容性分组，**不冒充 DSH 官方 schema**；上游格式证据由 M4 清单补齐。
 - 该 marker 只约束"受支持入口之间"的协作：不阻止其他裸 CLI、旧无 guard 二进制或用户直接写入 home。
 - M3 不实现 marker writer：首个写入者与升级预检属于 M4。
+
+## 5. M4 实现补充（2026-09-05，不改写原决策）
+
+M4 在原决策的"只读拒绝门"之上补齐了 writer 与预检，实现细节记录如下（决策理由不变）：
+
+- **固定链**：`parse marker → inspectHomeFormats（只读） → preflightHome（纯判定） → reserveHomeWrite`；Desktop/CLI/Safe Mode 共享该顺序，拒绝映射扩展为 `HOME_FORMAT_UNKNOWN` / `HOME_FORMAT_UNREADABLE` / `HOME_MIGRATION_REQUIRED`（仍为非重试、撤下 Safe Mode、CLI 退出码 5）。
+- **格式勘察**：只解析已知文件头/布局（credentials version 头、session JSONL 首行、storage 单元信封、profile manifest），不加载任何 DSH/provider 代码；枚举有界；被植入的 symlink 计入未知。
+- **写入预约**：仅在持 lease 时执行，fsync temp+rename+目录 fsync；预约在任何潜在新格式写入之前，预约后失败**不回滚 epoch**——这正是 §2 决策"拒绝不安全进入"在崩溃窗口上的延伸：宁可保守拒绝，不把半新数据当旧数据。
+- **marker/磁盘一致性**：marker 记录的槽位与磁盘观察不一致时保守拒绝。槽位值使用稳定身份（storages 槽固定为信封 id，projcache 独立槽位），使同一 epoch 内的正常域增长不会触发误拒——这一粒度来自真实共享 home 集成测试（workspace 域在会话间从无到有）的教训。
+- **MIGRATION_REQUIRED 是显式缺口**：本版本不迁移任何数据；引入迁移需要独立 ADR（停写、可验证备份、禁止自动降级）。

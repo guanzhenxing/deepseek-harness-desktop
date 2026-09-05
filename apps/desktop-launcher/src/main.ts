@@ -24,7 +24,7 @@ import {
 import { HostSupervisor, type HostFatalDetail, type HostReady } from '@dsh-desktop/host-supervisor'
 import { PRODUCT } from '@dsh-desktop/product-config'
 import { SAFE_PROFILE_NAME } from '@dsh-desktop/profile-manager'
-import { admitHome as admitHomeMarker } from '@dsh-desktop/release-compatibility'
+import { loadReleaseManifest, runHomeCompatibilityChain } from '@dsh-desktop/release-compatibility'
 import {
   closeWindowAction,
   createDesktopProfileRecovery,
@@ -574,15 +574,18 @@ async function startApplication(): Promise<void> {
         probe,
       }),
     profile: createDesktopProfileRecovery({ home, profileName }),
-    // Read-only home compatibility admission: after the lease, before any
+    // Home compatibility chain (M4): after the lease, before any
     // profile/cache/Host write, on every session (normal and Safe Mode both
-    // flow through this gate). A read failure is a fail-closed refusal.
-    admitHome: async () => {
-      try {
-        return await admitHomeMarker({ home })
-      } catch {
-        return 'unknown-schema' as const
-      }
+    // flow through this gate). Marker parse → read-only inspection →
+    // preflight → write-epoch reservation. A read failure is a fail-closed
+    // refusal (thrown → HOME_MARKER_UNREADABLE in the controller).
+    admitHome: (lease) => {
+      const release = loadReleaseManifest({
+        ...(installedRuntime !== undefined
+          ? { resourcesDir: process.resourcesPath }
+          : { repositoryRoot: path.resolve(import.meta.dirname, '..', '..', '..') }),
+      })
+      return runHomeCompatibilityChain({ home, lease, release, reserve: true })
     },
     readRecoveryMarker: () => marker.read(),
     writeRecoveryMarker: (entry) => marker.write(entry),

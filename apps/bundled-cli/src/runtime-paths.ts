@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -25,6 +25,20 @@ export type CliRuntimePaths = Readonly<{
    */
   scanArgvNeedles: readonly string[]
 }>
+
+/**
+ * Where this process should read its release manifest: an installed `.app`
+ * carries the embedded copy next to runtime-cli/, development reads the
+ * generated manifest facts from the repository baseline document through
+ * `loadReleaseManifest({ repositoryRoot })`.
+ */
+export function releaseManifestInput(): { resourcesDir?: string; repositoryRoot?: string } {
+  const embedded = path.join(packageRoot, '..', 'compatibility.json')
+  if (existsSync(embedded)) {
+    return { resourcesDir: path.resolve(packageRoot, '..') }
+  }
+  return { repositoryRoot: path.resolve(packageRoot, '..', '..') }
+}
 
 /**
  * One-line release facts for diagnostics, read from the embedded release

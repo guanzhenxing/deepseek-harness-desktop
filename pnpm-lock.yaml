@@ -176,7 +176,11 @@ importers:
         specifier: workspace:*
         version: link:../home-lease
 
-  packages/release-compatibility: {}
+  packages/release-compatibility:
+    dependencies:
+      '@dsh-desktop/home-lease':
+        specifier: workspace:*
+        version: link:../home-lease
 
   packages/shell-core:
     dependencies:

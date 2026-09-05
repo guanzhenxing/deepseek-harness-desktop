@@ -12,5 +12,8 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@dsh-desktop/home-lease": "workspace:*"
   }
 }
