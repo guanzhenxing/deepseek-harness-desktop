@@ -25,11 +25,18 @@ const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const steps = [
   { name: 'check (format/lint/types/unit/docs)', command: ['run', 'check'] },
   { name: 'generate:compatibility', command: ['run', 'generate:compatibility'] },
-  { name: 'verify:compatibility', command: ['run', 'verify:compatibility'] },
   { name: 'verify:dsh-closure', command: ['run', 'verify:dsh-closure'] },
   { name: 'verify:patches', command: ['run', 'verify:patches'] },
   { name: 'test:integration', command: ['run', 'test:integration'] },
   { name: 'test:shared-home', command: ['run', 'test:shared-home'] },
+  // package:dir rebuilds the staging tree at the CURRENT head and runs the
+  // in-line gates (verify-runtime-tree, verify:dsh-closure, verify:patches,
+  // verify-compatibility) against it; packaging straight to dmg would wrap a
+  // stale staging tree whenever HEAD moved since the last stage. The
+  // standalone verify:compatibility re-check runs only after staging is fresh
+  // — before that, a stale staging tree would false-fail the comparison.
+  { name: 'package:dir', command: ['run', 'package:dir'] },
+  { name: 'verify:compatibility (fresh staging)', command: ['run', 'verify:compatibility'] },
   { name: 'package:dmg', command: ['run', 'package:dmg'] },
   { name: 'verify:artifacts', command: ['run', 'verify:artifacts'] },
   { name: 'smoke:package', command: ['run', 'smoke:package'] },
