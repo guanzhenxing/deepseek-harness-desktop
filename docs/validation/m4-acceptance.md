@@ -82,6 +82,8 @@
 | 4   | P1   | 归档索引指向 `release/dist`（后续构建会覆盖），演练实际验证的是 dist 而非归档副本                                                                                                                                      | 归档步骤改写 `file` 为归档内相对路径 + 复制后重算副本摘要与构建记录比对后才写索引；当前 `release/candidate/artifacts.json` 由修复后的链重新生成                           |
 | 5   | P2   | "历史续写与重启再读"只有文件计数证据                                                                                                                                                                                   | 捕获播种会话 ID：升级启动后经真实 API `session/list` 断言旧会话在列并**续写同一会话**；旧会话文件须含两轮 turn 与两条原文标记；重启后 API 级再断言（旧 ID 在列且 ≥3 项）  |
 
+修复期间链式重跑继续暴露 lease 探测的瞬态问题（同一主线 bug 的两面），追加两项加固：取锁侧 `inspectConfirmed`（非 `same` 判定需间隔 100ms 两次一致才信，活进程单次误读不再被判定 HOME_STALE——`7c9dae5`，22/22 单测）；释放侧重试加强至 5×500ms 且错误信息内联探测判定值（`different`/`unknown` 可分辨——`5ccfd4f`）。遗留观察项：高负载下曾对活进程读到一次 `different`（出现在通过场景的日志中），根因未定，诊断信息已内联，留待复现。
+
 ## 6. 门禁结果
 
 `pnpm verify:release` 聚合链（`scripts/verify-release.mjs`）于最终 HEAD `e487138` 实跑，**13 步全部退出码 0**（2026-09-05，含收尾 `git diff --check`）：
