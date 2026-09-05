@@ -8,7 +8,7 @@ import {
   type LeaseOwner,
   type ProcessIdentity,
 } from './owner.js'
-import type { ProcessProbe, ProcessStatus } from './process-probe.js'
+import type { ProcessProbe } from './process-probe.js'
 import {
   createNativeGuardLock,
   resolveLeaseHelperPath,
@@ -23,6 +23,7 @@ import {
   validateHome,
   writeOwnerWithDurability,
 } from './lease-fs.js'
+import { inspectConfirmed } from './probe-confirm.js'
 
 export interface HomeLease {
   readonly home: string
@@ -88,50 +89,6 @@ function validateProfile(profile: string): string {
  * advisory-lock guard so two doctors can never race an acquiring wrapper.
  * Stale or unreadable owners are reported, never auto-recovered.
  */
-/**
- * Bounded retry for identity probes: 'unknown' means the helper could not
- * look the process up (transient — e.g. system under load), unlike the
- * determinate 'same'/'absent'/'different'. Retrying a handful of times with
- * a short pause turns quit-path transients into successful releases without
- * weakening the determinate refusals.
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/**
- * Determinate-verdict confirmation for acquisition: a single read that does
- * not say 'same' is re-read once after a pause; only two agreeing non-'same'
- * reads (or an immediate 'different', which encodes a real identity mismatch)
- * are believed. This never weakens refusals — a genuinely dead owner stays
- * 'absent' across both reads — it only absorbs one-sample misreads of a
- * live owner.
- */
-async function inspectConfirmed(
-  probe: ProcessProbe,
-  identity: Parameters<ProcessProbe['inspect']>[0],
-  pauseMs = 100,
-): Promise<ProcessStatus> {
-  const first = await inspectWithRetry(probe, identity)
-  if (first === 'same' || first === 'different') return first
-  await sleep(pauseMs)
-  return inspectWithRetry(probe, identity)
-}
-
-async function inspectWithRetry(
-  probe: ProcessProbe,
-  identity: Parameters<ProcessProbe['inspect']>[0],
-  attempts = 3,
-  pauseMs = 100,
-): Promise<ProcessStatus> {
-  let status: ProcessStatus = 'unknown'
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    status = await probe.inspect(identity)
-    if (status !== 'unknown') return status
-    if (attempt < attempts - 1) await sleep(pauseMs)
-  }
-  return status
-}
 
 export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<HomeLease> {
   const home = validateHome(input.home)
@@ -174,11 +131,11 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
       )
     }
     // A live owner can be transiently misread (proc_pidinfo failures under
-    // load surface as 'unknown', and in rarer windows as 'absent'). Declaring
-    // a live home stale on one bad read would strand the user behind a lock
-    // that doctor would happily "clean" while the app is still running, so
-    // every non-'same' verdict is confirmed by a second read after a short
-    // pause before it is believed. 'same' is trusted immediately.
+    // load surface as 'unknown', and in rarer windows as 'absent' or
+    // 'different'). Declaring a live home stale on one bad read would strand
+    // the user behind a lock that doctor would happily "clean" while the app
+    // is still running, so only 'same' is believed immediately; every other
+    // verdict is confirmed by a second read before it is acted on.
     const supervisor = await inspectConfirmed(probe, current.owner.supervisor)
     const host =
       current.owner.host === null ? 'absent' : await inspectConfirmed(probe, current.owner.host)
@@ -247,7 +204,7 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
         describeLeaseOwner(current.owner),
       )
     }
-    if ((await probe.inspect(current.owner.supervisor)) !== 'same') {
+    if ((await inspectConfirmed(probe, current.owner.supervisor)) !== 'same') {
       throw new LeaseError(
         'LEASE_CHANGED',
         'home lease supervisor identity no longer matches this process',
@@ -362,27 +319,35 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
           )
         }
         // Re-verify the supervisor identity inside the guard: a matching
-        // generation alone must never authorize removal. A determinate
-        // non-match refuses; a transient 'unknown' (the helper cannot look
-        // the process up under load) is retried a bounded number of times —
-        // refusing on a transient would strand a perfectly healthy session
-        // with a stale lock.
-        const supervisorStatus = await inspectWithRetry(probe, current.owner.supervisor, 5, 500)
+        // generation alone must never authorize removal. Only 'same' is
+        // believed immediately; a determinate mismatch or a persistent
+        // 'unknown' is re-read once (with the wider quit-path budget) before
+        // the refusal is thrown — a single bad read must not strand a
+        // healthy session with a lock, but a confirmed mismatch still
+        // refuses, lock intact, for doctor.
+        const supervisorStatus = await inspectConfirmed(probe, current.owner.supervisor, {
+          attempts: 5,
+          pauseMs: 500,
+        })
         if (supervisorStatus !== 'same') {
-          // The probe verdict is part of the message: 'different' (identity
-          // mismatch) and a persistent 'unknown' (helper could not look the
-          // process up) are different failures wearing one code. For
-          // 'different' — which identity math says is impossible for the
-          // recording process — the current process identity is attached so
-          // the next occurrence diagnoses itself (same pid + different
-          // identity = kernel-level misread; different pid = the lock was
-          // recorded by another process).
+          // The probe verdict and three identities together diagnose the
+          // failure on the next occurrence: the current process's own
+          // identity, the identity the owner file RECORDS, and a fresh
+          // observation of the owner pid. Same pid with recorded != observed
+          // while self agrees with one of them distinguishes a release-time
+          // misread from an acquire-time misread from a wrong-process
+          // release; different pids mean the lock was recorded by another
+          // process.
           let selfDiagnosis = ''
           if (supervisorStatus === 'different') {
             const currentSelf = await probe.current().catch(() => undefined)
-            if (currentSelf !== undefined) {
-              selfDiagnosis = `; self pid ${currentSelf.pid} identity ${currentSelf.startIdentity}, owner pid ${current.owner.supervisor.pid}`
-            }
+            const observed = await probe
+              .identify(current.owner.supervisor.pid)
+              .catch(() => undefined)
+            selfDiagnosis =
+              `; self pid ${currentSelf?.pid} identity ${currentSelf?.startIdentity}` +
+              `, owner pid ${current.owner.supervisor.pid} recorded identity ${current.owner.supervisor.startIdentity}` +
+              `, observed identity ${observed?.startIdentity}`
           }
           throw new LeaseError(
             'LEASE_CHANGED',
@@ -391,7 +356,7 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
           )
         }
         if (current.owner.host !== null) {
-          const status = await inspectWithRetry(probe, current.owner.host)
+          const status = await inspectConfirmed(probe, current.owner.host)
           if (status === 'same') {
             throw new LeaseError(
               'HOST_ACTIVE',

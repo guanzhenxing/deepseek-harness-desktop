@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { acquireHomeLease } from '../src/lease.js'
+import { unlockHome } from '../src/doctor.js'
 import type { ProcessIdentity } from '../src/owner.js'
 import type { ProcessProbe, ProcessScanResult, ProcessStatus } from '../src/process-probe.js'
 import { createInProcessGuardLock } from '../src/native-helper.js'
@@ -411,5 +412,189 @@ describe('home lease lifecycle', () => {
     expect((await stat(path.join(home, 'run'))).mode & 0o777).toBe(0o700)
     expect((await stat(path.join(home, 'run', 'host-lease.guard'))).mode & 0o777).toBe(0o600)
     expect((await stat(await ownerPathOf(home))).mode & 0o777).toBe(0o600)
+  })
+})
+
+describe('probe verdict confirmation', () => {
+  it('reports busy, not stale, when a live owner is misread as different once', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const holder = await acquireHomeLease(acquireInput(home, probe))
+    const originalInspect = probe.inspect.bind(probe)
+    let misreadOnce = false
+    probe.inspect = async (identity) => {
+      if (!misreadOnce) {
+        misreadOnce = true
+        return 'different'
+      }
+      return originalInspect(identity)
+    }
+    await expect(
+      acquireHomeLease({ ...acquireInput(home, probe), profile: 'headless' }),
+    ).rejects.toMatchObject({ code: 'HOME_BUSY' })
+    await holder.release()
+  })
+
+  it('reports a recycled owner pid as stale only after a confirming read', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    // The recorded pid 4242 now belongs to a different live process.
+    other.processes.set(4242, { startIdentity: 'boot-777', status: 'same' })
+    await expect(acquireHomeLease(acquireInput(home, other))).rejects.toMatchObject({
+      code: 'HOME_STALE',
+    })
+  })
+
+  it('assertHeld absorbs a single self-probe misread', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    const originalInspect = probe.inspect.bind(probe)
+    let misreadOnce = false
+    probe.inspect = async (identity) => {
+      if (!misreadOnce) {
+        misreadOnce = true
+        return 'absent'
+      }
+      return originalInspect(identity)
+    }
+    await expect(lease.assertHeld()).resolves.toBeUndefined()
+    await lease.release()
+  })
+
+  it('releases through a single different-misread of the supervisor', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    const originalInspect = probe.inspect.bind(probe)
+    let misreadOnce = false
+    probe.inspect = async (identity) => {
+      if (!misreadOnce) {
+        misreadOnce = true
+        return 'different'
+      }
+      return originalInspect(identity)
+    }
+    await lease.release()
+    await expect(stat(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('refuses release on a confirmed different supervisor and records all three identities', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    // Same generation, but the owner pid now names a different live process.
+    const ownerFile = await ownerPathOf(home)
+    const raw = JSON.parse(await readFile(ownerFile, 'utf8'))
+    raw.supervisor = { pid: 9191, startIdentity: 'someone-else' }
+    await writeFile(ownerFile, JSON.stringify(raw, null, 2))
+    probe.processes.set(9191, { startIdentity: 'boot-real-9191', status: 'same' })
+    await expect(lease.release()).rejects.toThrow(
+      /probe: different.*owner pid 9191 recorded identity someone-else.*observed identity boot-real-9191/su,
+    )
+    // The lock stays for doctor.
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+  })
+})
+
+describe('home doctor (unlock)', () => {
+  async function unlockInput(home: string, probe: FakeProbe) {
+    return { home, probe, guard: createInProcessGuardLock() }
+  }
+
+  it('refuses to unlock while the recorded owner is live', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'same' })
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'refused', code: 'ACTIVE_OWNER' })
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+  })
+
+  it('absorbs a single absent-misread of a live owner before deciding', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'same' })
+    const originalInspect = other.inspect.bind(other)
+    let misreadOnce = false
+    other.inspect = async (identity) => {
+      if (!misreadOnce) {
+        misreadOnce = true
+        return 'absent'
+      }
+      return originalInspect(identity)
+    }
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'refused', code: 'ACTIVE_OWNER' })
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+  })
+
+  it('absorbs a single different-misread of a live owner instead of deleting its lock', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'same' })
+    const originalInspect = other.inspect.bind(other)
+    let misreadOnce = false
+    other.inspect = async (identity) => {
+      if (!misreadOnce) {
+        misreadOnce = true
+        return 'different'
+      }
+      return originalInspect(identity)
+    }
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'refused', code: 'ACTIVE_OWNER' })
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+  })
+
+  it('unlocks a stale owner only after a confirming read', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'absent' })
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'unlocked' })
+    await expect(stat(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('unlocks a recycled owner pid after confirming the mismatch', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-777', status: 'same' })
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'unlocked' })
+  })
+
+  it('refuses when the owner cannot be identified', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'unknown' })
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'refused', code: 'IDENTITY_UNKNOWN' })
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
   })
 })

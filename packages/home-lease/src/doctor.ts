@@ -3,6 +3,7 @@ import { rm, rmdir } from 'node:fs/promises'
 import { describeLeaseOwner } from './owner.js'
 import type { ProcessProbe } from './process-probe.js'
 import { createNativeGuardLock, resolveLeaseHelperPath, type GuardLock } from './native-helper.js'
+import { inspectConfirmed } from './probe-confirm.js'
 import { directoryIdentity, leasePaths, readOwner, validateHome } from './lease-fs.js'
 
 export type UnlockResult =
@@ -25,7 +26,10 @@ export type UnlockHomeInput = Readonly<{
  * entrypoints, and removing the lock — happens inside one guard critical
  * section, so a concurrent acquisition can never be deleted by an older
  * doctor. Live or unidentifiable owners are always refused; there is no
- * `--force`.
+ * `--force`. Owner liveness uses the same confirmation discipline as
+ * acquisition: only 'same' is believed immediately, and any other verdict
+ * is re-read once before a lock is removed — a single misread of a live
+ * owner must never authorize deletion.
  */
 export async function unlockHome(input: UnlockHomeInput): Promise<UnlockResult> {
   const home = validateHome(input.home)
@@ -101,8 +105,8 @@ export async function unlockHome(input: UnlockHomeInput): Promise<UnlockResult> 
     }
 
     const owner = current.owner
-    const supervisor = await input.probe.inspect(owner.supervisor)
-    const host = owner.host === null ? 'absent' : await input.probe.inspect(owner.host)
+    const supervisor = await inspectConfirmed(input.probe, owner.supervisor)
+    const host = owner.host === null ? 'absent' : await inspectConfirmed(input.probe, owner.host)
     const summary = describeLeaseOwner(owner)
     if (supervisor === 'same' || host === 'same') {
       return refuse('ACTIVE_OWNER', `the recorded owner is still running: ${summary}`)
