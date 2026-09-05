@@ -367,11 +367,14 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
         // the process up under load) is retried a bounded number of times —
         // refusing on a transient would strand a perfectly healthy session
         // with a stale lock.
-        const supervisorStatus = await inspectWithRetry(probe, current.owner.supervisor)
+        const supervisorStatus = await inspectWithRetry(probe, current.owner.supervisor, 5, 500)
         if (supervisorStatus !== 'same') {
+          // The probe verdict is part of the message: 'different' (identity
+          // mismatch) and a persistent 'unknown' (helper could not look the
+          // process up) are different failures wearing one code.
           throw new LeaseError(
             'LEASE_CHANGED',
-            'the recorded supervisor identity is not this process',
+            `the recorded supervisor identity is not this process (probe: ${supervisorStatus})`,
             describeLeaseOwner(current.owner),
           )
         }
