@@ -346,13 +346,12 @@ async function profilesFormatId(
     const text = await readFile(manifest, 'utf8').catch(() => '')
     try {
       const parsed: unknown = JSON.parse(text)
-      if (
-        typeof parsed === 'object' &&
-        parsed !== null &&
-        typeof (parsed as Record<string, unknown>).dsh === 'object'
-      ) {
-        continue
-      }
+      // The upstream profile manifest shape is a JSON object with an OPTIONAL
+      // dsh section: app-owned profiles carry dsh.profile, while third-party
+      // bundles installed by the user are plain package.json manifests. Both
+      // are this baseline's known profile format; only unparseable or
+      // non-object content is foreign.
+      if (typeof parsed === 'object' && parsed !== null) continue
       sawUnknownManifest = true
       unknown.push(path.relative(home, manifest))
     } catch {

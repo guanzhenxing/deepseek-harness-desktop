@@ -286,6 +286,23 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('accepts third-party bundle manifests without a dsh section', async () => {
+    const home = await tempHome()
+    try {
+      const bundleDir = path.join(home, 'profiles', 'user-plugin')
+      await mkdir(bundleDir, { recursive: true })
+      await writeFile(
+        path.join(bundleDir, 'package.json'),
+        JSON.stringify({ name: 'example-user-plugin', version: '1.0.0', main: './index.js' }),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.profiles).toBe('dsh-profile-manifest-0.1.2-alpha.3')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('flags a pre-release flat credentials file as an unknown path', async () => {
     const home = await tempHome()
     try {
