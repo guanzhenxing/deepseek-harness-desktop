@@ -104,6 +104,29 @@ function isLeaseCoordination(relative) {
   )
 }
 
+/**
+ * Wait until the home lease is released after an installed-app exit. The
+ * launcher never blocks quit on a failed release (M1 semantics), so a slow
+ * or retried release briefly leaves run/host.lock behind — the M3 package
+ * smoke waits the same way before any CLI round.
+ */
+async function waitForLeaseGone(home, timeoutMs = 30_000) {
+  const { stat } = await import('node:fs/promises')
+  const lock = path.join(home, 'run', 'host.lock')
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const gone = await stat(lock).then(
+      () => false,
+      (error) => error.code === 'ENOENT',
+    )
+    if (gone) return
+    if (Date.now() > deadline) {
+      fail('lease release', `run/host.lock still present after app exit: ${lock}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+}
+
 async function assertOnlyCoordinationChanged(step, home, before) {
   const after = await treeDigests(home)
   const changed = digestDiff(before, after).filter((file) => !isLeaseCoordination(file))
@@ -218,6 +241,7 @@ export async function runUpgradeRehearsal(input) {
         await driveOneTurn(client, { cwd: fixture.cwd, text: 'previous desktop seeds the home' })
       },
     })
+    await waitForLeaseGone(fixture.home)
     record(
       'previous-desktop-boot',
       true,
@@ -239,32 +263,29 @@ export async function runUpgradeRehearsal(input) {
       'byte-identical copy; the rehearsal continues on the copy only',
     )
 
-    // -- Step 5: the candidate upgrades the copy. ---------------------------
-    // Desktop smoke modes resolve their home as <userData>/home (main.ts
-    // resolveSmokeHome) and ignore DSH_HOME, so the verified copy is cloned
-    // into the candidate's smoke userData — the CLI keeps addressing the same
-    // directory through DSH_HOME.
-    const beforeUpgrade = await dataDigests(rehearsalCopy.home)
-    const candidateUserData = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-m0-smoke-upgrade-'))
-    const candidateHome = path.join(candidateUserData, 'home')
-    await cp(rehearsalCopy.home, candidateHome, { recursive: true })
-    const cloneDigest = digestDiff(beforeUpgrade, await dataDigests(candidateHome))
-    if (cloneDigest.length > 0) {
-      fail('candidate upgrade', `clone into userData diverged: ${cloneDigest.join(', ')}`)
-    }
+    // -- Step 5: the candidate upgrades the seeded home IN PLACE. -----------
+    // A real upgrade replaces the .app and keeps both the home path and the
+    // application-support directory; profile journals pin absolute ref paths
+    // and MUST NOT be relocated (the M2 containment check would rightly call
+    // them corrupt). So the candidate runs against the fixture's own
+    // userData/home; the verified copy stays untouched as the pristine
+    // baseline for the refusal negatives.
+    const candidateHome = fixture.home
+    const beforeUpgrade = await dataDigests(candidateHome)
     await runInstalledApp({
       executable: candidateInstall.executable,
       mode: 'conversation',
-      userData: candidateUserData,
+      userData: fixture.userData,
       cwd: fixture.cwd,
       timeoutMs: 300_000,
       async action({ waitFor }) {
         await waitFor(
           (report) => report.kind === 'ui-ready',
-          'candidate ui-ready on the upgraded copy',
+          'candidate ui-ready on the upgraded home',
         )
       },
     })
+    await waitForLeaseGone(candidateHome)
     const afterUpgrade = await dataDigests(candidateHome)
     const seededSessionFiles = [...beforeUpgrade.keys()].filter((file) =>
       file.startsWith('sessions/'),
@@ -273,7 +294,7 @@ export async function runUpgradeRehearsal(input) {
     if (lostHistory.length > 0)
       fail('candidate upgrade', `upgrade lost history: ${lostHistory.join(', ')}`)
     // Anti-vacuous proof: the candidate's own admission must have reserved
-    // the write epoch on THIS home (not on some other userData/home).
+    // the write epoch on THIS home.
     const candidateMarker = JSON.parse(
       await readFile(path.join(candidateHome, 'run', 'compatibility.json'), 'utf8'),
     )
@@ -283,7 +304,7 @@ export async function runUpgradeRehearsal(input) {
     ) {
       fail(
         'candidate upgrade',
-        `marker was not reserved by the candidate on the upgraded copy: ${JSON.stringify(candidateMarker)}`,
+        `marker was not reserved by the candidate on the upgraded home: ${JSON.stringify(candidateMarker)}`,
       )
     }
     await assertThirdPartyBundleUnchanged(bundle)
@@ -295,7 +316,7 @@ export async function runUpgradeRehearsal(input) {
 
     const continued = await runInstalledCli(
       candidateInstall.cliEntry,
-      ['--profile', 'headless', 'candidate cli adds a round on the copy'],
+      ['--profile', 'headless', 'candidate cli adds a round on the upgraded home'],
       { home: candidateHome, cwd: fixture.cwd },
     )
     if (continued.code !== 0) fail('candidate continuation', continued.output.slice(-300))
@@ -305,22 +326,23 @@ export async function runUpgradeRehearsal(input) {
     }
     record('candidate-continuation', true, 'candidate reads history and appends new content')
 
-    // -- Step 6: restart the candidate on the same copy. --------------------
+    // -- Step 6: restart the candidate on the same home. --------------------
     await runInstalledApp({
       executable: candidateInstall.executable,
       mode: 'conversation',
-      userData: candidateUserData,
+      userData: fixture.userData,
       cwd: fixture.cwd,
       timeoutMs: 300_000,
       async action({ waitFor }) {
         await waitFor((report) => report.kind === 'ui-ready', 'candidate restart ui-ready')
       },
     })
+    await waitForLeaseGone(candidateHome)
     const restartedSessions = await listSessions(candidateHome)
     if (restartedSessions.length !== 3) {
       fail('candidate restart', `restart lost sessions: found ${restartedSessions.length}`)
     }
-    await assertThirdPartyBundleUnchanged(bundle, candidateHome)
+    await assertThirdPartyBundleUnchanged(bundle)
     record('candidate-restart', true, 'restart re-reads history and new content')
 
     // -- Step 7: refusal negatives against the real installed artifacts. ----
@@ -333,7 +355,7 @@ export async function runUpgradeRehearsal(input) {
     for (const refusalCase of cases) {
       const negativeRoot = await mkdtemp(path.join(tmpdir(), 'dsh-negative-'))
       const negativeHome = path.join(negativeRoot, 'home')
-      await cp(rehearsalCopy.home, negativeHome)
+      await cp(rehearsalCopy.home, negativeHome, { recursive: true })
       try {
         await mkdir(path.join(negativeHome, 'run'), { recursive: true })
         if (refusalCase.rawMarker !== undefined) {
@@ -394,7 +416,7 @@ export async function runUpgradeRehearsal(input) {
     // same <userData>/home resolution the app will actually use.
     const negativeUserData = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-m0-smoke-negative-'))
     const desktopNegativeHome = path.join(negativeUserData, 'home')
-    await cp(rehearsalCopy.home, desktopNegativeHome)
+    await cp(rehearsalCopy.home, desktopNegativeHome, { recursive: true })
     try {
       await mkdir(path.join(desktopNegativeHome, 'run'), { recursive: true })
       const epochTwo = cases.find((entry) => entry.id === 'epoch-2-marker')
@@ -403,30 +425,35 @@ export async function runUpgradeRehearsal(input) {
         `${JSON.stringify(epochTwo.marker, undefined, 2)}\n`,
       )
       const before = await dataDigests(desktopNegativeHome)
-      let sawRefusal = false
-      try {
-        await runInstalledApp({
-          executable: previousInstall.executable,
-          mode: 'recovery',
-          userData: negativeUserData,
-          cwd: fixture.cwd,
-          timeoutMs: 300_000,
-          async action({ waitFor }) {
-            await waitFor(
-              (report) =>
-                (report.kind === 'failed' && report.stage === 'home-admission') ||
-                (report.kind === 'recovery' && report.step === 'recovery-view-reached'),
-              'desktop downgrade refusal',
-            )
-          },
-        })
-        // A clean run with no failed report means the refusal never happened.
-        fail('desktop downgrade refusal', 'previous app booted a newer-epoch home without refusing')
-      } catch (error) {
+      // The recovery smoke mode absorbs a failed startup into its recovery
+      // chain by design and exits cleanly, so the refusal is observed from
+      // the smoke reports (and from a hard failure's error message).
+      const reports = await runInstalledApp({
+        executable: previousInstall.executable,
+        mode: 'recovery',
+        userData: negativeUserData,
+        cwd: fixture.cwd,
+        timeoutMs: 300_000,
+        async action({ waitFor }) {
+          await waitFor(
+            (report) =>
+              (report.kind === 'failed' && report.stage === 'home-admission') ||
+              (report.kind === 'recovery' && report.step === 'recovery-view-reached'),
+            'desktop downgrade refusal',
+          )
+        },
+      }).catch((error) => {
         if (!/home-admission/.test(String(error.message))) throw error
-        sawRefusal = true
+        return []
+      })
+      const refused =
+        reports.some((report) => report.kind === 'failed' && report.stage === 'home-admission') ||
+        reports.some(
+          (report) => report.kind === 'recovery' && report.step === 'recovery-view-reached',
+        )
+      if (!refused) {
+        fail('desktop downgrade refusal', 'admission refusal was not observed')
       }
-      if (!sawRefusal) fail('desktop downgrade refusal', 'admission refusal was not observed')
       await assertOnlyCoordinationChanged('desktop downgrade refusal', desktopNegativeHome, before)
       record(
         'refusal-desktop-epoch-2',
