@@ -371,10 +371,22 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
         if (supervisorStatus !== 'same') {
           // The probe verdict is part of the message: 'different' (identity
           // mismatch) and a persistent 'unknown' (helper could not look the
-          // process up) are different failures wearing one code.
+          // process up) are different failures wearing one code. For
+          // 'different' — which identity math says is impossible for the
+          // recording process — the current process identity is attached so
+          // the next occurrence diagnoses itself (same pid + different
+          // identity = kernel-level misread; different pid = the lock was
+          // recorded by another process).
+          let selfDiagnosis = ''
+          if (supervisorStatus === 'different') {
+            const currentSelf = await probe.current().catch(() => undefined)
+            if (currentSelf !== undefined) {
+              selfDiagnosis = `; self pid ${currentSelf.pid} identity ${currentSelf.startIdentity}, owner pid ${current.owner.supervisor.pid}`
+            }
+          }
           throw new LeaseError(
             'LEASE_CHANGED',
-            `the recorded supervisor identity is not this process (probe: ${supervisorStatus})`,
+            `the recorded supervisor identity is not this process (probe: ${supervisorStatus}${selfDiagnosis})`,
             describeLeaseOwner(current.owner),
           )
         }
