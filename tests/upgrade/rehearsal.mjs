@@ -53,8 +53,11 @@ async function loadArtifactIndex(kind, indexPath) {
     fail(kind, `expected exactly one ${process.arch} artifact record in ${indexPath}`)
   }
   const record = records[0]
-  const dmgPath = path.resolve(path.dirname(indexPath), record.file)
-  if (!existsSync(dmgPath)) fail(kind, `artifact file missing: ${dmgPath}`)
+  // Records may reference their DMG relative to the index directory (archived
+  // indexes) or relative to the repository root (release/artifacts.json).
+  let dmgPath = path.resolve(path.dirname(indexPath), record.file)
+  if (!existsSync(dmgPath)) dmgPath = path.resolve(repositoryRoot, record.file)
+  if (!existsSync(dmgPath)) fail(kind, `artifact file missing: ${record.file}`)
   const actualSha = await sha256File(dmgPath)
   if (actualSha !== record.sha256) {
     fail(kind, `artifact digest mismatch: index pins ${record.sha256}, file hashes ${actualSha}`)
@@ -237,15 +240,23 @@ export async function runUpgradeRehearsal(input) {
     )
 
     // -- Step 5: the candidate upgrades the copy. ---------------------------
+    // Desktop smoke modes resolve their home as <userData>/home (main.ts
+    // resolveSmokeHome) and ignore DSH_HOME, so the verified copy is cloned
+    // into the candidate's smoke userData — the CLI keeps addressing the same
+    // directory through DSH_HOME.
     const beforeUpgrade = await dataDigests(rehearsalCopy.home)
-    const candidateHome = rehearsalCopy.home
-    const candidateUserData = await mkdtemp(path.join(tmpdir(), 'dsh-upgrade-userdata-'))
+    const candidateUserData = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-m0-smoke-upgrade-'))
+    const candidateHome = path.join(candidateUserData, 'home')
+    await cp(rehearsalCopy.home, candidateHome, { recursive: true })
+    const cloneDigest = digestDiff(beforeUpgrade, await dataDigests(candidateHome))
+    if (cloneDigest.length > 0) {
+      fail('candidate upgrade', `clone into userData diverged: ${cloneDigest.join(', ')}`)
+    }
     await runInstalledApp({
       executable: candidateInstall.executable,
       mode: 'conversation',
       userData: candidateUserData,
       cwd: fixture.cwd,
-      home: candidateHome,
       timeoutMs: 300_000,
       async action({ waitFor }) {
         await waitFor(
@@ -261,11 +272,25 @@ export async function runUpgradeRehearsal(input) {
     const lostHistory = seededSessionFiles.filter((file) => !afterUpgrade.has(file))
     if (lostHistory.length > 0)
       fail('candidate upgrade', `upgrade lost history: ${lostHistory.join(', ')}`)
-    const bundleOk = await assertThirdPartyBundleUnchanged(bundle, candidateHome)
+    // Anti-vacuous proof: the candidate's own admission must have reserved
+    // the write epoch on THIS home (not on some other userData/home).
+    const candidateMarker = JSON.parse(
+      await readFile(path.join(candidateHome, 'run', 'compatibility.json'), 'utf8'),
+    )
+    if (
+      candidateMarker.lastWriterReleaseId !== candidateManifest.releaseId ||
+      candidateMarker.schemaVersion !== 1
+    ) {
+      fail(
+        'candidate upgrade',
+        `marker was not reserved by the candidate on the upgraded copy: ${JSON.stringify(candidateMarker)}`,
+      )
+    }
+    await assertThirdPartyBundleUnchanged(bundle)
     record(
       'candidate-upgrade-boot',
       true,
-      `history preserved, third-party bundle intact (${bundleOk})`,
+      `history preserved, marker reserved by ${candidateMarker.lastWriterReleaseId}, third-party bundle intact`,
     )
 
     const continued = await runInstalledCli(
@@ -286,7 +311,6 @@ export async function runUpgradeRehearsal(input) {
       mode: 'conversation',
       userData: candidateUserData,
       cwd: fixture.cwd,
-      home: candidateHome,
       timeoutMs: 300_000,
       async action({ waitFor }) {
         await waitFor((report) => report.kind === 'ui-ready', 'candidate restart ui-ready')
@@ -366,8 +390,10 @@ export async function runUpgradeRehearsal(input) {
     }
 
     // -- Step 8: Desktop-side downgrade refusal on the real previous app. ---
-    const desktopNegativeRoot = await mkdtemp(path.join(tmpdir(), 'dsh-negative-desktop-'))
-    const desktopNegativeHome = path.join(desktopNegativeRoot, 'home')
+    // The poisoned home goes inside the previous app's smoke userData, the
+    // same <userData>/home resolution the app will actually use.
+    const negativeUserData = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-m0-smoke-negative-'))
+    const desktopNegativeHome = path.join(negativeUserData, 'home')
     await cp(rehearsalCopy.home, desktopNegativeHome)
     try {
       await mkdir(path.join(desktopNegativeHome, 'run'), { recursive: true })
@@ -377,7 +403,6 @@ export async function runUpgradeRehearsal(input) {
         `${JSON.stringify(epochTwo.marker, undefined, 2)}\n`,
       )
       const before = await dataDigests(desktopNegativeHome)
-      const negativeUserData = await mkdtemp(path.join(tmpdir(), 'dsh-negative-userdata-'))
       let sawRefusal = false
       try {
         await runInstalledApp({
@@ -385,7 +410,6 @@ export async function runUpgradeRehearsal(input) {
           mode: 'recovery',
           userData: negativeUserData,
           cwd: fixture.cwd,
-          home: desktopNegativeHome,
           timeoutMs: 300_000,
           async action({ waitFor }) {
             await waitFor(
@@ -410,7 +434,7 @@ export async function runUpgradeRehearsal(input) {
         'previous app refuses a newer-epoch home in its admission chain, before any write',
       )
     } finally {
-      await rm(desktopNegativeRoot, {
+      await rm(desktopNegativeHome, {
         recursive: true,
         force: true,
         maxRetries: 5,

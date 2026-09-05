@@ -107,7 +107,11 @@ async function credentialsFormatId(file: string): Promise<SlotResult> {
   if (!(await regularFile(file))) return { state: 'absent' }
   const text = await readFile(file, 'utf8').catch(() => '')
   const header = /^version:[ \t]*(\d+)[ \t]*$/m.exec(text)
-  if (header !== null && header[1] === '1' && /^refs:/m.test(text)) {
+  // The baseline credentials file carries `version: 1` plus one or both of
+  // the two sections this release knows: `refs:` (API-key references via
+  // dsh-credentials-local) and `records:` (connection grants written by the
+  // desktop Host). Either section is the known baseline format.
+  if (header !== null && header[1] === '1' && (/^refs:/m.test(text) || /^records:/m.test(text))) {
     return { state: 'known', formatId: `dsh-credentials-file-${header[1]}` }
   }
   return { state: 'unknown', relative }

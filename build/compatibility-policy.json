@@ -16,10 +16,11 @@
       "writable": "dsh-credentials-file-1",
       "evidence": [
         "npm:@deepseek-ai/dsh-credentials-local@0.1.2-alpha.3:lib/index.js",
+        "fixture:tests/fixtures/home-formats/credentials-records.yaml#f75eb708888b7457fc5d58f4b36739d4afa29bac5ef2100d2e02f052a4fdfa18",
         "fixture:tests/fixtures/home-formats/credentials.yaml#3834614b05eff66d5abded116f263c068483dc5175f4ea46a39ecba980091907",
         "upstream:dd6322d604e00eec1ba5e0c8541159906a21094a"
       ],
-      "$notes": "<home>/.credentials.yaml carries an upstream-defined `version: 1` header with a refs: map; the pre-release flat layout is refused by the provider itself."
+      "$notes": "<home>/.credentials.yaml carries an upstream-defined `version: 1` header; this baseline writes two known sections \u2014 `refs:` (API-key references, dsh-credentials-local) and `records:` (connection grants written by the desktop Host). The pre-release flat layout is refused by the provider itself."
     },
     {
       "provider": "@deepseek-ai/dsh-settings-file",

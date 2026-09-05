@@ -324,6 +324,21 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('classifies the Host-written records: credentials section as the baseline format', async () => {
+    const home = await tempHome()
+    try {
+      await writeFile(
+        path.join(home, '.credentials.yaml'),
+        'version: 1\nrecords:\n  client-connection/browser-session:\n    kind: grant\n',
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.credentials).toBe('dsh-credentials-file-1')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('flags a pre-release flat credentials file as an unknown path', async () => {
     const home = await tempHome()
     try {
