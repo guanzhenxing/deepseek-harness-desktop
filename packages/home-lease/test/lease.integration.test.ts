@@ -121,6 +121,27 @@ describe.skipIf(!helperAvailable)('real helper process identity', () => {
     )
   })
 
+  it('accepts the legacy boot-prefixed identity of a live older-version holder', async () => {
+    // Owners recorded before the boottime component was dropped store
+    // "<bootSec>.<bootUsec>-<startSec>.<startUsec>". A live pre-upgrade
+    // holder must read 'same' (doctor must never delete its lock); a
+    // mismatched start suffix still reads 'different'.
+    const probe = nativeProbe()
+    const identity = await probe.current()
+    await expect(
+      probe.inspect({
+        pid: process.pid,
+        startIdentity: `1700000000.000000-${identity.startIdentity}`,
+      }),
+    ).resolves.toBe('same')
+    await expect(
+      probe.inspect({
+        pid: process.pid,
+        startIdentity: `1700000000.000000-1700000000.000001`,
+      }),
+    ).resolves.toBe('different')
+  })
+
   it('finds a live entry executable through scanSupported', async () => {
     const sleeper = spawn('/bin/sleep', ['10'])
     try {

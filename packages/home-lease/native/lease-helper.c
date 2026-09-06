@@ -114,6 +114,7 @@ static int cmd_probe(const char *pidText, const char *expected) {
     if (!process_identity((pid_t)value, start, sizeof(start))) {
         /* Distinguish "no such process" from "cannot look" (permissions). */
         struct proc_bsdinfo info;
+        memset(&info, 0, sizeof(info));
         if (proc_pidinfo((pid_t)value, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) <= 0 &&
             (errno == ESRCH || errno == EINVAL)) {
             print_result("{\"ok\":true,\"status\":\"absent\"}");
@@ -122,7 +123,16 @@ static int cmd_probe(const char *pidText, const char *expected) {
         }
         return 0;
     }
-    print_result(strcmp(start, expected) == 0
+    /* Legacy compatibility: owners recorded before the boottime component was
+     * dropped store "<bootSec>.<bootUsec>-<startSec>.<startUsec>". Compare the
+     * start-time suffix so a LIVE older-version holder still reads 'same'
+     * (refusing it as stale would let doctor delete a live lock and break the
+     * single-writer guarantee across a coexistence window); a dead one still
+     * reads absent/different. The boottime component itself never contained
+     * '-'. */
+    const char *expectedStart = strchr(expected, '-');
+    expectedStart = expectedStart == NULL ? expected : expectedStart + 1;
+    print_result(strcmp(start, expectedStart) == 0
                      ? "{\"ok\":true,\"status\":\"same\"}"
                      : "{\"ok\":true,\"status\":\"different\"}");
     return 0;
