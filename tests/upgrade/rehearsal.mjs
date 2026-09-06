@@ -306,6 +306,25 @@ export async function runUpgradeRehearsal(input) {
     if (seededSessions.length !== 2) {
       fail('seed sessions', `expected two synthetic sessions, found ${seededSessions.length}`)
     }
+    // Plant a REAL compressed session: the fixture forces compression:none
+    // for the driven rounds, so without this the whole chain never
+    // exercises zstd admission on the upgrade path (self-review R4).
+    const { zstdCompressSync } = await import('node:zlib')
+    const zstdSessionDir = path.join(
+      path.dirname(seededSessions[0].file),
+      'zstd-seeded-session',
+    )
+    await mkdir(zstdSessionDir, { recursive: true })
+    const zstdBytes = Buffer.concat([
+      zstdCompressSync(
+        Buffer.from(
+          '{"type":"session","version":0,"id":"zstd-seeded-session","createdAt":0,"delegationDepth":0}\n',
+          'utf8',
+        ),
+      ),
+      zstdCompressSync(Buffer.from('{"type":"turn/end"}\n', 'utf8')),
+    ])
+    await writeFile(path.join(zstdSessionDir, 'session.jsonl.zstd'), zstdBytes)
     record('previous-cli-round', true, 'two synthetic sessions from the previous artifact')
 
     // -- Step 4: verify the copy, then retire the original for the day. -----
@@ -394,10 +413,16 @@ export async function runUpgradeRehearsal(input) {
       )
     }
     await assertThirdPartyBundleUnchanged(bundle)
+    const zstdAfter = await readFile(
+      path.join(path.dirname(seededFile.file), 'zstd-seeded-session', 'session.jsonl.zstd'),
+    )
+    if (!zstdAfter.equals(zstdBytes)) {
+      fail('candidate upgrade', 'the real compressed session was rewritten or lost')
+    }
     record(
       'candidate-upgrade-boot',
       true,
-      `history preserved, marker reserved by ${candidateMarker.lastWriterReleaseId}, third-party bundle intact`,
+      `history preserved (incl. a real zstd session, byte-identical), marker reserved by ${candidateMarker.lastWriterReleaseId}, third-party bundle intact`,
     )
 
     const continued = await runInstalledCli(
