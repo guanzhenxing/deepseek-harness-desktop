@@ -1,4 +1,4 @@
-import { lstat, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -598,6 +598,39 @@ describe('home doctor (unlock)', () => {
     other.processes.set(4242, { startIdentity: 'boot-777', status: 'same' })
     const result = await unlockHome(await unlockInput(home, other))
     expect(result).toMatchObject({ status: 'unlocked' })
+  })
+
+  it('keeps a sentinel so a foreign doctor can never rmdir a live v2 lock', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    const lockDir = path.join(home, 'run', 'host.lock')
+    const entries = await readdir(lockDir)
+    expect(entries).toContain('.dsh-writer-sentinel')
+    // Reproduce exactly what a frozen older doctor does when it misreads the
+    // new identity format: delete the owner, then rmdir. The sentinel must
+    // make that rmdir fail and leave the lock directory in place.
+    const { rm: remove, rmdir: removeDir } = await import('node:fs/promises')
+    await remove(path.join(lockDir, 'owner.json'), { force: true })
+    await expect(removeDir(lockDir)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect((await lstat(lockDir)).isDirectory()).toBe(true)
+    // The v2-aware doctor finishes what the foreign one was refused.
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'unlocked' })
+    await expect(stat(lockDir)).rejects.toMatchObject({ code: 'ENOENT' })
+    await lease.release().catch(() => undefined)
+  })
+
+  it('clears the sentinel on normal release', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    await lease.release()
+    await expect(stat(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('refuses when the owner cannot be identified', async () => {

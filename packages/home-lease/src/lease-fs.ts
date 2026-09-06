@@ -11,12 +11,22 @@ export const RUN_DIRNAME = 'run'
 export const LOCK_DIRNAME = 'host.lock'
 export const GUARD_FILENAME = 'host-lease.guard'
 export const OWNER_FILENAME = 'owner.json'
+/**
+ * Lock-directory sentinel: every release of THIS layout keeps one extra
+ * file inside <home>/run/host.lock/. All doctor implementations — including
+ * frozen older artifacts — refuse to rmdir a non-empty lock directory
+ * (ENOTEMPTY), so a foreign doctor that misreads the newer identity format
+ * can delete owner.json but can never remove a LIVE v2 lock. Only this
+ * release's own release/doctor remove the sentinel before rmdir.
+ */
+export const SENTINEL_FILENAME = '.dsh-writer-sentinel'
 
 export type LeasePaths = Readonly<{
   run: string
   lockDir: string
   guardPath: string
   ownerPath: string
+  sentinelPath: string
 }>
 
 export type ReadOwnerResult = Readonly<
@@ -31,6 +41,7 @@ export function leasePaths(home: string): LeasePaths {
     lockDir,
     guardPath: path.join(run, GUARD_FILENAME),
     ownerPath: path.join(lockDir, OWNER_FILENAME),
+    sentinelPath: path.join(lockDir, SENTINEL_FILENAME),
   }
 }
 

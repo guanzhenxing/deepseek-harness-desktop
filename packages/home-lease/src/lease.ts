@@ -191,6 +191,15 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
       appVersion: input.appVersion,
     })
     await writeOwnerWithDurability(paths.ownerPath, owner)
+    // The sentinel makes the lock directory non-empty on purpose: foreign
+    // doctors (frozen older artifacts misreading the identity format) can
+    // delete the owner file but their rmdir then hits ENOTEMPTY and they
+    // refuse — the single-writer guarantee is enforced by the lock layout,
+    // not by the goodwill of whoever holds the doctor binary.
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(paths.sentinelPath, `${input.appVersion}\n${owner.generation}\n`, {
+      mode: 0o600,
+    })
   }).catch((error: unknown) => {
     if (error instanceof LeaseError && error.code === 'GUARD_BUSY') {
       throw new LeaseError(
@@ -401,6 +410,9 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
           throw new LeaseError('LEASE_CHANGED', 'home lock directory identity changed')
         }
         await rm(paths.ownerPath, { force: false })
+        await rm(paths.sentinelPath, { force: true }).catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        })
         try {
           await rmdir(paths.lockDir)
         } catch (error) {

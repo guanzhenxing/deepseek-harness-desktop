@@ -84,6 +84,12 @@ export async function unlockHome(input: UnlockHomeInput): Promise<UnlockResult> 
       await rm(paths.ownerPath, { force: true }).catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       })
+      // A foreign doctor may have deleted the owner of a v2 lock; the
+      // sentinel lets THIS doctor finish the cleanup the foreign one was
+      // refused (their rmdir hit ENOTEMPTY and left the directory).
+      await rm(paths.sentinelPath, { force: true }).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      })
       try {
         await rmdir(paths.lockDir)
       } catch (error) {
@@ -125,6 +131,12 @@ export async function unlockHome(input: UnlockHomeInput): Promise<UnlockResult> 
       return refuse('LEASE_CHANGED', 'the owner file changed during diagnosis')
     }
     await rm(paths.ownerPath, { force: false }).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    })
+    // This doctor understands the v2 lock layout: clear OUR sentinel (the
+    // only extra entry this release ever creates) before rmdir. Anything
+    // still left after that is truly unexpected and keeps the refusal.
+    await rm(paths.sentinelPath, { force: true }).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     })
     try {
