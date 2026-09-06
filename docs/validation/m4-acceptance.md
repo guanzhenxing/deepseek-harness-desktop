@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.16 轮全部处置——锁布局 v2 哨兵承载单写者、watchdog 三修并降级为兜底、排空串行化、zstd 预算化+反证、预算 fail-closed——后于制品 HEAD `31c9d84` 全链重验通过，2026-09-07，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.17 轮全部处置——哨兵身份判定封死跨副本 doctor 误删、anchor-less 域 fail-closed、截断帧拒绝、CLI watchdog 覆盖后代窗口——后于制品 HEAD `3c558db` 全链重验通过，2026-09-07，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -207,11 +207,29 @@ codex 八审 8 项 Standards + 5 项 Spec，逐条核实**全部属实**；本�
 | Sp5  | P2   | credentials/settings 顶层槽位绕过预算                                                                                                                                         | 两槽位 unknown 记录改走 `flagUnknown`                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 自查 | —    | 复现驱动攻击本轮新鲜代码的 2 项发现：①`exhausted` 且输出恰为空（首条发现即被吞）仍读作 fresh 放行；②watchdog tick 在 await 期间 quit 已开始时，第二失败会向退出链误报 crashed | ①exhausted 必留标记路径（空输出时 push `home`），回归在案；②处决路径前复查 `#stop`。另补：旧布局（无哨兵）遗留锁仍可被新 doctor 清理的回归                                                                                                                                                                                                                                                                                                                                                          |
 
+## 5.17 codex 复审第九轮（2026-09-07，基线 `89a24bc`）与自查
+
+codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实**全部属实**，全部以复现先行修复。
+
+| #       | 级别 | 发现                                                                                                                                                        | 处置                                                                                                                                                                                                                                                                                                             |
+| ------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sp1     | P1   | 新版 doctor 仍可拆活锁哨兵：owner 被旧 doctor 删后，`scanSupported` 针脚绑定**当前安装副本**的绝对路径，另一副本的活实例读作 none → 删哨兵+目录，单写者退化 | 哨兵携带写者完整身份（`pid/startIdentity/generation`）。doctor 的 owner 缺失/损坏分支先按**哨兵身份**判定：same→`ACTIVE_OWNER` 拒删、unknown/不可解析→拒删、absent/different→续走原流程（scan 仅兜底 v1 无哨兵布局）。复现（scan none 但身份活 → 拒删）与身份死亡→可清均有回归；身份活时哨兵文件原样保留         |
+| Sp2     | P1   | 无 global 的普通域以首条记录自锚：两条一致 `version:99` 自证为已知 storage                                                                                  | 上游核实（`dsh-storage-domain` 源码）：baseline 仅两个 per-record 域——`workspace`（v2，有 global）与 `session_projcache`（v4，**无** global，已钉 4）。自锚废除；除钉 4 的 projcache 外，无 global 的域 fail-closed。复现（双 v99）转回归；**真实 `~/.dsh` 预检复跑确认仍 allow**（projcache 走钉 4 分支不误拒） |
+| Sp3     | P1   | CLI watchdog 在直属 child 退出即停，后代（pnpm/官方 CLI）仍写 home 的窗口无监视                                                                             | watchdog 改为武装至 `waitForDescendants` 完成；行为测试补完：kill 驱动 exit、被测调用必须 settle（此前永久 pending + `void running` 掩盖收尾路径）；新增 GUARD_BUSY 持续竞争不杀的单测                                                                                                                           |
+| St1     | P1   | 截断 zstd 帧放行：5 字节 `28 b5 2f fd 00`（FHD 声明 6 字节头）被判有效会话                                                                                  | 标准帧头一律核对 `stat.size ≥ offset + headerLength`（原来只对 >8 字节头复读）。复现转回归                                                                                                                                                                                                                       |
+| St2/Sp4 | P2   | exhausted 收尾直接 push 槽位名，输出突破预算（`unknowns:1` 返回 2 条）                                                                                      | exhausted 收敛为**单一固定标记 `home`**（明确不计入逐路径预算，输出上界 = unknowns+1）；claimed 槽位照清。复现转回归                                                                                                                                                                                             |
+| St3     | P2   | CLI watchdog 测试永久 pending、GUARD_BUSY 无覆盖                                                                                                            | 见 Sp3 行（kill→resolve、settle 断言、GUARD_BUSY 单测；`startLeaseWatchdog` 导出供测）                                                                                                                                                                                                                           |
+| St4     | P2   | home-lease 规范布局/释放状态机、data-layout 均未含 sentinel                                                                                                 | 三处更新：布局图含 `.dsh-writer-sentinel`（规范成员非可选）+ 释放状态机（删 owner→删哨兵→rmdir）+ doctor 状态机（owner 缺失按哨兵身份）+ data-layout 行                                                                                                                                                          |
+| Sp5     | P2   | attach 成功但解析失败泄漏挂载（登记晚于解析）                                                                                                               | `hdiutil attach -plist` 结构化输出 + regex 兜底提取 `/Volumes/…`，**提取即登记**，解析/复制失败都走同一回收（全链 15/15 冒烟与演练的实装已实战验证该路径）                                                                                                                                                       |
+| Sp6     | P2   | SIGTERM 退出码误用 130（应为 143）                                                                                                                          | 两入口按信号映射 130/143，SIGTERM 行为测试（ready 握手后发 SIGTERM，断言 143 + 标记文件）                                                                                                                                                                                                                        |
+
+**本轮自查（复现驱动攻击新鲜代码）**：真实 `~/.dsh` 预检复跑仍 allow（anchor-less 收紧不误拒真实布局）；伪造/畸形哨兵均落保守拒绝（DoS 方向安全）；31c9d84 前候选的旧格式哨兵（无身份）遇新 doctor 按不可解析拒删——内部候选共存边界，记录于本节，不入协议。
+
 ## 6. 门禁结果
 
-**最终轮（§5.16 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `31c9d84`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（365 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（81 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记；独立 `zstd-session-admission` 步骤在本轮引入）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `31c9d84`。
+**最终轮（§5.17 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `3c558db`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（369 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（83 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记；独立 `zstd-session-admission` 步骤在本轮引入）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `3c558db`。
 
-前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`…`e213fbf`/`6fe04f5` 均 13/13。均被 §5.16 轮取代，记录保留于 git 历史。
+前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`…`6fe04f5`/`31c9d84` 均 13/13。均被 §5.17 轮取代，记录保留于 git 历史。
 
 链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
@@ -219,14 +237,14 @@ codex 八审 8 项 Standards + 5 项 Spec，逐条核实**全部属实**；本�
 
 | 项                             | 值                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-31c9d84`，DMG SHA `dd1ef7c1a3a23fe52f7983af550de3df91e089ba913b55a44efad1e3dedd8c75`（绑定 §5.16 轮全部代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-3c558db`，DMG SHA `ecf6ee304e70419d49e079e080f13391d357c4ac78353cb082a51d3f5dfabc4b`（绑定 §5.17 轮全部代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`            |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                             |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                               |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.16 轮全部处置后于制品 HEAD `31c9d84` 重验通过，2026-09-07）。
+- 自动测试完成 → **`candidate-verified`**（§5.17 轮全部处置后于制品 HEAD `3c558db` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
