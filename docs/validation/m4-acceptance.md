@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.14 五轮独立自查处置——含 1 项真缺陷（beforeExit 重试链）与真实 zstd 端到端盲区——后于制品 HEAD `e213fbf` 全链重验通过，2026-09-07，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.15 轮全部处置——lease watchdog、完整记录信封、skippable 帧长核对、预算输出上界、信号重试排空、全量植入位置测试、独立 zstd admission 步骤——后于制品 HEAD `6fe04f5` 全链重验通过，2026-09-07，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -172,11 +172,27 @@ codex 六审 4 项 Spec + 4 项 Standards，逐条核实**全部属实**，处�
 | R4  | 升级/状态机：演练盲区                       | **发现盲区并补端到端**。演练 fixture 强制 `compression: none`——16/16 全链从未让真实压缩会话过 admission，帧头验证若有 false positive 只有真实 `~/.dsh` 升级才会暴露。现在演练播种一个真实 `zstdCompressSync` 多帧会话（`zstd-seeded-session`），断言升级全程字节不变且 candidate admission 接受它（连同 R1 的单测，字节点与端到端双覆盖）。决策序其余面（marker/disk mismatch 保守拒绝等）核对已有测试覆盖                                                                                            |
 | R5  | 证据/验收记录                               | 本节；六轮措辞与实现复核无新偏差，§6 数字以本轮重跑为准                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
+## 5.15 codex 复审第七轮（2026-09-07，基线 `84c45ed`）
+
+codex 七审 5 项 Standards + 3 项 Spec，逐条核实**全部属实**；其中 Sp2 推翻了 §5.14 自查 R2 的"锁被删后不会双写"判断（lease 把守准入而非 Host 运行期写——该判断错误）。处置如下。
+
+| #   | 级别       | 发现                                                                                                                                                  | 处置                                                                                                                                                                                                                                                                                                                             |
+| --- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sp1 | P1         | 记录正文信封不完整：`{"version":4}` 无 `record` 字段被当合法；无 global 的普通域首条记录自锚、一致的未来版本可自证                                    | `readRecordStamp` 要求完整 `{version, record}` 信封（`record` own key，null 合法——global 即 `record:null`）。自锚边界如实记录：域版本的可信来源是 global 戳记与 projcache 钉 v4；无 global 域内部一致即过是可达边界（域清单由 provider 动态决定，勘察器无法静态枚举 descriptor）                                                 |
+| Sp2 | P1         | "M3 doctor 删 M4 锁后不会双写"不成立：`assertHeld` 只在启动链路调用，Host 授权后的数据写不查 lease；锁被删后旧 Host 继续写、新入口再进 → 真实双写窗口 | **lease watchdog**（`84f2503`）：supervisor 与 bundled CLI 在 Host/子进程运行期周期性 `assertHeld()`（默认 2s；guard 竞争不计、连续两次非竞争失败处决 Host/子进程并报 `LEASE_MISMATCH`），双写窗口压缩到至多一个监视周期。ADR-0005 修订、upgrade-guide 撤回错误宣称改为 watchdog 语义。supervisor 15/15 单测含两个 watchdog 用例 |
+| Sp3 | P1         | 截断 skippable 帧放行：只查读到 8 字节，声明 `0xffffffff` payload 的 8 字节文件仍过                                                                   | 声明长度与 stat 实际大小核对（零读成本）；且会话流必须最终包含标准帧——纯 skippable 流拒绝。负例（8 字节声明巨量）、正例（诚实 skippable 前缀 + 真实标准帧）、纯 skippable 拒绝三测试在案                                                                                                                                         |
+| Sp4 | P1（等价） | §5.14 的 zstd 端到端是空证明（§5.14 自查 R4 的实现缺陷被七审确认）                                                                                    | 见 St1——本轮重建为独立 admission 步骤后已真实过闸（首轮重建仍失败两次：上游 backend 拒绝在 none 配置 home 上 LIST .zstd artifact——最终形态是独立副本 + `--version` 透传探针：同一只读 admission 链、exit 5 拒/0 放、字节不变断言）                                                                                               |
+| St1 | P1         | zstd 会话种在已存在 session 目录的**子目录**（admission 不下钻该层），"字节不变"只证明被忽略的文件未变                                                | 重建：独立副本 + 透传探针（见 Sp4 行）。教训入记忆：**证据必须证明被检查，而非仅仅存在**                                                                                                                                                                                                                                         |
+| St2 | P1         | SIGINT/SIGTERM 单次排空后 `process.exit(130)`——显式退出不触发 beforeExit，瞬态失败仍泄漏                                                              | 所有持有退出的路径改为 `drainWithRetries()` **完成后**再 exit；SIGINT 行为测试（标记文件在 130 退出前写出的机器证明）在案                                                                                                                                                                                                        |
+| St3 | P2         | unknown 输出预算仍超额：`unknowns:1` + 多坏记录返回 3 条、余额 -19                                                                                    | `flagUnknown` 预算守卫（耗尽即不再追加）；输出恰被预算上界的测试在案                                                                                                                                                                                                                                                             |
+| St4 | P2         | "至多三轮"实际可达九次（外层 3 次 beforeExit × 内层 3 drain）                                                                                         | 轮次预算**进程级共享**（`drainRoundsUsed`，信号与 beforeExit 同池，总数 ≤3）                                                                                                                                                                                                                                                     |
+| St5 | P2         | 位置测试用一次 opendir 选植入位、实现重新开目录——两次顺序无 API 契约，旧采样可假绿                                                                    | 三个测试改**全量植入**（72/40/40 条目全坏、断言全部被抓）——与顺序无关，采样复活必红                                                                                                                                                                                                                                              |
+
 ## 6. 门禁结果
 
-**最终轮（§5.14 五轮自查处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `e213fbf`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（351 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（76 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `e213fbf`。演练本轮起含真实 zstd 会话保全断言（candidate-upgrade-boot 步）。
+**最终轮（§5.15 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `6fe04f5`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（358 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（80 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `6fe04f5`。演练本轮起含独立的 zstd admission 步骤（17 步）。
 
-前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`/`434d214`/`f782c02` 均 13/13+16/16+15/15。均被 §5.14 轮取代，记录保留于 git 历史。
+前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`/`434d214`/`f782c02`/`e213fbf` 均 13/13。均被 §5.15 轮取代，记录保留于 git 历史。
 
 链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
@@ -184,14 +200,14 @@ codex 六审 4 项 Spec + 4 项 Standards，逐条核实**全部属实**，处�
 
 | 项                             | 值                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-e213fbf`，DMG SHA `1f8fb9e0e01e37c109ae0848367b3c79e845e0436a8f9d99510aee372884778e`（绑定 §5.14 轮全部代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-6fe04f5`，DMG SHA `697cb8828de9b88526d3989bbd62aa33e178fe5fd518fd47e09e742e3b5a843f`（绑定 §5.15 轮全部代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`            |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                             |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                               |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.14 轮全部处置后于制品 HEAD `e213fbf` 重验通过，2026-09-07）。
+- 自动测试完成 → **`candidate-verified`**（§5.15 轮全部处置后于制品 HEAD `6fe04f5` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
