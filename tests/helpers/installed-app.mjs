@@ -50,7 +50,7 @@ process.on('beforeExit', () => {
     for (let attempt = 0; attempt < 3 && liveCleanups.size > 0; attempt += 1) {
       await emergencyCleanup()
       if (liveCleanups.size > 0 && attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 50))
+        await new Promise((resolve) => sleepTimer(resolve, 50))
       }
     }
   })()

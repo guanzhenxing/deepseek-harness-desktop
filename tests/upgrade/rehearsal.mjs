@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process'
 import { clearTimeout, setTimeout } from 'node:timers'
 import { existsSync } from 'node:fs'
+import { Buffer } from 'node:buffer'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -310,10 +311,7 @@ export async function runUpgradeRehearsal(input) {
     // for the driven rounds, so without this the whole chain never
     // exercises zstd admission on the upgrade path (self-review R4).
     const { zstdCompressSync } = await import('node:zlib')
-    const zstdSessionDir = path.join(
-      path.dirname(seededSessions[0].file),
-      'zstd-seeded-session',
-    )
+    const zstdSessionDir = path.join(path.dirname(seededSessions[0].file), 'zstd-seeded-session')
     await mkdir(zstdSessionDir, { recursive: true })
     const zstdBytes = Buffer.concat([
       zstdCompressSync(
