@@ -33,7 +33,7 @@ owner 文件不含凭据、capability、authenticated URL 或完整命令行。
 
 ## 3. 进程身份与原生 helper
 
-`ProcessIdentity = { pid, startIdentity }`。`startIdentity` 是 macOS `proc_pidinfo` 记录的进程启动秒/微秒（内核在 fork 时一次性写入、此后不可变）。它曾是"启动时间 + 系统 boottime"的复合串；boottime 分量在 2026-09-06 被实测移除——`KERN_BOOTTIME` 是"当前墙钟 − 开机时长"的推导值，NTP 对时会使其在进程存续期间整体平移（实测同一 pid 记录 boot `…451.434515` vs 自身 boot `…451.538858`），把健康的会话在释放时误判为 `different` 并留锁。pid 固定时启动时间本身已唯一（pid 复用不可能复现同一微秒级启动时间），boottime 对判别无贡献；旧格式遗留锁会被判 stale，由 doctor 清理。它是操作系统进程身份，不是 M0 私有握手 nonce。
+`ProcessIdentity = { pid, startIdentity }`。`startIdentity` 是 macOS `proc_pidinfo` 记录的进程启动秒/微秒（内核在 fork 时一次性写入、此后不可变）。它曾是"启动时间 + 系统 boottime"的复合串；boottime 分量在 2026-09-06 被实测移除——`KERN_BOOTTIME` 是"当前墙钟 − 开机时长"的推导值，NTP 对时会使其在进程存续期间整体平移（实测同一 pid 记录 boot `…451.434515` vs 自身 boot `…451.538858`），把健康的会话在释放时误判为 `different` 并留锁。pid 固定时启动时间本身已唯一（pid 复用不可能复现同一微秒级启动时间），boottime 对判别无贡献。它是操作系统进程身份，不是 M0 私有握手 nonce。**旧格式兼容**：`probe` 对形如 `<boot>-<start>` 的身份串取 `-` 后的启动时间后缀比较，因此升级共存窗口内旧版本写入的 owner，其**活着的**持有者仍判 `same`（doctor 绝不因此删除活锁，保住单写者保证），已退出者仍正确判 `absent`/`different`。
 
 `packages/home-lease/native/lease-helper.c`（`pnpm build:native` 编译到被忽略的 `.build/` 目录）：
 
