@@ -2,6 +2,8 @@ import type { Stats } from 'node:fs'
 import { lstat, mkdtemp, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 
+import { RESERVED_PROFILE_NAME_PREFIX } from '@dsh-desktop/desktop-contracts/profile-name'
+
 export type RuntimeRoot = Readonly<{ dir: string; remove(): Promise<void> }>
 
 async function directoryIdentity(dirname: string): Promise<Stats> {
@@ -25,7 +27,10 @@ export async function createRuntimeRoot(home: string): Promise<RuntimeRoot> {
   if (canonicalProfiles !== path.join(canonicalHome, 'profiles')) {
     throw new Error('Host runtime parent escaped the shared home')
   }
-  const dir = await mkdtemp(path.join(canonicalProfiles, '.dsh-desktop-run-'))
+  // Single source for the prefix: the lease gate and the format inspection
+  // exempt/forbid exactly this namespace, so the mkdtemp template must be the
+  // shared constant, not a lookalike literal.
+  const dir = await mkdtemp(path.join(canonicalProfiles, RESERVED_PROFILE_NAME_PREFIX))
   const rootIdentity = await directoryIdentity(dir)
   let removed = false
   return Object.freeze({
