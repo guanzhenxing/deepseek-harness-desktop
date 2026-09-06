@@ -120,6 +120,9 @@ importers:
       '@deepseek-ai/dsh-atomic-write':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
+      '@dsh-desktop/desktop-contracts':
+        specifier: workspace:*
+        version: link:../desktop-contracts
     devDependencies:
       '@deepseek-ai/dsh-home-paths':
         specifier: 0.1.2-alpha.3
@@ -172,6 +175,9 @@ importers:
 
   packages/profile-manager:
     dependencies:
+      '@dsh-desktop/desktop-contracts':
+        specifier: workspace:*
+        version: link:../desktop-contracts
       '@dsh-desktop/home-lease':
         specifier: workspace:*
         version: link:../home-lease
