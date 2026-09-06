@@ -5,6 +5,8 @@
 // "behavior test" only ever ran in a shell and was no regression gate).
 import { describe, expect, it } from 'vitest'
 
+import { setTimeout as sleepTimer } from 'node:timers'
+
 import { emergencyCleanup, registerEmergencyCleanup } from './installed-app.mjs'
 
 describe('emergency cleanup registry', () => {
@@ -46,6 +48,41 @@ describe('emergency cleanup registry', () => {
     } finally {
       unregisterA()
       unregisterB()
+    }
+  })
+
+  it('retries a failed cleanup on SIGINT before exiting', async () => {
+    const { spawn } = await import('node:child_process')
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const path = await import('node:path')
+    const markerRoot = await mkdtemp(path.join(tmpdir(), 'r7-signal-'))
+    const marker = path.join(markerRoot, 'flushed')
+    try {
+      const script = [
+        'import { drainWithRetries, registerEmergencyCleanup } from ',
+        JSON.stringify(new URL('./installed-app.mjs', import.meta.url).pathname),
+        '; import { writeFile } from "node:fs/promises"; ',
+        'let attempts = 0; ',
+        'registerEmergencyCleanup(async () => { attempts += 1; ',
+        `if (attempts < 2) throw new Error("busy mount"); `,
+        `await writeFile(${JSON.stringify(marker)}, "ok"); }); `,
+        "for (const signal of ['SIGINT']) {",
+        'process.on(signal, () => { void drainWithRetries().finally(() => process.exit(130)) }); }',
+        'setInterval(() => {}, 60000)',
+      ].join('')
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+        stdio: 'ignore',
+      })
+      const exit = await new Promise((resolve) => {
+        child.once('exit', (code, signal) => resolve({ code, signal }))
+        sleepTimer(() => child.kill('SIGINT'), 150)
+      })
+      // The signal handler exits 130 AFTER the drain retried and succeeded.
+      expect(exit.code).toBe(130)
+      expect(await readFile(marker, 'utf8')).toBe('ok')
+    } finally {
+      await rm(markerRoot, { recursive: true, force: true })
     }
   })
 

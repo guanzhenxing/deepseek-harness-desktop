@@ -35,25 +35,30 @@ export async function emergencyCleanup() {
   }
 }
 
+/**
+ * Bounded, self-driving drain for paths that OWN the process exit: a failed
+ * cleanup is retried (Node does NOT re-emit beforeExit when a handler only
+ * schedules microtasks, so each activation drives its own retries with a
+ * real timer keeping the loop alive). The round budget is SHARED across the
+ * whole process lifetime — signal drains and beforeExit flushes draw from
+ * the same at-most-three rounds, never three each.
+ */
+let drainRoundsUsed = 0
+export async function drainWithRetries(maxTotalRounds = 3) {
+  for (;;) {
+    if (liveCleanups.size === 0 || drainRoundsUsed >= maxTotalRounds) return
+    drainRoundsUsed += 1
+    await emergencyCleanup()
+    if (liveCleanups.size === 0 || drainRoundsUsed >= maxTotalRounds) return
+    await new Promise((resolve) => sleepTimer(resolve, 50))
+  }
+}
+
 // Normal completion must also flush leftovers (e.g. a DMG mount whose
-// transient detach failed mid-run). Node does NOT re-emit beforeExit when a
-// handler only schedules microtasks — a failed-then-re-registered cleanup
-// would never be retried if each round waited for another trigger — so one
-// flush activation drives its own bounded retry loop, with a real timer
-// keeping the loop alive between attempts. Registered unconditionally;
-// other listeners on this event must not disable it.
-let exitDrainRounds = 0
+// transient detach failed mid-run). Registered unconditionally; other
+// listeners on this event must not disable it.
 process.on('beforeExit', () => {
-  if (liveCleanups.size === 0 || exitDrainRounds >= 3) return
-  exitDrainRounds += 1
-  void (async () => {
-    for (let attempt = 0; attempt < 3 && liveCleanups.size > 0; attempt += 1) {
-      await emergencyCleanup()
-      if (liveCleanups.size > 0 && attempt < 2) {
-        await new Promise((resolve) => sleepTimer(resolve, 50))
-      }
-    }
-  })()
+  void drainWithRetries()
 })
 
 function registerCleanup(cleanup) {

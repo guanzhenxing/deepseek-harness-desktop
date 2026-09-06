@@ -15,14 +15,16 @@ import { assertAcceptanceRuntime } from '../tests/helpers/acceptance-runtime.mjs
 // do real work first on a clean snapshot.
 assertAcceptanceRuntime('rehearse:upgrade')
 
-const { emergencyCleanup } = await import('../tests/helpers/installed-app.mjs')
+const { drainWithRetries } = await import('../tests/helpers/installed-app.mjs')
 
 // An interrupted rehearsal (Ctrl-C, CI cancel) must never leave installed-app
 // process groups, temp install trees, or DMG mounts behind: leftovers raise
 // system load and surface as unrelated probe flakiness in the NEXT run.
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    void emergencyCleanup().finally(() => process.exit(130))
+    // Retries run BEFORE the explicit exit — beforeExit never fires
+    // after process.exit, so the drain must complete here.
+    void drainWithRetries().finally(() => process.exit(130))
   })
 }
 

@@ -13,7 +13,7 @@ import { setTimeout as sleepTimer } from 'node:timers'
 import { fileURLToPath } from 'node:url'
 
 import {
-  emergencyCleanup,
+  drainWithRetries,
   installFromDmg,
   runInstalledApp,
   runInstalledCli,
@@ -36,7 +36,9 @@ const PRODUCT_NAME = 'DeepSeek Harness Desktop'
 // this module was imported.
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    void emergencyCleanup().finally(() => process.exit(130))
+    // Retries run BEFORE the explicit exit — beforeExit never fires
+    // after process.exit, so the drain must complete here.
+    void drainWithRetries().finally(() => process.exit(130))
   })
 }
 
