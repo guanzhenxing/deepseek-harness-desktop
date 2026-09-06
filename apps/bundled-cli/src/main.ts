@@ -112,7 +112,7 @@ function startLeaseWatchdog(
         failures = 0
       } catch (error) {
         const code = (error as { code?: string }).code ?? 'unknown error'
-        if (code === 'HOME_BUSY') return
+        if (code === 'GUARD_BUSY' || code === 'HOME_BUSY') return
         failures += 1
         if (failures < 2) return
         stopped = true
@@ -215,6 +215,8 @@ export type RunBundledCliOptions = Readonly<{
   probe?: ProcessProbe
   guard?: GuardLock
   spawnChild?: SpawnCliChild
+  /** Lease-watchdog interval while an authorized child runs (tests shrink it). */
+  watchdogIntervalMs?: number
   appVersion?: string
   stderr?: NodeJS.WritableStream
   /**
@@ -424,7 +426,7 @@ export async function runBundledCli(
       await lease.attachHost(identity)
       child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
       authorized = true
-      const watchdog = startLeaseWatchdog(lease, child, stderr)
+      const watchdog = startLeaseWatchdog(lease, child, stderr, options.watchdogIntervalMs)
       let exit: { code: number | null; signal: string | null }
       try {
         exit = await child.exited

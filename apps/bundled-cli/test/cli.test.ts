@@ -135,6 +135,59 @@ describe('planCliInvocation', () => {
   })
 })
 
+describe('bundled CLI lease watchdog', () => {
+  it('kills an authorized child when the lease disappears underneath it', async () => {
+    const home = await isolatedHome()
+    const stderr = new MemoryStderr()
+    const killSignals: NodeJS.Signals[] = []
+    let authorized = false
+    const spawn: SpawnCliChild = () => {
+      const handle: CliChildHandle = {
+        pid: 5556,
+        send(message) {
+          if ((message as { kind?: string })?.kind === 'dsh-native-authorized') {
+            authorized = true
+          }
+        },
+        exited: new Promise<{ code: number | null; signal: string | null }>(() => {
+          // The child never exits on its own; only the watchdog's kill
+          // resolves it below.
+        }),
+        kill(signal = 'SIGTERM') {
+          killSignals.push(signal)
+        },
+      }
+      return handle
+    }
+    const running = runBundledCli(['--profile', 'headless', 'task'], {
+      env: { DSH_HOME: home },
+      probe: fakeProbe,
+      guard: createInProcessGuardLock(),
+      spawnChild: spawn,
+      stderr,
+      watchdogIntervalMs: 20,
+    }).then(() => {
+      // The promise settles when the watchdog-killed child's exited promise
+      // resolves; the return code is not what this test asserts.
+    })
+    // Wait until the child is authorized, then destroy the lease the way a
+    // foreign doctor would (owner + sentinel gone).
+    const deadline = Date.now() + 5_000
+    while (!authorized && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(authorized).toBe(true)
+    // Destroy the lease from the filesystem the way a foreign doctor would.
+    const { rm: removeDir } = await import('node:fs/promises')
+    await removeDir(path.join(home, 'run', 'host.lock'), { recursive: true, force: true })
+    // Two watchdog failures at 20ms intervals must SIGKILL the child.
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(killSignals).toContain('SIGKILL')
+    expect(stderr.text()).toContain('home lease lost')
+    void running
+  })
+})
+
 describe('runBundledCli', () => {
   it('refuses an incompatible home before any write-home child spawns', async () => {
     const home = await isolatedHome()

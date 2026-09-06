@@ -73,7 +73,7 @@ class RecordingLease implements HomeLease {
     this.calls.push('assertHeld')
     if (this.assertHeldBusyTimes > 0) {
       this.assertHeldBusyTimes -= 1
-      throw Object.assign(new Error('critical section contended'), { code: 'HOME_BUSY' })
+      throw Object.assign(new Error('critical section contended'), { code: 'GUARD_BUSY' })
     }
     if (this.assertHeldError !== undefined) throw this.assertHeldError
   }

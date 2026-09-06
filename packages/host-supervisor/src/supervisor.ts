@@ -463,22 +463,27 @@ export class HostSupervisor {
       this.#watchdogFailures = 0
     } catch (error) {
       const code = (error as { code?: string }).code ?? 'unknown error'
-      if (code === 'HOME_BUSY') {
-        // Guard contention means another lease operation is in flight (e.g.
-        // a concurrent doctor), not that the lock is gone — never fatal.
+      if (code === 'GUARD_BUSY' || code === 'HOME_BUSY') {
+        // Guard contention means another lease critical section is in flight
+        // (a concurrent doctor or acquirer) — assertHeld propagates
+        // GUARD_BUSY for that and it is never evidence of lease loss.
         return
       }
       this.#watchdogFailures += 1
       if (this.#watchdogFailures < 2) return
       this.#stopWatchdog()
-      this.#failHealthy(
-        new HostControlError(
-          'LEASE_MISMATCH',
-          `home lease lost while the Host was running (${code}): ${String(
-            (error as Error).message,
-          )} — terminating the Host to preserve the single-writer guarantee`,
-        ),
+      // The watchdog runs from bootstrap delivery, BEFORE the Host reports
+      // ready: losing the lease during startup must abort the start
+      // (failStart), not fall through a healthy-only handler and leave the
+      // Host running unwatched.
+      const fatal = new HostControlError(
+        'LEASE_MISMATCH',
+        `home lease lost while the Host was ${this.#healthy ? 'running' : 'starting'} (${code}): ${String(
+          (error as Error).message,
+        )} — terminating the Host to preserve the single-writer guarantee`,
       )
+      if (this.#healthy) this.#failHealthy(fatal)
+      else this.#failStart(fatal)
     } finally {
       this.#watchdogBusy = false
     }
