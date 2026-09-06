@@ -17,9 +17,9 @@ const liveCleanups = new Set()
 
 /**
  * Drain every registered cleanup. Cleanups may be sync or async; one that
- * FAILS stays registered so a later drain retries it (a transient detach
- * failure must not lose its only cleanup path); successful ones are
- * forgotten. Re-entrancy is safe — the drain iterates a snapshot.
+ * FAILS (by throwing or rejecting — registered cleanups must REPORT failure,
+ * not swallow it) stays registered so a later drain retries it; successful
+ * ones are forgotten. Re-entrancy is safe — the drain iterates a snapshot.
  */
 export async function emergencyCleanup() {
   const pending = [...liveCleanups]
@@ -38,15 +38,14 @@ export async function emergencyCleanup() {
 // Normal completion must also flush leftovers (e.g. a DMG mount whose
 // transient detach failed mid-run): beforeExit fires when the event loop
 // goes quiet, so a failed retry keeps the process alive for exactly one
-// more round, up to a bounded number of rounds before giving up.
+// more round, up to a bounded number of rounds before giving up. Registered
+// unconditionally — other listeners on this event must not disable it.
 let exitDrainRounds = 0
-if (!process.listenerCount('beforeExit')) {
-  process.on('beforeExit', () => {
-    if (liveCleanups.size === 0 || exitDrainRounds >= 3) return
-    exitDrainRounds += 1
-    void emergencyCleanup()
-  })
-}
+process.on('beforeExit', () => {
+  if (liveCleanups.size === 0 || exitDrainRounds >= 3) return
+  exitDrainRounds += 1
+  void emergencyCleanup()
+})
 
 function registerCleanup(cleanup) {
   liveCleanups.add(cleanup)
@@ -85,17 +84,13 @@ export async function installFromDmg(dmgPath, productName) {
   }
   // The mount must be reachable from the emergency registry BEFORE any
   // further await (mkdtemp included): a signal or failure in that window
-  // would otherwise leave the DMG mounted. A failed detach KEEPS the
-  // registration so a later drain retries it — a transient detach failure
-  // must not unhook the only cleanup path.
-  let detached = false
+  // would otherwise leave the DMG mounted. The registered cleanup must
+  // REPORT failure (throw) — a swallowed error would make the drain treat
+  // the detach as done and never retry it. The finally path uses the same
+  // cleanup through a quiet probe and only unregisters on success; a failed
+  // detach KEEPS the registration for a later drain.
   const detachMount = () => {
-    try {
-      execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
-      detached = true
-    } catch {
-      /* the mount may already be gone, or busy — leave the registration */
-    }
+    execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
   }
   const unregisterMount = registerCleanup(detachMount)
   let installDirectory
@@ -115,7 +110,13 @@ export async function installFromDmg(dmgPath, productName) {
     }
     throw error
   } finally {
-    detachMount()
+    let detached = false
+    try {
+      detachMount()
+      detached = true
+    } catch {
+      /* busy or already gone — the registration stays for a later drain */
+    }
     if (detached) unregisterMount()
   }
   const appPath = path.join(installDirectory, `${productName}.app`)
