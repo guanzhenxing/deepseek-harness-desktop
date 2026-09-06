@@ -1,11 +1,16 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { ENUMERATION_CEILING, boundedEntries, inspectHomeFormats } from '../src/inspect-home.js'
+import {
+  boundedEntries,
+  createInspectionBudget,
+  ENUMERATION_CEILING,
+  inspectHomeFormats,
+} from '../src/inspect-home.js'
 import { preflightHome } from '../src/preflight.js'
 import type { ReleaseManifest } from '../src/manifest.js'
 
@@ -505,27 +510,101 @@ describe('inspectHomeFormats', () => {
     }
   })
 
-  it('classifies EVERY storage unit regardless of position (no sampling)', async () => {
+  it('classifies corrupt storage-unit content beyond any historical sampling cap', async () => {
     const home = await tempHome()
     try {
-      // 65 legit units + one corrupt JSON unit created LAST — with full
-      // classification its position in the readdir order is irrelevant.
-      for (let index = 0; index < 65; index += 1) {
+      for (let index = 0; index < 72; index += 1) {
         const domain = path.join(home, 'storages', `domain-${index}`)
         await mkdir(domain, { recursive: true })
         await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
       }
-      await mkdir(path.join(home, 'storages', 'corrupt-unit'), { recursive: true })
-      await writeFile(path.join(home, 'storages', 'corrupt-unit', 'global.json'), '{not json')
+      // Corrupt exactly the units the readdir implementation will iterate at
+      // positions beyond the OLD 64-entry sampling cap (raw order — APFS
+      // does not return creation order, so the test reads what the
+      // implementation reads). A sampling implementation would miss them.
+      const listed = [...(await readdir(path.join(home, 'storages')))]
+      const beyondOldCap = listed.slice(64)
+      expect(beyondOldCap.length).toBeGreaterThan(0)
+      for (const domain of beyondOldCap) {
+        await writeFile(path.join(home, 'storages', domain, 'global.json'), '{not json')
+      }
       const observed = await inspectHomeFormats(home)
-      expect(observed.unknownPaths).toContain('storages/corrupt-unit/global.json')
+      for (const domain of beyondOldCap) {
+        expect(observed.unknownPaths).toContain(`storages/${domain}/global.json`)
+      }
       expect(observed.formats.storages).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
 
-  it('classifies EVERY session regardless of position (no sampling)', async () => {
+  it('classifies storage RECORDS inside unit tables (corrupt and foreign version)', async () => {
+    const home = await tempHome()
+    try {
+      // A non-projcache domain with a corrupt record: its content was
+      // previously only shape-checked, never parsed.
+      const corruptTable = path.join(home, 'storages', 'fixture-domain', 'sessions')
+      await mkdir(corruptTable, { recursive: true })
+      await writeFile(path.join(corruptTable, 'session-1.json'), '{"version":1,"record":null}')
+      await writeFile(path.join(corruptTable, 'session-2.json'), '{bad json')
+      // projcache with a version:99 record beyond any sampling position.
+      const projTable = path.join(home, 'storages', 'session_projcache', 'sessions')
+      await mkdir(projTable, { recursive: true })
+      for (let index = 0; index < 20; index += 1) {
+        await writeFile(
+          path.join(projTable, `session-${index}.json`),
+          '{"version":4,"record":{"watermark":7}}',
+        )
+      }
+      await writeFile(path.join(projTable, 'session-future.json'), '{"version":99,"record":null}')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('storages/fixture-domain/sessions/session-2.json')
+      expect(observed.unknownPaths).toContain(
+        'storages/session_projcache/sessions/session-future.json',
+      )
+      expect(observed.formats.storages).toBeUndefined()
+      expect(observed.formats.projcache).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses plain text disguised as a compressed session', async () => {
+    const home = await tempHome()
+    try {
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      const sessionDir = path.join(projectDir, 'fake-zstd')
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), 'definitely not zstd\n')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--fixture--/fake-zstd/session.jsonl.zstd')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts a .zstd session carrying a real zstd frame magic', async () => {
+    const home = await tempHome()
+    try {
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      const sessionDir = path.join(projectDir, 'framed')
+      await mkdir(sessionDir, { recursive: true })
+      // Standard zstd frame magic 28 B5 2F FD (LE 0xFD2FB528), garbage after —
+      // header-only inspection cannot decompress, but the frame must be real.
+      await writeFile(
+        path.join(sessionDir, 'session.jsonl.zstd'),
+        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00]),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.sessions).toBe('dsh-session-jsonl-0')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('classifies sessions beyond any historical sampling cap', async () => {
     const home = await tempHome()
     try {
       const projectDir = path.join(home, 'sessions', '--fixture--')
@@ -537,22 +616,28 @@ describe('inspectHomeFormats', () => {
           '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
         )
       }
-      // A foreign-version header created LAST must still be flagged.
-      const foreign = path.join(projectDir, 's-future')
-      await mkdir(foreign, { recursive: true })
-      await writeFile(
-        path.join(foreign, 'session.jsonl'),
-        '{"type":"session","version":99,"id":"f","createdAt":0,"delegationDepth":0}\n',
-      )
+      // Corrupt the sessions the implementation iterates beyond the OLD
+      // 32-per-project sampling cap, in raw readdir order.
+      const listed = [...(await readdir(projectDir))]
+      const beyondOldCap = listed.slice(32)
+      expect(beyondOldCap.length).toBeGreaterThan(0)
+      for (const sessionId of beyondOldCap) {
+        await writeFile(
+          path.join(projectDir, sessionId, 'session.jsonl'),
+          '{"type":"session","version":99,"id":"f","createdAt":0,"delegationDepth":0}\n',
+        )
+      }
       const observed = await inspectHomeFormats(home)
-      expect(observed.unknownPaths).toContain('sessions/--fixture--/s-future/session.jsonl')
+      for (const sessionId of beyondOldCap) {
+        expect(observed.unknownPaths).toContain(`sessions/--fixture--/${sessionId}/session.jsonl`)
+      }
       expect(observed.formats.sessions).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
 
-  it('classifies EVERY profile manifest regardless of position (no sampling)', async () => {
+  it('classifies profile manifests beyond any historical sampling cap', async () => {
     const home = await tempHome()
     try {
       for (let index = 0; index < 40; index += 1) {
@@ -560,11 +645,16 @@ describe('inspectHomeFormats', () => {
         await mkdir(profileDir, { recursive: true })
         await writeFile(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p' }))
       }
-      const corrupt = path.join(home, 'profiles', 'p-corrupt')
-      await mkdir(corrupt, { recursive: true })
-      await writeFile(path.join(corrupt, 'package.json'), '{not json')
+      const listed = [...(await readdir(path.join(home, 'profiles')))]
+      const beyondOldCap = listed.slice(32)
+      expect(beyondOldCap.length).toBeGreaterThan(0)
+      for (const profile of beyondOldCap) {
+        await writeFile(path.join(home, 'profiles', profile, 'package.json'), '{not json')
+      }
       const observed = await inspectHomeFormats(home)
-      expect(observed.unknownPaths).toContain('profiles/p-corrupt/package.json')
+      for (const profile of beyondOldCap) {
+        expect(observed.unknownPaths).toContain(`profiles/${profile}/package.json`)
+      }
       expect(observed.formats.profiles).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
@@ -630,14 +720,49 @@ describe('inspectHomeFormats', () => {
       for (let index = 0; index < 5; index += 1) {
         await writeFile(path.join(dir, `entry-${index}`), 'x')
       }
-      expect(await boundedEntries(dir, 10)).toHaveLength(5)
-      expect(await boundedEntries(dir, 5)).toHaveLength(5)
-      expect(await boundedEntries(dir, 4)).toBe('overflow')
-      expect(await boundedEntries(path.join(home, 'missing'), 10)).toEqual([])
+      const roomy = createInspectionBudget({ entries: 100 })
+      expect(await boundedEntries(dir, roomy, 10)).toHaveLength(5)
+      expect(await boundedEntries(dir, roomy, 5)).toHaveLength(5)
+      expect(await boundedEntries(dir, createInspectionBudget({ entries: 100 }), 4)).toBe(
+        'overflow',
+      )
+      // Per-directory ceiling is not the only bound: the SHARED budget ends
+      // the walk too.
+      expect(await boundedEntries(dir, createInspectionBudget({ entries: 3 }), 10)).toBe('overflow')
+      expect(await boundedEntries(path.join(home, 'missing'), roomy, 10)).toEqual([])
       await writeFile(path.join(home, 'plain'), 'x')
-      expect(await boundedEntries(path.join(home, 'plain'), 10)).toBe('unreadable')
+      expect(await boundedEntries(path.join(home, 'plain'), roomy, 10)).toBe('unreadable')
       // The ceiling constant stays far above real homes.
       expect(ENUMERATION_CEILING).toBeGreaterThan(10_000)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed when the shared end-to-end budget is exhausted', async () => {
+    const home = await tempHome()
+    try {
+      // Entries budget smaller than the fixture: the walk must flag the slot
+      // instead of silently inspecting a prefix — and the budget is shared
+      // ACROSS slots (the credentials file alone eats most of it here).
+      const budget = createInspectionBudget({ entries: 10, unknowns: 8_192 })
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      await mkdir(projectDir, { recursive: true })
+      await writeFile(path.join(home, '.credentials.yaml'), 'version: 1\nrefs:\n  K: v\n')
+      for (let index = 0; index < 12; index += 1) {
+        const sessionDir = path.join(projectDir, `s-${index}`)
+        await mkdir(sessionDir, { recursive: true })
+        await writeFile(
+          path.join(sessionDir, 'session.jsonl'),
+          '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
+        )
+      }
+      const observed = await inspectHomeFormats(home, budget)
+      expect(budget.entries).toBeLessThan(0)
+      // The walk bails at the deepest enumeration it was running — the
+      // project listing here — and flags that directory fail-closed.
+      expect(observed.unknownPaths).toContain('sessions/--fixture--')
+      expect(observed.formats.sessions).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
