@@ -15,19 +15,37 @@ import { waitUntilDead } from './shared-home-driver.mjs'
  */
 const liveCleanups = new Set()
 
+/**
+ * Drain every registered cleanup. Cleanups may be sync or async; one that
+ * FAILS stays registered so a later drain retries it (a transient detach
+ * failure must not lose its only cleanup path); successful ones are
+ * forgotten. Re-entrancy is safe — the drain iterates a snapshot.
+ */
 export async function emergencyCleanup() {
   const pending = [...liveCleanups]
-  liveCleanups.clear()
+  for (const cleanup of pending) liveCleanups.delete(cleanup)
   for (const cleanup of pending) {
     try {
       // await on a sync (undefined-returning) cleanup is fine; the try/catch
-      // is what matters — one failed cleanup must never abort the drain and
-      // strand the rest of the processes, trees, and mounts.
+      // is what matters — one failed cleanup must never abort the drain.
       await cleanup()
     } catch {
-      /* keep draining */
+      liveCleanups.add(cleanup)
     }
   }
+}
+
+// Normal completion must also flush leftovers (e.g. a DMG mount whose
+// transient detach failed mid-run): beforeExit fires when the event loop
+// goes quiet, so a failed retry keeps the process alive for exactly one
+// more round, up to a bounded number of rounds before giving up.
+let exitDrainRounds = 0
+if (!process.listenerCount('beforeExit')) {
+  process.on('beforeExit', () => {
+    if (liveCleanups.size === 0 || exitDrainRounds >= 3) return
+    exitDrainRounds += 1
+    void emergencyCleanup()
+  })
 }
 
 function registerCleanup(cleanup) {
