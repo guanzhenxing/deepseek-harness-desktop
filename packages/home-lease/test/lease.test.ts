@@ -614,9 +614,12 @@ describe('home doctor (unlock)', () => {
     await remove(path.join(lockDir, 'owner.json'), { force: true })
     await expect(removeDir(lockDir)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     expect((await lstat(lockDir)).isDirectory()).toBe(true)
-    // The v2-aware doctor finishes what the foreign one was refused.
+    // The v2-aware doctor finishes what the foreign one was refused — the
+    // sentinel's named supervisor must be provably DEAD (not merely absent
+    // from a scan whose needles bind to one installation's paths).
     const other = new FakeProbe()
     other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'absent' })
     const result = await unlockHome(await unlockInput(home, other))
     expect(result).toMatchObject({ status: 'unlocked' })
     await expect(stat(lockDir)).rejects.toMatchObject({ code: 'ENOENT' })
@@ -638,6 +641,29 @@ describe('home doctor (unlock)', () => {
     await expect(stat(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+
+  it('refuses to delete a live lock whose sentinel names a running supervisor', async () => {
+    // Sp1 round-9 reproduction: the owner was deleted by a foreign doctor,
+    // the process scan reports 'none' (its needles bind to THIS
+    // installation's paths and miss another copy), but the sentinel's
+    // identity is verifiably alive — the lock must survive.
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const { rm: remove } = await import('node:fs/promises')
+    await remove(path.join(home, 'run', 'host.lock', 'owner.json'), { force: true })
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    // The supervisor (4242) IS alive, and the scan would say 'none'.
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'same' })
+    other.scanResult = 'none'
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'refused', code: 'ACTIVE_OWNER' })
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
+    expect(
+      await readFile(path.join(home, 'run', 'host.lock', '.dsh-writer-sentinel'), 'utf8'),
+    ).toContain('boot-1')
   })
 
   it('clears the sentinel on normal release', async () => {

@@ -4,6 +4,11 @@ import { describeLeaseOwner } from './owner.js'
 import type { ProcessProbe } from './process-probe.js'
 import { createNativeGuardLock, resolveLeaseHelperPath, type GuardLock } from './native-helper.js'
 import { inspectConfirmed } from './probe-confirm.js'
+
+async function readSentinelIdentity(sentinelPath: string): Promise<string | undefined> {
+  const { readFile } = await import('node:fs/promises')
+  return readFile(sentinelPath, 'utf8').catch(() => undefined)
+}
 import { directoryIdentity, leasePaths, readOwner, validateHome } from './lease-fs.js'
 
 export type UnlockResult =
@@ -66,6 +71,44 @@ export async function unlockHome(input: UnlockHomeInput): Promise<UnlockResult> 
 
     const current = await readOwner(paths.ownerPath)
     if (current.kind !== 'ok') {
+      // A v2 sentinel carries the writer's identity: when the owner file is
+      // gone but the sentinel names a LIVE supervisor, the lock is alive no
+      // matter what a process scan says (scan needles bind to one
+      // installation's absolute paths and miss other copies). Only a
+      // provably-dead identity, or the legacy sentinel-less layout, may
+      // fall through to the scan.
+      const sentinelIdentity = await readSentinelIdentity(paths.sentinelPath)
+      if (sentinelIdentity !== undefined) {
+        if (!sentinelIdentity.match(/^\d+\n[^\n]+\n[^\n]+\n$/u)) {
+          return refuse(
+            'IDENTITY_UNKNOWN',
+            'the lock has no readable owner and an unparseable sentinel; inspect it manually',
+          )
+        }
+        const [pidText, startIdentity] = sentinelIdentity.split('\n')
+        if (pidText === undefined || startIdentity === undefined) {
+          return refuse(
+            'IDENTITY_UNKNOWN',
+            'the lock has no readable owner and an unparseable sentinel; inspect it manually',
+          )
+        }
+        const status = await inspectConfirmed(input.probe, {
+          pid: Number(pidText),
+          startIdentity,
+        })
+        if (status === 'same') {
+          return refuse(
+            'ACTIVE_OWNER',
+            'the sentinel names a supervisor that is still running (the owner file was deleted by another tool)',
+          )
+        }
+        if (status === 'unknown') {
+          return refuse(
+            'IDENTITY_UNKNOWN',
+            'the sentinel names a supervisor whose liveness cannot be determined',
+          )
+        }
+      }
       // Missing or corrupt owner: fall back to scanning for supported
       // entrypoint executables before touching anything.
       const scan = await input.probe.scanSupported()

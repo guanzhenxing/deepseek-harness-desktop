@@ -197,9 +197,15 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
     // refuse — the single-writer guarantee is enforced by the lock layout,
     // not by the goodwill of whoever holds the doctor binary.
     const { writeFile } = await import('node:fs/promises')
-    await writeFile(paths.sentinelPath, `${input.appVersion}\n${owner.generation}\n`, {
-      mode: 0o600,
-    })
+    // The sentinel carries the supervisor's full identity: a doctor finding
+    // owner-less lock (a foreign doctor already deleted owner.json) can
+    // then verify liveness against THIS identity instead of trusting a
+    // process scan whose needles are bound to one installation's paths.
+    await writeFile(
+      paths.sentinelPath,
+      `${identity.pid}\n${identity.startIdentity}\n${owner.generation}\n`,
+      { mode: 0o600 },
+    )
   }).catch((error: unknown) => {
     if (error instanceof LeaseError && error.code === 'GUARD_BUSY') {
       throw new LeaseError(
