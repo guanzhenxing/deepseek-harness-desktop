@@ -36,15 +36,24 @@ export async function emergencyCleanup() {
 }
 
 // Normal completion must also flush leftovers (e.g. a DMG mount whose
-// transient detach failed mid-run): beforeExit fires when the event loop
-// goes quiet, so a failed retry keeps the process alive for exactly one
-// more round, up to a bounded number of rounds before giving up. Registered
-// unconditionally — other listeners on this event must not disable it.
+// transient detach failed mid-run). Node does NOT re-emit beforeExit when a
+// handler only schedules microtasks — a failed-then-re-registered cleanup
+// would never be retried if each round waited for another trigger — so one
+// flush activation drives its own bounded retry loop, with a real timer
+// keeping the loop alive between attempts. Registered unconditionally;
+// other listeners on this event must not disable it.
 let exitDrainRounds = 0
 process.on('beforeExit', () => {
   if (liveCleanups.size === 0 || exitDrainRounds >= 3) return
   exitDrainRounds += 1
-  void emergencyCleanup()
+  void (async () => {
+    for (let attempt = 0; attempt < 3 && liveCleanups.size > 0; attempt += 1) {
+      await emergencyCleanup()
+      if (liveCleanups.size > 0 && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
+  })()
 })
 
 function registerCleanup(cleanup) {

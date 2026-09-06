@@ -49,23 +49,36 @@ describe('emergency cleanup registry', () => {
     }
   })
 
-  it('registers the beforeExit flush unconditionally on import', async () => {
-    // imported at the top: the hook must exist regardless of any other
-    // beforeExit listeners the process already had.
+  it('flushes a leftover cleanup through beforeExit at normal exit', async () => {
     const { execFileSync } = await import('node:child_process')
-    // Prove the flush actually fires at exit: a child registers a failing
-    // cleanup (never succeeds), exits normally, and its stderr must show the
-    // bounded beforeExit retries happened.
-    const script = [
-      'import { registerEmergencyCleanup } from ',
-      JSON.stringify(new URL('./installed-app.mjs', import.meta.url).pathname),
-      '; registerEmergencyCleanup(() => { throw new Error("busy mount") }); process.exitCode = 0',
-    ].join('')
-    const result = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
-      encoding: 'utf8',
-      timeout: 15_000,
-    })
-    // The child must EXIT (bounded rounds, not an infinite beforeExit loop).
-    expect(result).toBeDefined()
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const path = await import('node:path')
+    // A child registers a cleanup that fails ONCE (like a busy mount on the
+    // first detach) and succeeds on retry, writing a marker file. The
+    // beforeExit flush must run that retry after main completes; the marker
+    // is the proof (a weak "the child exited" assertion proves nothing).
+    const markerRoot = await mkdtemp(path.join(tmpdir(), 'r3-beforeexit-'))
+    const marker = path.join(markerRoot, 'flushed')
+    try {
+      const script = [
+        'import { registerEmergencyCleanup } from ',
+        JSON.stringify(new URL('./installed-app.mjs', import.meta.url).pathname),
+        '; import { writeFile } from "node:fs/promises"; ',
+        'let attempts = 0; ',
+        'registerEmergencyCleanup(async () => { attempts += 1; ',
+        `if (attempts < 2) throw new Error("busy mount"); `,
+        `await writeFile(${JSON.stringify(marker)}, "ok"); });`,
+        '// An unrelated listener must not disable the flush hook.',
+        'process.on("beforeExit", () => {}); ',
+        'process.exitCode = 0',
+      ].join('')
+      execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+        timeout: 15_000,
+      })
+      expect(await readFile(marker, 'utf8')).toBe('ok')
+    } finally {
+      await rm(markerRoot, { recursive: true, force: true })
+    }
   })
 })
