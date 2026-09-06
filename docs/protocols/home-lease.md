@@ -14,8 +14,12 @@ Desktop 与 `dsh-native` 在共享 DSH home 上顺序互斥：任何 Host boot�
 <home>/run/                 0700 目录
 ├── host-lease.guard        0600 永久 owner-only advisory lock 文件
 └── host.lock/              0700 目录，原子 mkdir 获取
-    └── owner.json          0600 closed-schema owner 记录
+    ├── owner.json          0600 closed-schema owner 记录
+    └── .dsh-writer-sentinel 0600 写者哨兵：内容为 supervisor 的
+                              "<pid>\n<startIdentity>\n<generation>\n"
 ```
+
+哨兵是布局 v2 的规范成员（非可选）：它使锁目录恒非空——一切版本的 doctor/release 对非空锁目录的 `rmdir` 都 `ENOTEMPTY` 拒绝，冻结旧制品的 doctor 即便误读新身份格式也删不掉 v2 活锁目录（单写者由布局承载）。owner 文件被外部工具删除后，doctor 以哨兵内的身份判定存活（same→拒删、unknown→拒删、absent/different→放行到原流程）；本版本的 release/doctor 在 rmdir 前先清己方哨兵。
 
 `owner.json` 字段（schemaVersion 固定 1）：
 
@@ -60,7 +64,15 @@ assertHeld():         重读 owner，generation 与 supervisor 身份必须仍�
 release:   generation 不匹配 → LEASE_CHANGED
            host 身份 same → HOST_ACTIVE；unknown → LEASE_UNKNOWN
            pendingSpawn → PENDING_SPAWN
-           全部通过 → 删除 owner.json 并 rmdir(host.lock)；重复 release 幂等
+           全部通过 → 删除 owner.json → 删除 .dsh-writer-sentinel → rmdir(host.lock)
+           （目录中任何其他残留触发 ENOTEMPTY → LEASE_UNKNOWN 留给 doctor）
+           重复 release 幂等
+
+doctor:    owner 可读 → 身份判定（活→ACTIVE_OWNER 拒；不可识别→拒）
+           owner 缺失/损坏且哨兵在 → 按哨兵身份判定
+             （same → ACTIVE_OWNER 拒；unknown → 拒；absent/different → 续走）
+           owner 缺失且无哨兵（v1 旧布局）→ scanSupported 兜底
+           放行路径统一为：删 owner → 删哨兵 → rmdir
 ```
 
 所有 owner 读改写都发生在 guard 短临界区内，方法之间按进程内串行队列执行。`HOME_BUSY`/`HOME_STALE`/`LEASE_UNKNOWN` 的错误对象携带脱敏 ownerSummary（entrypoint、profile、PID、时间），供对话框与 stderr 使用。
