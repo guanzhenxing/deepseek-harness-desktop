@@ -65,19 +65,24 @@ export async function installFromDmg(dmgPath, productName) {
   if (mountPoint === undefined || !mountPoint.startsWith('/')) {
     throw new Error(`could not parse hdiutil mount point from: ${output}`)
   }
-  const installDirectory = await mkdtemp(path.join(tmpdir(), 'dsh-installed-app-'))
-  // The mount must also be reachable from the emergency registry: an
-  // interrupted run between attach and detach would otherwise leave the DMG
-  // mounted on the user's machine.
+  // The mount must be reachable from the emergency registry BEFORE any
+  // further await (mkdtemp included): a signal or failure in that window
+  // would otherwise leave the DMG mounted. A failed detach KEEPS the
+  // registration so a later drain retries it — a transient detach failure
+  // must not unhook the only cleanup path.
+  let detached = false
   const detachMount = () => {
     try {
       execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+      detached = true
     } catch {
-      /* the mount may already be gone */
+      /* the mount may already be gone, or busy — leave the registration */
     }
   }
   const unregisterMount = registerCleanup(detachMount)
+  let installDirectory
   try {
+    installDirectory = await mkdtemp(path.join(tmpdir(), 'dsh-installed-app-'))
     const appBundle = path.join(mountPoint, `${productName}.app`)
     const identity = await lstat(appBundle)
     if (!identity.isDirectory()) throw new Error(`${appBundle} is not an app bundle`)
@@ -87,14 +92,13 @@ export async function installFromDmg(dmgPath, productName) {
     // invalid signature, which the kernel then kills at launch.
     execFileSync('/usr/bin/ditto', [appBundle, path.join(installDirectory, `${productName}.app`)])
   } catch (error) {
-    await rm(installDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    if (installDirectory !== undefined) {
+      await rm(installDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    }
     throw error
   } finally {
-    // Detach first, then unregister: a mount that is live but unregistered
-    // would survive an emergency drain; a detach repeated by the drain is
-    // harmless (already gone, swallowed inside detachMount).
     detachMount()
-    unregisterMount()
+    if (detached) unregisterMount()
   }
   const appPath = path.join(installDirectory, `${productName}.app`)
   const resources = path.join(appPath, 'Contents', 'Resources')
