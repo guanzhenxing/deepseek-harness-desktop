@@ -93,6 +93,15 @@ export type HostSupervisorOptions = Readonly<{
   stabilityMs?: number
   startupTimeoutMs?: number
   terminateGraceMs?: number
+  /**
+   * How often the supervisor re-asserts the home lease while the Host runs.
+   * The lease gates ADMISSION, not the Host's own writes: without a watchdog,
+   * a lock removed underneath a running Host (e.g. a frozen older artifact's
+   * doctor misreading the new identity format) would leave the Host writing
+   * while a new entrant acquires a fresh lock — a real double-writer window.
+   * The watchdog bounds that window to one interval.
+   */
+  watchdogIntervalMs?: number
   onEvent?: (event: HostSupervisorEvent) => void
 }>
 
@@ -127,6 +136,9 @@ export class HostSupervisor {
   #stabilityTimer: ReturnType<typeof setTimeout> | undefined
   #terminateTimer: ReturnType<typeof setTimeout> | undefined
   #killTimer: ReturnType<typeof setTimeout> | undefined
+  #watchdogTimer: ReturnType<typeof setInterval> | undefined
+  #watchdogBusy = false
+  #watchdogFailures = 0
   #spawnPromise: Promise<void> | undefined
   #request: HostStartRequest | undefined
   #leaseTouched = false
@@ -140,6 +152,7 @@ export class HostSupervisor {
       stabilityMs: options.stabilityMs ?? 1_000,
       startupTimeoutMs: options.startupTimeoutMs ?? 30_000,
       terminateGraceMs: options.terminateGraceMs ?? 2_000,
+      watchdogIntervalMs: options.watchdogIntervalMs ?? 2_000,
       ...options,
     }
   }
@@ -206,6 +219,10 @@ export class HostSupervisor {
           leaseGeneration: request.lease.generation,
         })
         process.deliverBootstrap(bootstrap)
+        // From the moment the Host holds boot authorization, its writes are
+        // no longer gated by lease checks — the watchdog is what keeps the
+        // single-writer guarantee true if the lock disappears underneath it.
+        this.#startWatchdog()
       } catch (error) {
         // The child never received boot credentials; reap it and, only when
         // its death is provable, clear the pending spawn registration. An
@@ -417,11 +434,62 @@ export class HostSupervisor {
     }, this.#options.terminateGraceMs)
   }
 
+  #startWatchdog(): void {
+    if (this.#watchdogTimer !== undefined) return
+    this.#watchdogTimer = setInterval(() => {
+      void this.#watchdogTick()
+    }, this.#options.watchdogIntervalMs)
+    this.#watchdogTimer.unref?.()
+  }
+
+  #stopWatchdog(): void {
+    if (this.#watchdogTimer === undefined) return
+    clearInterval(this.#watchdogTimer)
+    this.#watchdogTimer = undefined
+  }
+
+  async #watchdogTick(): Promise<void> {
+    if (
+      this.#watchdogBusy ||
+      this.#exited ||
+      this.#stop !== undefined ||
+      this.#request === undefined
+    ) {
+      return
+    }
+    this.#watchdogBusy = true
+    try {
+      await this.#request.lease.assertHeld()
+      this.#watchdogFailures = 0
+    } catch (error) {
+      const code = (error as { code?: string }).code ?? 'unknown error'
+      if (code === 'HOME_BUSY') {
+        // Guard contention means another lease operation is in flight (e.g.
+        // a concurrent doctor), not that the lock is gone — never fatal.
+        return
+      }
+      this.#watchdogFailures += 1
+      if (this.#watchdogFailures < 2) return
+      this.#stopWatchdog()
+      this.#failHealthy(
+        new HostControlError(
+          'LEASE_MISMATCH',
+          `home lease lost while the Host was running (${code}): ${String(
+            (error as Error).message,
+          )} — terminating the Host to preserve the single-writer guarantee`,
+        ),
+      )
+    } finally {
+      this.#watchdogBusy = false
+    }
+  }
+
   #clearTimers(): void {
     clearTimeout(this.#startupTimer)
     clearTimeout(this.#stabilityTimer)
     clearTimeout(this.#terminateTimer)
     clearTimeout(this.#killTimer)
+    this.#stopWatchdog()
   }
 
   #emit(event: HostSupervisorEvent): void {

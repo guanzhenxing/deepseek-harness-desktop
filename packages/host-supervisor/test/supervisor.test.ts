@@ -64,9 +64,18 @@ class RecordingLease implements HomeLease {
   readonly generation = 'lease-generation-1'
   readonly calls: string[] = []
   refuseAt: 'beforeSpawn' | 'attachHost' | undefined
+  /** When set, assertHeld rejects with this error (watchdog tests). */
+  assertHeldError: Error | undefined
+  /** Codes that simulate transient contention instead of lease loss. */
+  assertHeldBusyTimes = 0
 
   async assertHeld(): Promise<void> {
     this.calls.push('assertHeld')
+    if (this.assertHeldBusyTimes > 0) {
+      this.assertHeldBusyTimes -= 1
+      throw Object.assign(new Error('critical section contended'), { code: 'HOME_BUSY' })
+    }
+    if (this.assertHeldError !== undefined) throw this.assertHeldError
   }
 
   async beforeSpawn(profile: string): Promise<void> {
@@ -401,6 +410,147 @@ describe('HostSupervisor', () => {
       expect(setup.process.killCount).toBe(1)
       setup.process.emitExit(null, 'SIGKILL')
       await stopped
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('HostSupervisor lease watchdog', () => {
+  it('terminates a healthy Host when the lease is lost underneath it', async () => {
+    vi.useFakeTimers()
+    try {
+      const process = new FakeProcess()
+      const lease = new RecordingLease()
+      const events: string[] = []
+      const supervisor = new HostSupervisor({
+        factory: {
+          async spawnWaiting() {
+            return process
+          },
+        },
+        stabilityMs: 0,
+        startupTimeoutMs: 10_000,
+        terminateGraceMs: 50,
+        watchdogIntervalMs: 100,
+        onEvent: (event) => events.push(event.kind),
+      })
+      const started = supervisor.start({
+        home: '/tmp/isolated-home',
+        profileName: 'desktop',
+        mode: 'normal',
+        lease,
+        probe: fakeProbe,
+      })
+      await vi.waitFor(() => expect(process.bootstrap).toBeDefined())
+      const writer = createEnvelopeWriter(
+        'host-to-launcher',
+        process.bootstrap!.capability,
+        process.bootstrap!.leaseGeneration,
+      )
+      process.emitMessage(
+        writer.next({
+          kind: 'hello',
+          host: { pid: process.pid, startIdentity: process.startIdentity },
+          profile: { name: process.bootstrap!.profileName },
+          mode: process.bootstrap!.mode,
+          supportedMinor: { min: 0, max: 0 },
+        }),
+      )
+      process.emitMessage(writer.next({ kind: 'phase', phase: 'booting' }))
+      process.emitMessage(writer.next({ kind: 'phase', phase: 'surface-waiting' }))
+      process.emitMessage(
+        writer.next({
+          kind: 'surface',
+          surfaceId: 'surface-1',
+          purpose: 'normal',
+          surface: { kind: 'loopback', url: 'http://127.0.0.1:43123/?token=secret' },
+        }),
+      )
+      process.emitMessage(writer.next({ kind: 'ready', surfaceId: 'surface-1' }))
+      await vi.advanceTimersByTimeAsync(1)
+      await started
+      expect(events).toContain('healthy')
+      lease.assertHeldError = Object.assign(new Error('home lease generation changed'), {
+        code: 'LEASE_CHANGED',
+      })
+      await vi.advanceTimersByTimeAsync(100)
+      expect(events).not.toContain('crashed') // first failure is not yet fatal
+      await vi.advanceTimersByTimeAsync(100)
+      expect(events).toContain('crashed')
+      expect(process.terminateCount).toBeGreaterThan(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores guard contention and transient single failures', async () => {
+    vi.useFakeTimers()
+    try {
+      const process = new FakeProcess()
+      const lease = new RecordingLease()
+      const events: string[] = []
+      const supervisor = new HostSupervisor({
+        factory: {
+          async spawnWaiting() {
+            return process
+          },
+        },
+        stabilityMs: 0,
+        startupTimeoutMs: 10_000,
+        terminateGraceMs: 50,
+        watchdogIntervalMs: 100,
+        onEvent: (event) => events.push(event.kind),
+      })
+      const started = supervisor.start({
+        home: '/tmp/isolated-home',
+        profileName: 'desktop',
+        mode: 'normal',
+        lease,
+        probe: fakeProbe,
+      })
+      await vi.waitFor(() => expect(process.bootstrap).toBeDefined())
+      const writer = createEnvelopeWriter(
+        'host-to-launcher',
+        process.bootstrap!.capability,
+        process.bootstrap!.leaseGeneration,
+      )
+      process.emitMessage(
+        writer.next({
+          kind: 'hello',
+          host: { pid: process.pid, startIdentity: process.startIdentity },
+          profile: { name: process.bootstrap!.profileName },
+          mode: process.bootstrap!.mode,
+          supportedMinor: { min: 0, max: 0 },
+        }),
+      )
+      process.emitMessage(writer.next({ kind: 'phase', phase: 'booting' }))
+      process.emitMessage(writer.next({ kind: 'phase', phase: 'surface-waiting' }))
+      process.emitMessage(
+        writer.next({
+          kind: 'surface',
+          surfaceId: 'surface-1',
+          purpose: 'normal',
+          surface: { kind: 'loopback', url: 'http://127.0.0.1:43123/?token=secret' },
+        }),
+      )
+      process.emitMessage(writer.next({ kind: 'ready', surfaceId: 'surface-1' }))
+      await vi.advanceTimersByTimeAsync(1)
+      await started
+      // Guard contention never counts.
+      lease.assertHeldBusyTimes = 5
+      await vi.advanceTimersByTimeAsync(500)
+      expect(events).not.toContain('crashed')
+      lease.assertHeldBusyTimes = 0
+      // One real failure followed by recovery resets the streak.
+      lease.assertHeldError = Object.assign(new Error('one bad probe'), {
+        code: 'LEASE_CHANGED',
+      })
+      await vi.advanceTimersByTimeAsync(100)
+      lease.assertHeldError = undefined
+      await vi.advanceTimersByTimeAsync(300)
+      expect(events).not.toContain('crashed')
+      expect(process.terminateCount).toBe(0)
     } finally {
       vi.useRealTimers()
     }

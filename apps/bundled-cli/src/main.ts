@@ -89,6 +89,49 @@ export interface CliChildHandle {
   kill(signal?: NodeJS.Signals): void
 }
 
+/**
+ * Keeps the single-writer guarantee true while the authorized CLI child
+ * runs: the lease gates ADMISSION, not the child's own writes, so a lock
+ * removed underneath it (e.g. a frozen older artifact's doctor misreading
+ * the new identity format) would otherwise let a second entrant start
+ * writing the same home. Two consecutive non-contention failures kill the
+ * child; guard contention never counts.
+ */
+function startLeaseWatchdog(
+  lease: HomeLease,
+  child: CliChildHandle,
+  stderr: Pick<NodeJS.WriteStream, 'write'>,
+  intervalMs = 2_000,
+): { stop(): void } {
+  let failures = 0
+  let stopped = false
+  const timer = setInterval(() => {
+    void (async () => {
+      try {
+        await lease.assertHeld()
+        failures = 0
+      } catch (error) {
+        const code = (error as { code?: string }).code ?? 'unknown error'
+        if (code === 'HOME_BUSY') return
+        failures += 1
+        if (failures < 2) return
+        stopped = true
+        clearInterval(timer)
+        stderr.write(
+          `dsh-native: home lease lost while the CLI was running (${code}): killing the child to preserve the single-writer guarantee\n`,
+        )
+        child.kill('SIGKILL')
+      }
+    })()
+  }, intervalMs)
+  timer.unref?.()
+  return {
+    stop() {
+      if (!stopped) clearInterval(timer)
+    },
+  }
+}
+
 export type SpawnCliChild = (
   input: Readonly<{
     argv: readonly string[]
@@ -381,7 +424,13 @@ export async function runBundledCli(
       await lease.attachHost(identity)
       child.send({ kind: 'dsh-native-authorized', argv, dshBin: runtime.dshBin })
       authorized = true
-      const exit = await child.exited
+      const watchdog = startLeaseWatchdog(lease, child, stderr)
+      let exit: { code: number | null; signal: string | null }
+      try {
+        exit = await child.exited
+      } finally {
+        watchdog.stop()
+      }
       // Wait for write-home descendants (pnpm and anything the official CLI
       // spawned) before proving the home is writable again.
       const descendantsGone = await waitForDescendants(child.pid, options)
