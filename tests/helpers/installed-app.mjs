@@ -44,14 +44,27 @@ export async function emergencyCleanup() {
  * the same at-most-three rounds, never three each.
  */
 let drainRoundsUsed = 0
-export async function drainWithRetries(maxTotalRounds = 3) {
-  for (;;) {
-    if (liveCleanups.size === 0 || drainRoundsUsed >= maxTotalRounds) return
-    drainRoundsUsed += 1
-    await emergencyCleanup()
-    if (liveCleanups.size === 0 || drainRoundsUsed >= maxTotalRounds) return
-    await new Promise((resolve) => sleepTimer(resolve, 50))
-  }
+let drainInFlight
+/**
+ * Concurrent signals must SHARE one drain: the first drain temporarily
+ * empties the registry while awaiting its cleanups, so a second signal
+ * entering here would see "nothing to do", exit early, and process.exit
+ * mid-cleanup of the first. Every caller awaits the same promise.
+ */
+export function drainWithRetries(maxTotalRounds = 3) {
+  if (drainInFlight !== undefined) return drainInFlight
+  drainInFlight = (async () => {
+    for (;;) {
+      if (liveCleanups.size === 0 || drainRoundsUsed >= maxTotalRounds) return
+      drainRoundsUsed += 1
+      await emergencyCleanup()
+      if (liveCleanups.size === 0 || drainRoundsUsed >= maxTotalRounds) return
+      await new Promise((resolve) => sleepTimer(resolve, 50))
+    }
+  })().finally(() => {
+    drainInFlight = undefined
+  })
+  return drainInFlight
 }
 
 // Normal completion must also flush leftovers (e.g. a DMG mount whose

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 
 import { setTimeout as sleepTimer } from 'node:timers'
 
-import { emergencyCleanup, registerEmergencyCleanup } from './installed-app.mjs'
+import { drainWithRetries, emergencyCleanup, registerEmergencyCleanup } from './installed-app.mjs'
 
 describe('emergency cleanup registry', () => {
   it('retries a failed cleanup on the next drain and drops it after success', async () => {
@@ -51,6 +51,23 @@ describe('emergency cleanup registry', () => {
     }
   })
 
+  it('shares one drain across concurrent callers', async () => {
+    let entries = 0
+    const unregister = registerEmergencyCleanup(async () => {
+      entries += 1
+      if (entries > 1) throw new Error('two drains entered the cleanup concurrently')
+      // A slow cleanup: the second caller must wait on the same drain
+      // instead of seeing an emptied registry and exiting early.
+      await new Promise((resolve) => sleepTimer(resolve, 80))
+    })
+    try {
+      await Promise.all([drainWithRetries(), drainWithRetries(), drainWithRetries()])
+      expect(entries).toBe(1)
+    } finally {
+      unregister()
+    }
+  })
+
   it('retries a failed cleanup on SIGINT before exiting', async () => {
     const { spawn } = await import('node:child_process')
     const { mkdtemp, readFile, rm } = await import('node:fs/promises')
@@ -69,14 +86,23 @@ describe('emergency cleanup registry', () => {
         `await writeFile(${JSON.stringify(marker)}, "ok"); }); `,
         "for (const signal of ['SIGINT']) {",
         'process.on(signal, () => { void drainWithRetries().finally(() => process.exit(130)) }); }',
+        'process.stdout.write("watchdog-ready\\n"); ',
         'setInterval(() => {}, 60000)',
       ].join('')
       const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'ignore'],
       })
       const exit = await new Promise((resolve) => {
         child.once('exit', (code, signal) => resolve({ code, signal }))
-        sleepTimer(() => child.kill('SIGINT'), 150)
+        // Ready handshake: wait for the child to PRINT its marker before
+        // signalling, so imports and the handler are provably installed
+        // (a fixed delay guesses and flakes under load).
+        let buffered = ''
+        child.stdout.setEncoding('utf8')
+        child.stdout.on('data', (chunk) => {
+          buffered += chunk
+          if (buffered.includes('watchdog-ready')) child.kill('SIGINT')
+        })
       })
       // The signal handler exits 130 AFTER the drain retried and succeeded.
       expect(exit.code).toBe(130)
