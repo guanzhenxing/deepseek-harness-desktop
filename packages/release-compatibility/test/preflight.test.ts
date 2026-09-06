@@ -513,30 +513,117 @@ describe('inspectHomeFormats', () => {
   it('classifies corrupt storage-unit content beyond any historical sampling cap', async () => {
     const home = await tempHome()
     try {
+      // Corrupt EVERY unit and assert EVERY one is flagged: a reintroduced
+      // sampler (old cap 64) would flag only its prefix, so this assertion
+      // is order-independent and must fail under sampling.
       for (let index = 0; index < 72; index += 1) {
         const domain = path.join(home, 'storages', `domain-${index}`)
         await mkdir(domain, { recursive: true })
-        await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
-      }
-      // Corrupt exactly the units the readdir implementation will iterate at
-      // positions beyond the OLD 64-entry sampling cap (raw order — APFS
-      // does not return creation order, so the test reads what the
-      // implementation reads). A sampling implementation would miss them.
-      const listed = [
-        ...(await boundedEntries(
-          path.join(home, 'storages'),
-          createInspectionBudget({ entries: 1_000_000 }),
-        )),
-      ]
-      const beyondOldCap = listed.slice(64)
-      expect(beyondOldCap.length).toBeGreaterThan(0)
-      for (const domain of beyondOldCap) {
-        await writeFile(path.join(home, 'storages', domain, 'global.json'), '{not json')
+        await writeFile(path.join(domain, 'global.json'), '{not json')
       }
       const observed = await inspectHomeFormats(home)
-      for (const domain of beyondOldCap) {
-        expect(observed.unknownPaths).toContain(`storages/${domain}/global.json`)
+      expect(observed.unknownPaths).toHaveLength(72)
+      for (let index = 0; index < 72; index += 1) {
+        expect(observed.unknownPaths).toContain(`storages/domain-${index}/global.json`)
       }
+      expect(observed.formats.storages).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+  it('refuses record documents that carry a stamp but no record envelope', async () => {
+    const home = await tempHome()
+    try {
+      const table = path.join(home, 'storages', 'workspace', 'records')
+      await mkdir(table, { recursive: true })
+      await writeFile(
+        path.join(home, 'storages', 'workspace', 'global.json'),
+        '{"version":1,"record":null}',
+      )
+      await writeFile(path.join(table, 'stamp-only.json'), '{"version":1}')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('storages/workspace/records/stamp-only.json')
+      expect(observed.formats.storages).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a truncated skippable frame declaring more payload than the file holds', async () => {
+    const home = await tempHome()
+    try {
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      const sessionDir = path.join(projectDir, 'liar-skip')
+      await mkdir(sessionDir, { recursive: true })
+      // Skippable magic (0x184D2A50) declaring 0xffffffff payload in an
+      // 8-byte file: the length claim must be checked against the real size.
+      await writeFile(
+        path.join(sessionDir, 'session.jsonl.zstd'),
+        Buffer.from([0x50, 0x2a, 0x4d, 0x18, 0xff, 0xff, 0xff, 0xff]),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--fixture--/liar-skip/session.jsonl.zstd')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts a complete skippable prefix only when a standard frame follows', async () => {
+    const home = await tempHome()
+    try {
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      const { zstdCompressSync } = await import('node:zlib')
+      // Honest skippable prefix (declared size = real payload) + a real
+      // standard frame after it.
+      const payload = Buffer.from('metadata')
+      const honest = path.join(projectDir, 'honest-skip')
+      await mkdir(honest, { recursive: true })
+      const skipHeader = Buffer.alloc(8)
+      skipHeader.writeUInt32LE(0x184d2a50, 0)
+      skipHeader.writeUInt32LE(payload.length, 4)
+      await writeFile(
+        path.join(honest, 'session.jsonl.zstd'),
+        Buffer.concat([
+          skipHeader,
+          payload,
+          zstdCompressSync(
+            Buffer.from(
+              '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
+              'utf8',
+            ),
+          ),
+        ]),
+      )
+      // Skippable-only stream (nothing after the prefix) is not a session.
+      const skipOnly = path.join(projectDir, 'skip-only')
+      await mkdir(skipOnly, { recursive: true })
+      await writeFile(
+        path.join(skipOnly, 'session.jsonl.zstd'),
+        Buffer.concat([skipHeader, payload]),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--fixture--/skip-only/session.jsonl.zstd')
+      expect(observed.unknownPaths).not.toContain(
+        'sessions/--fixture--/honest-skip/session.jsonl.zstd',
+      )
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('bounds the unknown-paths output by the shared budget', async () => {
+    const home = await tempHome()
+    try {
+      const table = path.join(home, 'storages', 'workspace', 'records')
+      await mkdir(table, { recursive: true })
+      for (let index = 0; index < 20; index += 1) {
+        await writeFile(path.join(table, `bad-${index}.json`), '{not json')
+      }
+      const budget = createInspectionBudget({ unknowns: 1 })
+      const observed = await inspectHomeFormats(home, budget)
+      expect(observed.unknownPaths.length).toBeLessThanOrEqual(1)
+      expect(budget.unknowns).toBeGreaterThanOrEqual(0)
       expect(observed.formats.storages).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
@@ -717,67 +804,47 @@ describe('inspectHomeFormats', () => {
   it('classifies sessions beyond any historical sampling cap', async () => {
     const home = await tempHome()
     try {
+      // Corrupt EVERY session and assert EVERY one is flagged (old cap 32
+      // per project); order-independent, must fail under sampling.
       const projectDir = path.join(home, 'sessions', '--fixture--')
       for (let index = 0; index < 40; index += 1) {
         const sessionDir = path.join(projectDir, `s-${index}`)
         await mkdir(sessionDir, { recursive: true })
         await writeFile(
           path.join(sessionDir, 'session.jsonl'),
-          '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
-        )
-      }
-      // Corrupt the sessions the implementation iterates beyond the OLD
-      // 32-per-project sampling cap, in raw readdir order.
-      const listed = [
-        ...(await boundedEntries(projectDir, createInspectionBudget({ entries: 1_000_000 }))),
-      ]
-      const beyondOldCap = listed.slice(32)
-      expect(beyondOldCap.length).toBeGreaterThan(0)
-      for (const sessionId of beyondOldCap) {
-        await writeFile(
-          path.join(projectDir, sessionId, 'session.jsonl'),
-          '{"type":"session","version":99,"id":"f","createdAt":0,"delegationDepth":0}\n',
+          '{"type":"session","version":99,"id":"f","createdAt":0,"delegationDepth":0}\\n',
         )
       }
       const observed = await inspectHomeFormats(home)
-      for (const sessionId of beyondOldCap) {
-        expect(observed.unknownPaths).toContain(`sessions/--fixture--/${sessionId}/session.jsonl`)
+      expect(observed.unknownPaths).toHaveLength(40)
+      for (let index = 0; index < 40; index += 1) {
+        expect(observed.unknownPaths).toContain(`sessions/--fixture--/s-${index}/session.jsonl`)
       }
       expect(observed.formats.sessions).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
-
   it('classifies profile manifests beyond any historical sampling cap', async () => {
     const home = await tempHome()
     try {
+      // Corrupt EVERY manifest and assert EVERY one is flagged (old cap 32);
+      // order-independent, must fail under sampling.
       for (let index = 0; index < 40; index += 1) {
         const profileDir = path.join(home, 'profiles', `p-${index}`)
         await mkdir(profileDir, { recursive: true })
-        await writeFile(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p' }))
-      }
-      const listed = [
-        ...(await boundedEntries(
-          path.join(home, 'profiles'),
-          createInspectionBudget({ entries: 1_000_000 }),
-        )),
-      ]
-      const beyondOldCap = listed.slice(32)
-      expect(beyondOldCap.length).toBeGreaterThan(0)
-      for (const profile of beyondOldCap) {
-        await writeFile(path.join(home, 'profiles', profile, 'package.json'), '{not json')
+        await writeFile(path.join(profileDir, 'package.json'), '{not json')
       }
       const observed = await inspectHomeFormats(home)
-      for (const profile of beyondOldCap) {
-        expect(observed.unknownPaths).toContain(`profiles/${profile}/package.json`)
+      expect(observed.unknownPaths).toHaveLength(40)
+      for (let index = 0; index < 40; index += 1) {
+        expect(observed.unknownPaths).toContain(`profiles/p-${index}/package.json`)
       }
       expect(observed.formats.profiles).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
-
   it('flags dot-prefixed profiles: createProfileRef accepts names like .prod', async () => {
     const home = await tempHome()
     try {
