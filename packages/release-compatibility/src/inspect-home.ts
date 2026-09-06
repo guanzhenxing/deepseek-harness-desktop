@@ -153,23 +153,15 @@ export async function inspectHomeFormats(
   // record: no data slot may claim a known format on that evidence, and
   // every slot that had claimed one surfaces a budget-level unknown path.
   if (budget.exhausted) {
-    const dataSlots: Array<[string, string | undefined]> = [
-      ['credentials', formats.credentials],
-      ['settings', formats.settings],
-      ['sessions', formats.sessions],
-      ['storages', formats.storages],
-      ['profiles', formats.profiles],
-    ]
-    for (const [slot, claimed] of dataSlots) {
-      if (claimed !== undefined) {
-        delete formats[slot]
-        if (!unknownPaths.includes(slot)) unknownPaths.push(slot)
-      }
+    // Recorded paths stay (they are real findings), but the exhaustion
+    // itself collapses to ONE fixed marker that is explicitly outside the
+    // per-path budget — the output is thereby bounded by unknowns + 1, and
+    // no slot may keep a claimed format on an inspection that could not
+    // record everything it found.
+    for (const slot of ['credentials', 'settings', 'sessions', 'storages', 'profiles']) {
+      delete formats[slot]
     }
-    // The budget may run dry on the very FIRST finding (unknowns: 0): no
-    // slot claimed anything and nothing was recorded — exhausted must still
-    // never read as "clean". One marker path keeps the verdict a refusal.
-    if (unknownPaths.length === 0) unknownPaths.push('home')
+    if (!unknownPaths.includes('home')) unknownPaths.push('home')
   }
 
   const fresh =
@@ -508,6 +500,9 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
       const fcsLength =
         singleSegment === 1 ? ([1, 2, 4, 8][fcsCode] ?? 1) : ([0, 2, 4, 8][fcsCode] ?? 0)
       const headerLength = 5 + (singleSegment === 1 ? 0 : 1) + dictLength + fcsLength
+      // The file must COVER the complete header — a 5-byte file with a
+      // 6-byte-header descriptor is truncated, whatever was read so far.
+      if (stat.size < offset + headerLength) return false
       if (headerLength > 8) {
         const extendedLength = Math.min(headerLength, budget.bytes + 1)
         if (extendedLength < headerLength) return false
@@ -624,9 +619,18 @@ async function storagesFormatId(
           if (entry === 'session_projcache') projcacheFromDirectory = stamp
         }
       }
-    } else if (entry === 'session_projcache') {
-      unitVersion = 4
-      projcacheFromDirectory = await sampleRecordStamp(target, budget)
+    } else {
+      // Anchor-less domain: the baseline's only anchor-less per-record
+      // domain is session_projcache (pinned v4). Any OTHER domain without a
+      // global document has no trustworthy version source — the first
+      // record must never anchor itself (two consistent version:99
+      // documents would self-certify). Such a domain fails closed.
+      if (entry === 'session_projcache') {
+        unitVersion = 4
+        projcacheFromDirectory = await sampleRecordStamp(target, budget)
+      } else {
+        flagUnknown(budget, unknown, path.relative(home, target))
+      }
     }
     const interiorFlagged = await auditUnitInterior(target, home, unitVersion, unknown, budget)
     if (entry === 'session_projcache' && interiorFlagged) projcacheInteriorFlagged = true
@@ -676,7 +680,7 @@ async function auditUnitInterior(
     return true
   }
   let flagged = false
-  let anchoredVersion = unitVersion
+  const anchoredVersion = unitVersion
   for (const table of tables) {
     if (budgetExhausted(budget)) {
       flagUnknown(budget, unknown, path.relative(home, unitDirectory))
@@ -728,15 +732,10 @@ async function auditUnitInterior(
       // record seen in an anchor-less unit) is data upstream would silently
       // drop.
       const stamp = await readRecordStamp(recordPath, budget)
-      if (stamp === undefined) {
+      if (stamp === undefined || stamp !== anchoredVersion) {
         flagUnknown(budget, unknown, path.relative(home, recordPath))
         flagged = true
-        continue
       }
-      if (anchoredVersion === undefined) anchoredVersion = stamp
-      if (stamp === anchoredVersion) continue
-      flagUnknown(budget, unknown, path.relative(home, recordPath))
-      flagged = true
     }
   }
   return flagged

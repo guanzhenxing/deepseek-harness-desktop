@@ -612,6 +612,41 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('refuses a truncated 5-byte standard zstd frame', async () => {
+    const home = await tempHome()
+    try {
+      const sessionDir = path.join(home, 'sessions', '--p--', 'truncated5')
+      await mkdir(sessionDir, { recursive: true })
+      // FHD 0x00 declares a 6-byte header; the file is 5 bytes.
+      await writeFile(
+        path.join(sessionDir, 'session.jsonl.zstd'),
+        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00]),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--p--/truncated5/session.jsonl.zstd')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('fails anchor-less storage domains closed instead of self-anchoring', async () => {
+    const home = await tempHome()
+    try {
+      // Two CONSISTENT version:99 records in a domain with no global
+      // document: without an anchor they must not self-certify as known.
+      const table = path.join(home, 'storages', 'future-domain', 'rows')
+      await mkdir(table, { recursive: true })
+      await writeFile(path.join(table, 'a.json'), '{"version":99,"record":null}')
+      await writeFile(path.join(table, 'b.json'), '{"version":99,"record":null}')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('storages/future-domain')
+      expect(observed.formats.storages).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('never reads an exhausted budget as clean, even with nothing recorded', async () => {
     const home = await tempHome()
     try {
@@ -638,7 +673,11 @@ describe('inspectHomeFormats', () => {
       }
       const budget = createInspectionBudget({ unknowns: 1 })
       const observed = await inspectHomeFormats(home, budget)
-      expect(observed.unknownPaths.length).toBeLessThanOrEqual(1)
+      // Output bound: at most `unknowns` recorded paths plus the single
+      // fixed 'home' exhaustion marker (explicitly outside the per-path
+      // budget).
+      expect(observed.unknownPaths.length).toBeLessThanOrEqual(2)
+      expect(observed.unknownPaths).toContain('home')
       expect(budget.unknowns).toBeGreaterThanOrEqual(0)
       expect(observed.formats.storages).toBeUndefined()
     } finally {
