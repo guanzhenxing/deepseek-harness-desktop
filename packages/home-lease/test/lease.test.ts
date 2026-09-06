@@ -345,6 +345,20 @@ describe('home lease lifecycle', () => {
     ).rejects.toThrow(/invalid lease profile/u)
   })
 
+  it('reserves the runtime launch-root prefix from lease profiles', async () => {
+    // The bundled CLI leases with whatever profile it is given (including the
+    // no-profile passthrough) and then lets the official CLI create
+    // `<home>/profiles/<name>`; a reserved name would create a directory the
+    // format inspection exempts.
+    const probe = new FakeProbe()
+    await expect(
+      acquireHomeLease({ ...acquireInput('/tmp/x', probe), profile: '.dsh-desktop-run-user' }),
+    ).rejects.toThrow(/reserved runtime launch-root prefix/u)
+    await expect(
+      acquireHomeLease({ ...acquireInput('/tmp/x', probe), profile: '.dsh-desktop-run-' }),
+    ).rejects.toThrow(/reserved runtime launch-root prefix/u)
+  })
+
   it('refuses to release a lock directory that gained unexpected entries', async () => {
     const home = await isolatedHome()
     const probe = new FakeProbe()

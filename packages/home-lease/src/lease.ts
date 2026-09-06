@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, rm, rmdir } from 'node:fs/promises'
 
 import {
+  isReservedProfileName,
+  RESERVED_PROFILE_NAME_PREFIX,
+} from '@dsh-desktop/desktop-contracts/profile-name'
+
+import {
   describeLeaseOwner,
   LeaseError,
   type LeaseEntrypoint,
@@ -78,6 +83,18 @@ function validateProfile(profile: string): string {
     throw new LeaseError(
       'LEASE_PROFILE_MISMATCH',
       `invalid lease profile ${JSON.stringify(profile)}`,
+    )
+  }
+  // The bundled CLI reaches the home (and creates `<home>/profiles/<name>`
+  // through the official CLI) with whatever profile it leases for, so the
+  // reserved runtime launch-root namespace must be refused HERE, at the
+  // shared lease gate — not only in the profile manager's own ref builder.
+  if (isReservedProfileName(profile)) {
+    throw new LeaseError(
+      'LEASE_PROFILE_MISMATCH',
+      `lease profile ${JSON.stringify(profile)} uses the reserved runtime launch-root prefix ${JSON.stringify(
+        RESERVED_PROFILE_NAME_PREFIX,
+      )}`,
     )
   }
   return profile

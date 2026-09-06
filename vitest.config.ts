@@ -12,6 +12,10 @@ export default defineConfig({
         root,
         'packages/desktop-contracts/src/host-control.ts',
       ),
+      '@dsh-desktop/desktop-contracts/profile-name': path.join(
+        root,
+        'packages/desktop-contracts/src/profile-name.ts',
+      ),
       '@dsh-desktop/profile-manager': path.join(root, 'packages/profile-manager/src/index.ts'),
       '@dsh-desktop/desktop-plugin': path.join(root, 'packages/desktop-plugin/src/index.ts'),
       '@dsh-desktop/desktop-recovery-bridge': path.join(
@@ -29,7 +33,11 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
+    include: [
+      'packages/*/test/**/*.test.ts',
+      'apps/*/test/**/*.test.ts',
+      'tests/helpers/*.test.mjs',
+    ],
     exclude: ['**/*.integration.test.ts'],
     passWithNoTests: true,
     testTimeout: 10_000,
