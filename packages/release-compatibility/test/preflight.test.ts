@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -522,7 +522,12 @@ describe('inspectHomeFormats', () => {
       // positions beyond the OLD 64-entry sampling cap (raw order — APFS
       // does not return creation order, so the test reads what the
       // implementation reads). A sampling implementation would miss them.
-      const listed = [...(await readdir(path.join(home, 'storages')))]
+      const listed = [
+        ...(await boundedEntries(
+          path.join(home, 'storages'),
+          createInspectionBudget({ entries: 1_000_000 }),
+        )),
+      ]
       const beyondOldCap = listed.slice(64)
       expect(beyondOldCap.length).toBeGreaterThan(0)
       for (const domain of beyondOldCap) {
@@ -584,21 +589,98 @@ describe('inspectHomeFormats', () => {
     }
   })
 
-  it('accepts a .zstd session carrying a real zstd frame magic', async () => {
+  it('accepts a .zstd session carrying a real zstd frame header', async () => {
     const home = await tempHome()
     try {
       const projectDir = path.join(home, 'sessions', '--fixture--')
       const sessionDir = path.join(projectDir, 'framed')
       await mkdir(sessionDir, { recursive: true })
-      // Standard zstd frame magic 28 B5 2F FD (LE 0xFD2FB528), garbage after —
-      // header-only inspection cannot decompress, but the frame must be real.
+      // Minimal RFC 8878 frame: magic 28 B5 2F FD + FHD 0x20 (single-segment,
+      // FCS code 0 → 1 content-size byte) + one FCS byte. Header-only
+      // inspection validates the frame header structure, not the blocks.
       await writeFile(
         path.join(sessionDir, 'session.jsonl.zstd'),
-        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00]),
+        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x00]),
       )
       const observed = await inspectHomeFormats(home)
       expect(observed.unknownPaths).toEqual([])
       expect(observed.formats.sessions).toBe('dsh-session-jsonl-0')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a .zstd session whose frame header is malformed or truncated', async () => {
+    const home = await tempHome()
+    try {
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      // magic + FHD 0xC0 (FCS code 3, non-single-segment → header length 14)
+      // with only ten bytes total: truncated. And a reserved-bit FHD:
+      // malformed by spec.
+      const truncated = path.join(projectDir, 'truncated')
+      await mkdir(truncated, { recursive: true })
+      await writeFile(
+        path.join(truncated, 'session.jsonl.zstd'),
+        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00]),
+      )
+      const reserved = path.join(projectDir, 'reserved-bit')
+      await mkdir(reserved, { recursive: true })
+      await writeFile(
+        path.join(reserved, 'session.jsonl.zstd'),
+        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x08, 0x00, 0x00, 0x00]),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--fixture--/truncated/session.jsonl.zstd')
+      expect(observed.unknownPaths).toContain(
+        'sessions/--fixture--/reserved-bit/session.jsonl.zstd',
+      )
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses plain and compressed encodings coexisting in one session directory', async () => {
+    const home = await tempHome()
+    try {
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      const sessionDir = path.join(projectDir, 'both-encodings')
+      await mkdir(sessionDir, { recursive: true })
+      // A perfectly valid plaintext session — but a damaged .zstd sits next
+      // to it, and the upstream backend rejects dual encodings.
+      await writeFile(
+        path.join(sessionDir, 'session.jsonl'),
+        '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
+      )
+      await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), 'definitely not zstd\n')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--fixture--/both-encodings/session.jsonl')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('binds storage records to their unit version in ordinary domains', async () => {
+    const home = await tempHome()
+    try {
+      // A plain domain anchored at version 1 by its global document: a
+      // version-99 record is data upstream would silently treat as absent.
+      const domain = path.join(home, 'storages', 'workspace')
+      const table = path.join(domain, 'records')
+      await mkdir(table, { recursive: true })
+      await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
+      await writeFile(path.join(table, 'current.json'), '{"version":1,"record":{"k":1}}')
+      await writeFile(path.join(table, 'future.json'), '{"version":99,"record":{"k":2}}')
+      // And an anchor-less unit whose records disagree with each other.
+      const anchorless = path.join(home, 'storages', 'mixed-domain', 'rows')
+      await mkdir(anchorless, { recursive: true })
+      await writeFile(path.join(anchorless, 'a.json'), '{"version":2,"record":null}')
+      await writeFile(path.join(anchorless, 'b.json'), '{"version":3,"record":null}')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('storages/workspace/records/future.json')
+      expect(observed.unknownPaths).toContain('storages/mixed-domain/rows/b.json')
+      expect(observed.formats.storages).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
@@ -618,7 +700,9 @@ describe('inspectHomeFormats', () => {
       }
       // Corrupt the sessions the implementation iterates beyond the OLD
       // 32-per-project sampling cap, in raw readdir order.
-      const listed = [...(await readdir(projectDir))]
+      const listed = [
+        ...(await boundedEntries(projectDir, createInspectionBudget({ entries: 1_000_000 }))),
+      ]
       const beyondOldCap = listed.slice(32)
       expect(beyondOldCap.length).toBeGreaterThan(0)
       for (const sessionId of beyondOldCap) {
@@ -645,7 +729,12 @@ describe('inspectHomeFormats', () => {
         await mkdir(profileDir, { recursive: true })
         await writeFile(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p' }))
       }
-      const listed = [...(await readdir(path.join(home, 'profiles')))]
+      const listed = [
+        ...(await boundedEntries(
+          path.join(home, 'profiles'),
+          createInspectionBudget({ entries: 1_000_000 }),
+        )),
+      ]
       const beyondOldCap = listed.slice(32)
       expect(beyondOldCap.length).toBeGreaterThan(0)
       for (const profile of beyondOldCap) {

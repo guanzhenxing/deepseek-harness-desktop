@@ -249,8 +249,12 @@ async function readBoundedText(
   const handle = await openFile(file)
   if (handle === undefined) return 'unreadable'
   try {
-    const buffer = Buffer.alloc(capBytes + 1)
-    const { bytesRead } = await handle.read(buffer, 0, capBytes + 1, 0)
+    // Budget-first read sizing: never read past what the remaining budget
+    // can account for, so a budget breach cannot over-read a whole file cap.
+    const readLength = Math.min(capBytes + 1, budget.bytes + 1)
+    if (readLength <= 0) return 'unreadable'
+    const buffer = Buffer.alloc(readLength)
+    const { bytesRead } = await handle.read(buffer, 0, readLength, 0)
     if (!takeBytes(budget, bytesRead)) return 'unreadable'
     if (bytesRead > capBytes) return 'too-large'
     return buffer.subarray(0, bytesRead).toString('utf8')
@@ -319,6 +323,9 @@ async function sessionsFormatId(
       continue
     }
     for (const sessionId of sessionIdsAll) {
+      // Bounded output: stop flagging once the shared unknowns budget is
+      // spent — earlier flags already refuse the slot.
+      if (budgetExhausted(budget)) break
       const sessionDir = path.join(projectDir, sessionId)
       const sessionKind = await directoryKind(sessionDir)
       if (sessionKind === 'foreign') {
@@ -345,12 +352,20 @@ async function sessionsFormatId(
         continue
       }
       if (!plainRegular && !zstdRegular) continue
+      if (plainRegular && zstdRegular) {
+        // The upstream session backend rejects two encodings of one session
+        // in the same directory; admission must not silently prefer one and
+        // skip the other's classification.
+        sawAllKnown = false
+        flagUnknown(budget, unknown, path.relative(home, plain))
+        continue
+      }
       if (plainRegular) {
         if (!(await isKnownSessionHeader(plain, budget))) {
           sawAllKnown = false
           flagUnknown(budget, unknown, path.relative(home, plain))
         }
-      } else if (!(await hasZstdFrameMagic(zstd, budget))) {
+      } else if (!(await hasZstdFrameHeader(zstd, budget))) {
         sawAllKnown = false
         flagUnknown(budget, unknown, path.relative(home, zstd))
       }
@@ -368,12 +383,9 @@ async function isKnownSessionHeader(file: string, budget: InspectionBudget): Pro
   const handle = await openFile(file)
   if (handle === undefined) return false
   try {
-    const { buffer, bytesRead } = await handle.read(
-      Buffer.alloc(FIRST_LINE_BYTES),
-      0,
-      FIRST_LINE_BYTES,
-      0,
-    )
+    const readLength = Math.min(FIRST_LINE_BYTES, budget.bytes + 1)
+    if (readLength <= 0) return false
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(readLength), 0, readLength, 0)
     if (!takeBytes(budget, bytesRead)) return false
     const firstLine = buffer.subarray(0, bytesRead).toString('utf8').split('\n')[0] ?? ''
     let parsed: unknown
@@ -394,22 +406,41 @@ async function isKnownSessionHeader(file: string, budget: InspectionBudget): Pro
 }
 
 /**
- * A compressed session is accepted only when its first four bytes are a real
- * zstd frame magic (standard 0xFD2FB528, or one of the skippable-frame
- * magics 0x184D2A50–0x184D2A5F that multi-frame writers may prepend).
- * Anything else wearing the .zstd name is unknown data, not a session this
- * release knows how to read.
+ * A compressed session is accepted only when it opens with a real zstd frame
+ * header (RFC 8878): the standard frame magic 0xFD2FB528 — or a skippable
+ * frame magic 0x184D2A50–0x184D2A5F, which multi-frame writers may prepend,
+ * carrying a 4-byte frame size — followed by a well-formed frame-header
+ * descriptor (reserved bit clear) and the window/dictionary/content-size
+ * fields its descriptor declares. Magic alone proves a type, not a frame; a
+ * truncated or malformed header is unknown data. Decompression stays out of
+ * scope (read-only header-only inspection).
  */
-async function hasZstdFrameMagic(file: string, budget: InspectionBudget): Promise<boolean> {
+async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promise<boolean> {
   const handle = await openFile(file)
   if (handle === undefined) return false
   try {
-    const { buffer, bytesRead } = await handle.read(Buffer.alloc(4), 0, 4, 0)
+    const readLength = Math.min(18, budget.bytes + 1)
+    if (readLength < 8) return false
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(readLength), 0, readLength, 0)
     if (!takeBytes(budget, bytesRead)) return false
-    if (bytesRead < 4) return false
+    if (bytesRead < 5) return false
     const magic = buffer.readUInt32LE(0)
-    if (magic === 0xfd2fb528) return true
-    return magic >= 0x184d2a50 && magic <= 0x184d2a5f
+    if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {
+      // Skippable frame: magic + 4-byte frame size.
+      return bytesRead >= 8
+    }
+    if (magic !== 0xfd2fb528) return false
+    const descriptor = buffer[4]
+    if (descriptor === undefined) return false
+    if ((descriptor & 0b0000_1000) !== 0) return false // reserved bit must be zero
+    const fcsCode = (descriptor >> 6) & 0b11
+    const singleSegment = (descriptor >> 5) & 0b1
+    const dictCode = descriptor & 0b11
+    const dictLength = [0, 1, 2, 4][dictCode] ?? 0
+    const fcsLength =
+      singleSegment === 1 ? ([1, 2, 4, 8][fcsCode] ?? 1) : ([0, 2, 4, 8][fcsCode] ?? 0)
+    const headerLength = 5 + (singleSegment === 1 ? 0 : 1) + dictLength + fcsLength
+    return bytesRead >= headerLength
   } finally {
     await handle.close()
   }
@@ -497,9 +528,13 @@ async function storagesFormatId(
     // Per-record units take their identity from the directory name; the
     // version stamp lives in global.json when the domain has a global slot,
     // otherwise in the record documents themselves. The interior walk runs
-    // for EVERY unit and classifies EVERY record.
+    // for EVERY unit and classifies EVERY record against the unit's own
+    // version: the unit stamp anchors the records, and a record stamped
+    // differently is data upstream's storage backend would silently treat as
+    // absent — a future-version record must never ride through admission.
     const global = path.join(target, 'global.json')
     const globalIdentity = await safeLstat(global)
+    let unitVersion: number | undefined
     if (globalIdentity !== undefined) {
       if (globalIdentity.isSymbolicLink() || !globalIdentity.isFile()) {
         flagUnknown(budget, unknown, path.relative(home, global))
@@ -507,14 +542,16 @@ async function storagesFormatId(
         const stamp = await readRecordStamp(global, budget)
         if (stamp === undefined) {
           flagUnknown(budget, unknown, path.relative(home, global))
-        } else if (entry === 'session_projcache') {
-          projcacheFromDirectory = stamp
+        } else {
+          unitVersion = stamp
+          if (entry === 'session_projcache') projcacheFromDirectory = stamp
         }
       }
     } else if (entry === 'session_projcache') {
+      unitVersion = 4
       projcacheFromDirectory = await sampleRecordStamp(target, budget)
     }
-    const interiorFlagged = await auditUnitInterior(target, home, entry, unknown, budget)
+    const interiorFlagged = await auditUnitInterior(target, home, unitVersion, unknown, budget)
     if (entry === 'session_projcache' && interiorFlagged) projcacheInteriorFlagged = true
   }
   // The projection-cache domain's live layout wins: a migrated home keeps a
@@ -537,30 +574,32 @@ async function storagesFormatId(
 /**
  * Containment + classification walk of a per-record storage unit's interior:
  * every entry must be a real directory (a table) or a real regular file, and
- * every regular record is version-stamp-classified — a corrupt record is
- * unknown data, and inside the projection-cache domain a record whose stamp
- * is not the pinned v4 is foreign data this release cannot read. The
- * domain-global document is the one regular file allowed at unit level
- * (classified by the caller). A symlink, FIFO, or any other shape is
- * surfaced as an unknown path: the runtime reads and writes these exact
- * paths, so a planted link must never ride through admission hidden inside
- * the unit envelope. Enumeration uses the shared bounded listing and
- * budget; overflow flags the unit fail-closed.
+ * every regular record is version-stamp-classified against the unit's own
+ * version — a corrupt record is unknown data, and a record stamped
+ * differently from its unit (or from the first-anchored version when the
+ * unit has no global document) is data upstream's storage backend would
+ * silently treat as absent. The domain-global document is the one regular
+ * file allowed at unit level (classified by the caller). A symlink, FIFO,
+ * or any other shape is surfaced as an unknown path: the runtime reads and
+ * writes these exact paths, so a planted link must never ride through
+ * admission hidden inside the unit envelope. Enumeration uses the shared
+ * bounded listing and budget; overflow — or a budget breach, which stops
+ * the record loop at its next iteration — flags the unit fail-closed.
  */
 async function auditUnitInterior(
   unitDirectory: string,
   home: string,
-  unitName: string,
+  unitVersion: number | undefined,
   unknown: string[],
   budget: InspectionBudget,
 ): Promise<boolean> {
-  const projcachePinned = unitName === 'session_projcache'
   const tables = await boundedEntries(unitDirectory, budget)
   if (tables === 'unreadable' || tables === 'overflow') {
     flagUnknown(budget, unknown, path.relative(home, unitDirectory))
     return true
   }
   let flagged = false
+  let anchoredVersion = unitVersion
   for (const table of tables) {
     if (budgetExhausted(budget)) {
       flagUnknown(budget, unknown, path.relative(home, unitDirectory))
@@ -591,6 +630,12 @@ async function auditUnitInterior(
       continue
     }
     for (const record of records) {
+      // The unknowns budget must bound the OUTPUT: stop the walk when it is
+      // spent and collapse to one unit-level unknown.
+      if (budgetExhausted(budget)) {
+        flagUnknown(budget, unknown, path.relative(home, unitDirectory))
+        return true
+      }
       const recordPath = path.join(tableDir, record)
       const recordIdentity = await safeLstat(recordPath)
       if (recordIdentity === undefined) continue
@@ -602,9 +647,17 @@ async function auditUnitInterior(
       // Content classification: every record document must carry a valid
       // version stamp (`{version, record}` per dsh-storage-json
       // serializeRecord()); unparseable or unstamped content is unknown, and
-      // inside the pinned projcache domain any stamp but 4 is foreign.
+      // a stamp that disagrees with the unit's version (or with the first
+      // record seen in an anchor-less unit) is data upstream would silently
+      // drop.
       const stamp = await readRecordStamp(recordPath, budget)
-      if (stamp !== undefined && (!projcachePinned || stamp === 4)) continue
+      if (stamp === undefined) {
+        flagUnknown(budget, unknown, path.relative(home, recordPath))
+        flagged = true
+        continue
+      }
+      if (anchoredVersion === undefined) anchoredVersion = stamp
+      if (stamp === anchoredVersion) continue
       flagUnknown(budget, unknown, path.relative(home, recordPath))
       flagged = true
     }
