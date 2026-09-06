@@ -518,6 +518,20 @@ export async function runUpgradeRehearsal(input) {
           ),
           zstdCompressSync(Buffer.from('{"type":"turn/end"}\n', 'utf8')),
         ])
+        // Counter-proof FIRST: a plaintext file wearing the .zstd name must
+        // be refused (exit 5) — an artifact that silently skipped the
+        // directory would pass the positive case below vacuously.
+        await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), 'definitely not zstd\n')
+        const negative = await runInstalledCli(candidateInstall.cliEntry, ['--version'], {
+          home: zstdHome,
+          cwd: fixture.cwd,
+        })
+        if (negative.code !== 5) {
+          fail(
+            'zstd-session-admission',
+            `candidate admission did not refuse a fake zstd session (exit ${negative.code}): ${negative.output.slice(-300)}`,
+          )
+        }
         await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), zstdBytes)
         // Admission-only probe: the profile-less passthrough (--version)
         // runs the same read-only admission chain and exits 5 on refusal —
