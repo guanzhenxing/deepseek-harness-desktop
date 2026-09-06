@@ -484,6 +484,48 @@ describe('HostSupervisor lease watchdog', () => {
     }
   })
 
+  it('aborts a starting Host when the lease is lost before ready', async () => {
+    vi.useFakeTimers()
+    try {
+      const process = new FakeProcess()
+      const lease = new RecordingLease()
+      const events: string[] = []
+      const supervisor = new HostSupervisor({
+        factory: {
+          async spawnWaiting() {
+            return process
+          },
+        },
+        stabilityMs: 0,
+        startupTimeoutMs: 10_000,
+        terminateGraceMs: 50,
+        watchdogIntervalMs: 100,
+        onEvent: (event) => events.push(event.kind),
+      })
+      const started = supervisor.start({
+        home: '/tmp/isolated-home',
+        profileName: 'desktop',
+        mode: 'normal',
+        lease,
+        probe: fakeProbe,
+      })
+      const outcome = started.catch((error: unknown) => error)
+      // The Host received its bootstrap (watchdog armed) but never reported
+      // ready; the lease then disappears underneath the STARTING process.
+      await vi.waitFor(() => expect(process.bootstrap).toBeDefined())
+      lease.assertHeldError = Object.assign(new Error('lock vanished'), {
+        code: 'LEASE_CHANGED',
+      })
+      await vi.advanceTimersByTimeAsync(300)
+      const error = (await outcome) as { code?: string }
+      expect(error.code).toBe('LEASE_MISMATCH')
+      expect(process.terminateCount).toBeGreaterThan(0)
+      expect(events).toContain('failed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('ignores guard contention and transient single failures', async () => {
     vi.useFakeTimers()
     try {

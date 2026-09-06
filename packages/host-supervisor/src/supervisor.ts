@@ -471,6 +471,10 @@ export class HostSupervisor {
       }
       this.#watchdogFailures += 1
       if (this.#watchdogFailures < 2) return
+      // A stop that began while this tick was awaiting assertHeld owns the
+      // shutdown now (its release may even be what made assertHeld fail) —
+      // reporting a crash into a running quit chain would race the recoverer.
+      if (this.#stop !== undefined) return
       this.#stopWatchdog()
       // The watchdog runs from bootstrap delivery, BEFORE the Host reports
       // ready: losing the lease during startup must abort the start

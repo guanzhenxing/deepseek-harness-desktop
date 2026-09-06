@@ -166,6 +166,10 @@ export async function inspectHomeFormats(
         if (!unknownPaths.includes(slot)) unknownPaths.push(slot)
       }
     }
+    // The budget may run dry on the very FIRST finding (unknowns: 0): no
+    // slot claimed anything and nothing was recorded — exhausted must still
+    // never read as "clean". One marker path keeps the verdict a refusal.
+    if (unknownPaths.length === 0) unknownPaths.push('home')
   }
 
   const fresh =

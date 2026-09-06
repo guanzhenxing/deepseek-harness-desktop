@@ -623,6 +623,23 @@ describe('home doctor (unlock)', () => {
     await lease.release().catch(() => undefined)
   })
 
+  it('still cleans legacy sentinel-less locks left by older builds', async () => {
+    // Locks written before the v2 layout carry no sentinel; this doctor must
+    // keep clearing them (the sentinel removal tolerates ENOENT).
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    await rm(path.join(home, 'run', 'host.lock', '.dsh-writer-sentinel'), { force: true })
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'absent' })
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'unlocked' })
+    await expect(stat(path.join(home, 'run', 'host.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
   it('clears the sentinel on normal release', async () => {
     const home = await isolatedHome()
     const probe = new FakeProbe()

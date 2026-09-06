@@ -612,6 +612,22 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('never reads an exhausted budget as clean, even with nothing recorded', async () => {
+    const home = await tempHome()
+    try {
+      // The ONLY finding is a directory wearing the settings name, and the
+      // unknowns budget is zero from the start: exhausted-with-empty-output
+      // must still refuse, not report a fresh home.
+      await mkdir(path.join(home, 'settings.yaml'), { recursive: true })
+      const observed = await inspectHomeFormats(home, createInspectionBudget({ unknowns: 0 }))
+      expect(observed.fresh).toBe(false)
+      expect(observed.unknownPaths.length).toBeGreaterThan(0)
+      expect(observed.formats.settings).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('bounds the unknown-paths output by the shared budget', async () => {
     const home = await tempHome()
     try {
