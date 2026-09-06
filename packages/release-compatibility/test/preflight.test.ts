@@ -1,11 +1,17 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { inspectHomeFormats } from '../src/inspect-home.js'
+import {
+  inspectHomeFormats,
+  PROFILE_CLASSIFICATION_CAP,
+  SESSIONS_PER_PROJECT_CLASSIFICATION_CAP,
+  SESSION_PROJECT_CLASSIFICATION_CAP,
+  STORAGE_CLASSIFICATION_CAP,
+} from '../src/inspect-home.js'
 import { preflightHome } from '../src/preflight.js'
 import type { ReleaseManifest } from '../src/manifest.js'
 
@@ -497,6 +503,197 @@ describe('inspectHomeFormats', () => {
         )
         expect(observed.formats.storages).toBeUndefined()
         expect(observed.formats.projcache).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlink planted in a storage unit beyond the classification cap', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await writeFile(path.join(outside, 'escape.json'), '{"version":1,"record":null}')
+        for (let index = 0; index < 72; index += 1) {
+          const domain = path.join(home, 'storages', `domain-${index}`)
+          await mkdir(domain, { recursive: true })
+          await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
+        }
+        // readdir order is arbitrary on APFS: plant strictly in the entries
+        // that actually fall beyond the classification cap for THIS listing.
+        const listed = (await readdir(path.join(home, 'storages'))).sort()
+        const beyondCap = listed.slice(STORAGE_CLASSIFICATION_CAP)
+        expect(beyondCap.length).toBeGreaterThan(0)
+        for (const domain of beyondCap) {
+          const table = path.join(home, 'storages', domain, 'sessions')
+          await mkdir(table, { recursive: true })
+          await symlink(path.join(outside, 'escape.json'), path.join(table, 'record.json'))
+        }
+        const observed = await inspectHomeFormats(home)
+        for (const domain of beyondCap) {
+          expect(observed.unknownPaths).toContain(`storages/${domain}/sessions/record.json`)
+        }
+        expect(observed.formats.storages).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlinked storage unit itself beyond the classification cap', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        for (let index = 0; index < 72; index += 1) {
+          const domain = path.join(home, 'storages', `domain-${index}`)
+          await mkdir(domain, { recursive: true })
+          await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
+        }
+        await mkdir(path.join(outside, 'imposter-unit'), { recursive: true })
+        const listed = (await readdir(path.join(home, 'storages'))).sort()
+        const beyondCap = listed.slice(STORAGE_CLASSIFICATION_CAP)
+        expect(beyondCap.length).toBeGreaterThan(0)
+        for (const domain of beyondCap) {
+          await rm(path.join(home, 'storages', domain), { recursive: true, force: true })
+          await symlink(path.join(outside, 'imposter-unit'), path.join(home, 'storages', domain))
+        }
+        const observed = await inspectHomeFormats(home)
+        for (const domain of beyondCap) {
+          expect(observed.unknownPaths).toContain(`storages/${domain}`)
+        }
+        expect(observed.formats.storages).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a large legitimate per-record unit admissible', async () => {
+    const home = await tempHome()
+    try {
+      const table = path.join(home, 'storages', 'session_projcache', 'sessions')
+      await mkdir(table, { recursive: true })
+      for (let index = 0; index < 512; index += 1) {
+        await writeFile(
+          path.join(table, `session-${index}.json`),
+          '{"version":4,"record":{"watermark":7}}',
+        )
+      }
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.projcache).toBe('dsh-session-projcache-4')
+      expect(observed.formats.storages).toBe('dsh-storage-unit-0.1.2-alpha.3')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlinked session beyond the per-project classification cap', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await writeFile(path.join(outside, 'escape.jsonl'), 'not a session\n')
+        const projectDir = path.join(home, 'sessions', '--fixture--')
+        for (let index = 0; index < 40; index += 1) {
+          const sessionDir = path.join(projectDir, `s-${index}`)
+          await mkdir(sessionDir, { recursive: true })
+          await writeFile(
+            path.join(sessionDir, 'session.jsonl'),
+            '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
+          )
+        }
+        // readdir order is arbitrary: plant strictly beyond the cap for THIS
+        // listing.
+        const listed = (await readdir(projectDir)).sort()
+        const beyondCap = listed.slice(SESSIONS_PER_PROJECT_CLASSIFICATION_CAP)
+        expect(beyondCap.length).toBeGreaterThan(0)
+        for (const sessionId of beyondCap) {
+          await rm(path.join(projectDir, sessionId, 'session.jsonl'), { force: true })
+          await symlink(
+            path.join(outside, 'escape.jsonl'),
+            path.join(projectDir, sessionId, 'session.jsonl'),
+          )
+        }
+        const observed = await inspectHomeFormats(home)
+        for (const sessionId of beyondCap) {
+          expect(observed.unknownPaths).toContain(`sessions/--fixture--/${sessionId}/session.jsonl`)
+        }
+        expect(observed.formats.sessions).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlinked project directory beyond the classification cap', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await mkdir(path.join(outside, 'imposter-project'), { recursive: true })
+        for (let index = 0; index < 40; index += 1) {
+          await mkdir(path.join(home, 'sessions', `p-${index}`), { recursive: true })
+        }
+        const listed = (await readdir(path.join(home, 'sessions'))).sort()
+        const beyondCap = listed.slice(SESSION_PROJECT_CLASSIFICATION_CAP)
+        expect(beyondCap.length).toBeGreaterThan(0)
+        for (const project of beyondCap) {
+          await rm(path.join(home, 'sessions', project), { recursive: true, force: true })
+          await symlink(
+            path.join(outside, 'imposter-project'),
+            path.join(home, 'sessions', project),
+          )
+        }
+        const observed = await inspectHomeFormats(home)
+        for (const project of beyondCap) {
+          expect(observed.unknownPaths).toContain(`sessions/${project}`)
+        }
+        expect(observed.formats.sessions).toBeUndefined()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a symlinked profile beyond the classification cap', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        await mkdir(path.join(outside, 'imposter-profile'), { recursive: true })
+        for (let index = 0; index < 40; index += 1) {
+          const profileDir = path.join(home, 'profiles', `p-${index}`)
+          await mkdir(profileDir, { recursive: true })
+          await writeFile(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p' }))
+        }
+        const listed = (await readdir(path.join(home, 'profiles'))).sort()
+        const beyondCap = listed.slice(PROFILE_CLASSIFICATION_CAP)
+        expect(beyondCap.length).toBeGreaterThan(0)
+        for (const profile of beyondCap) {
+          await rm(path.join(home, 'profiles', profile), { recursive: true, force: true })
+          await symlink(
+            path.join(outside, 'imposter-profile'),
+            path.join(home, 'profiles', profile),
+          )
+        }
+        const observed = await inspectHomeFormats(home)
+        for (const profile of beyondCap) {
+          expect(observed.unknownPaths).toContain(`profiles/${profile}`)
+        }
+        expect(observed.formats.profiles).toBeUndefined()
       } finally {
         await rm(outside, { recursive: true, force: true })
       }

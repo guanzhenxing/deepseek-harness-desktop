@@ -16,18 +16,31 @@ const STORAGE_UNIT_FORMAT_ID = 'dsh-storage-unit-0.1.2-alpha.3'
 const PROJCACHE_FORMAT_ID = 'dsh-session-projcache-4'
 const PROFILE_FORMAT_ID = 'dsh-profile-manifest-0.1.2-alpha.3'
 
+/**
+ * Classification (header-read) caps. The containment walk below lstats EVERY
+ * listed entry at every level — planted symlinks and other foreign shapes are
+ * surfaced as unknown paths regardless of these caps — but expensive content
+ * reads are sampled only within them, keeping the inspection linear and
+ * cheap on large homes. Exported for the cap-boundary tests.
+ */
+export const STORAGE_CLASSIFICATION_CAP = 64
+export const SESSION_PROJECT_CLASSIFICATION_CAP = 32
+export const SESSIONS_PER_PROJECT_CLASSIFICATION_CAP = 32
+export const PROFILE_CLASSIFICATION_CAP = 32
+
 /** Bounds keep the read-only inspection linear and cheap on large homes. */
 const CREDENTIALS_READ_CAP = 1024 * 1024
 const STORAGE_READ_CAP = 16 * 1024 * 1024
 const RECORD_READ_CAP = 1024 * 1024
 const PROFILE_READ_CAP = 1024 * 1024
-const MAX_SESSION_PROJECTS = 32
-const MAX_SESSIONS_PER_PROJECT = 32
-const MAX_STORAGE_ENTRIES = 64
-const MAX_PROFILE_ENTRIES = 32
-/** Per-unit interior walk budget: linear, fail-closed on overflow. */
-const MAX_UNIT_INTERIOR_ENTRIES = 512
 const FIRST_LINE_BYTES = 4096
+
+/**
+ * Defensive ceiling for the lstat-only containment walk (per directory
+ * level). Far above any real home; overflowing it flags the directory
+ * fail-closed instead of leaving the tail unverified.
+ */
+const MAX_CONTAINMENT_ENTRIES = 65_536
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 
@@ -35,9 +48,13 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] }
  * Read-only home inspection for the compatibility preflight: parse only
  * well-known file headers and layouts (credentials version header, session
  * JSONL first line, storage unit headers, profile manifests). It never loads
- * DSH code or user plugins, never starts providers, and never writes. A
- * symlink planted at an inspected path counts as an unknown path — fail
- * closed.
+ * DSH code or user plugins, never starts providers, and never writes.
+ *
+ * Containment discipline: the directory walks lstat EVERY listed entry at
+ * every level — a symlink or other foreign shape planted at any data path,
+ * at any position, is surfaced as an unknown path and never followed. The
+ * classification caps only bound the expensive content reads, which are
+ * sampled within the first N entries of each level (exported above).
  */
 export async function inspectHomeFormats(home: string): Promise<HomeFormatState> {
   const formats: Mutable<Record<string, string>> = {}
@@ -221,12 +238,14 @@ async function sessionsFormatId(
   const unknown: string[] = []
   let sawAny = false
   let sawAllKnown = true
+  let classifiedProjects = 0
   const projectsAll = await readdirSafe(sessionsDir)
   if (projectsAll === 'unreadable') {
     return { state: 'known', formatId: SESSION_JSONL_FORMAT_ID, unknown: ['sessions'] }
   }
-  const projects = projectsAll.slice(0, MAX_SESSION_PROJECTS)
-  for (const project of projects) {
+  // Containment covers EVERY project and session directory (lstat only);
+  // header reads are sampled within the classification caps.
+  for (const project of projectsAll) {
     const projectDir = path.join(sessionsDir, project)
     const projectKind = await directoryKind(projectDir)
     if (projectKind === 'absent') continue
@@ -241,8 +260,9 @@ async function sessionsFormatId(
       unknown.push(path.relative(home, projectDir))
       continue
     }
-    const sessionIds = sessionIdsAll.slice(0, MAX_SESSIONS_PER_PROJECT)
-    for (const sessionId of sessionIds) {
+    const withinClassificationCap = classifiedProjects < SESSION_PROJECT_CLASSIFICATION_CAP
+    let classifiedSessions = 0
+    for (const sessionId of sessionIdsAll) {
       const sessionDir = path.join(projectDir, sessionId)
       const sessionKind = await directoryKind(sessionDir)
       if (sessionKind === 'foreign') {
@@ -253,25 +273,33 @@ async function sessionsFormatId(
       if (sessionKind === 'absent') continue
       const plain = path.join(sessionDir, 'session.jsonl')
       const zstd = path.join(sessionDir, 'session.jsonl.zstd')
-      if (await regularFile(plain)) {
-        sawAny = true
+      const plainIdentity = await safeLstat(plain)
+      const zstdIdentity = await safeLstat(zstd)
+      const plainRegular = plainIdentity !== undefined && plainIdentity.isFile()
+      const zstdRegular = zstdIdentity !== undefined && zstdIdentity.isFile()
+      if (plainRegular || zstdRegular) sawAny = true
+      if (
+        (plainIdentity !== undefined && !plainRegular) ||
+        (zstdIdentity !== undefined && !zstdRegular)
+      ) {
+        // Present at the data path but not a regular file (symlink, fifo,
+        // ...): a containment failure at any index, classified or not.
+        sawAllKnown = false
+        unknown.push(path.relative(home, plain))
+        continue
+      }
+      if (!plainRegular && !zstdRegular) continue
+      if (!withinClassificationCap) continue
+      if (classifiedSessions >= SESSIONS_PER_PROJECT_CLASSIFICATION_CAP) continue
+      classifiedSessions += 1
+      if (plainRegular) {
         if (!(await isKnownSessionHeader(plain))) {
           sawAllKnown = false
           unknown.push(path.relative(home, plain))
         }
-        continue
-      }
-      if (await regularFile(zstd)) {
-        sawAny = true
-        continue
-      }
-      const plainIdentity = await safeLstat(plain)
-      const zstdIdentity = await safeLstat(zstd)
-      if (plainIdentity !== undefined || zstdIdentity !== undefined) {
-        sawAllKnown = false
-        unknown.push(path.relative(home, plain))
       }
     }
+    if (withinClassificationCap) classifiedProjects += 1
   }
   // Absent only when nothing was seen AND nothing was flagged: an unreadable
   // project directory with no other sessions must surface its unknown path,
@@ -339,6 +367,7 @@ async function storagesFormatId(home: string): Promise<
   }
   const unknown: string[] = []
   let sawAny = false
+  let classified = 0
   let projcache: 4 | 'foreign' | 'none' = 'none'
   let projcacheFromSingleFile: number | undefined
   let projcacheFromDirectory: number | undefined
@@ -351,8 +380,10 @@ async function storagesFormatId(home: string): Promise<
       projcache: 'none',
     }
   }
-  const entries = entriesAll.slice(0, MAX_STORAGE_ENTRIES)
-  for (const entry of entries) {
+  // Containment covers EVERY listed entry (lstat only): a planted symlink or
+  // foreign shape anywhere in the slot is unknown. Content reads are sampled
+  // within the classification cap.
+  for (const entry of entriesAll) {
     const target = path.join(storagesDir, entry)
     const identity = await safeLstat(target)
     if (identity === undefined) continue
@@ -361,7 +392,14 @@ async function storagesFormatId(home: string): Promise<
       unknown.push(path.relative(home, target))
       continue
     }
+    if (!identity.isFile() && !identity.isDirectory()) {
+      // present but neither file nor directory (fifo, socket, ...)
+      unknown.push(path.relative(home, target))
+      continue
+    }
     if (identity.isFile()) {
+      if (classified >= STORAGE_CLASSIFICATION_CAP) continue
+      classified += 1
       const unit = await readUnitHeader(target)
       if (unit === undefined) {
         unknown.push(path.relative(home, target))
@@ -372,33 +410,29 @@ async function storagesFormatId(home: string): Promise<
       }
       continue
     }
-    if (identity.isDirectory()) {
-      // Per-record units take their identity from the directory name; the
-      // version stamp lives in global.json when the domain has a global slot,
-      // otherwise in the record documents themselves. The interior is walked
-      // in full (bounded): the inspection's containment promise — a planted
-      // symlink at an inspected data path is unknown, never followed —
-      // covers the record paths this release writes, not just the unit
-      // envelope.
-      const global = path.join(target, 'global.json')
-      if (await regularFile(global)) {
+    // Per-record units take their identity from the directory name; the
+    // version stamp lives in global.json when the domain has a global slot,
+    // otherwise in the record documents themselves. The containment walk of
+    // the interior runs for EVERY unit; the version-stamp reads stay
+    // sampled within the classification cap.
+    const global = path.join(target, 'global.json')
+    const globalIdentity = await safeLstat(global)
+    if (globalIdentity !== undefined) {
+      if (globalIdentity.isSymbolicLink() || !globalIdentity.isFile()) {
+        unknown.push(path.relative(home, global))
+      } else if (classified < STORAGE_CLASSIFICATION_CAP) {
         const stamp = await readRecordStamp(global)
         if (stamp === undefined) {
           unknown.push(path.relative(home, global))
-          continue
+        } else {
+          if (entry === 'session_projcache') projcacheFromDirectory = stamp
+          classified += 1
         }
-        if (entry === 'session_projcache') projcacheFromDirectory = stamp
-        await auditUnitInterior(target, home, unknown)
-        continue
       }
-      if (entry === 'session_projcache') {
-        projcacheFromDirectory = await sampleRecordStamp(target)
-      }
-      await auditUnitInterior(target, home, unknown)
-      continue
+    } else if (entry === 'session_projcache' && classified < STORAGE_CLASSIFICATION_CAP) {
+      projcacheFromDirectory = await sampleRecordStamp(target)
     }
-    // present but neither file nor directory (fifo, socket, ...)
-    unknown.push(path.relative(home, target))
+    await auditUnitInterior(target, home, unknown)
   }
   // The projection-cache domain's live layout wins: a migrated home keeps a
   // stale single-unit file from an older domain version next to the current
@@ -415,28 +449,30 @@ async function storagesFormatId(home: string): Promise<
 
 /**
  * Containment walk of a per-record storage unit's interior: every entry must
- * be a real directory (a table) or a real regular file, within the bounded
- * budget. A symlink, FIFO, socket, or any other shape anywhere inside the
- * unit — including a swapped global.json or a symlinked table/record — is
- * surfaced as an unknown path: the runtime reads and writes these exact
- * paths, so a planted link must never ride through admission hidden inside
- * the unit envelope. Overflowing the budget flags the unit instead of
- * silently leaving the tail uninspected.
+ * be a real directory (a table) or a real regular file, with no functional
+ * cap — the domain-global document is the one regular file allowed at unit
+ * level (its content is classified separately). A symlink, FIFO, socket, or
+ * any other shape anywhere inside the unit — a swapped global.json, a
+ * symlinked table or record — is surfaced as an unknown path: the runtime
+ * reads and writes these exact paths, so a planted link must never ride
+ * through admission hidden inside the unit envelope. The walk is lstat-only
+ * (no content reads) and bounded by MAX_CONTAINMENT_ENTRIES, which flags the
+ * unit fail-closed on overflow.
  */
 async function auditUnitInterior(
   unitDirectory: string,
   home: string,
   unknown: string[],
 ): Promise<void> {
-  let walked = 0
+  let inspected = 0
   const tables = await readdirSafe(unitDirectory)
   if (tables === 'unreadable') {
     unknown.push(path.relative(home, unitDirectory))
     return
   }
   for (const table of tables) {
-    walked += 1
-    if (walked > MAX_UNIT_INTERIOR_ENTRIES) {
+    inspected += 1
+    if (inspected > MAX_CONTAINMENT_ENTRIES) {
       unknown.push(path.relative(home, unitDirectory))
       return
     }
@@ -462,8 +498,8 @@ async function auditUnitInterior(
       continue
     }
     for (const record of records) {
-      walked += 1
-      if (walked > MAX_UNIT_INTERIOR_ENTRIES) {
+      inspected += 1
+      if (inspected > MAX_CONTAINMENT_ENTRIES) {
         unknown.push(path.relative(home, unitDirectory))
         return
       }
@@ -561,12 +597,14 @@ async function profilesFormatId(
   const unknown: string[] = []
   let sawAny = false
   let sawUnknownManifest = false
+  let classified = 0
   const entriesAll = await readdirSafe(profilesDir)
   if (entriesAll === 'unreadable') {
     return { state: 'known', formatId: PROFILE_FORMAT_ID, unknown: ['profiles'] }
   }
-  const entries = entriesAll.slice(0, MAX_PROFILE_ENTRIES)
-  for (const entry of entries) {
+  // Containment covers EVERY profile directory and manifest (lstat only);
+  // manifest content reads are sampled within the classification cap.
+  for (const entry of entriesAll) {
     if (entry.startsWith('.')) continue // runtime launch roots are not data
     const profileDir = path.join(profilesDir, entry)
     const profileKind = await directoryKind(profileDir)
@@ -586,6 +624,8 @@ async function profilesFormatId(
       unknown.push(path.relative(home, manifest))
       continue
     }
+    if (classified >= PROFILE_CLASSIFICATION_CAP) continue
+    classified += 1
     const text = await readBoundedText(manifest, PROFILE_READ_CAP)
     if (text === 'unreadable' || text === 'too-large') {
       sawUnknownManifest = true
