@@ -135,12 +135,49 @@ describe('planCliInvocation', () => {
   })
 })
 
+describe('startLeaseWatchdog', () => {
+  it('never kills on sustained guard contention', async () => {
+    const { startLeaseWatchdog } = await import('../src/main.js')
+    const killSignals: NodeJS.Signals[] = []
+    const child: CliChildHandle = {
+      pid: 1,
+      send() {},
+      exited: new Promise(() => {}),
+      kill(signal = 'SIGTERM') {
+        killSignals.push(signal)
+      },
+    }
+    const lease = {
+      home: '/tmp/h',
+      generation: 'g',
+      assertHeld: async () => {
+        throw Object.assign(new Error('critical section contended'), { code: 'GUARD_BUSY' })
+      },
+    } as unknown as Parameters<typeof startLeaseWatchdog>[0]
+    const stderrLines: string[] = []
+    const watchdog = startLeaseWatchdog(
+      lease,
+      child,
+      { write: (line: string) => stderrLines.push(line) } as never,
+      10,
+    )
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      expect(killSignals).toEqual([])
+      expect(stderrLines).toEqual([])
+    } finally {
+      watchdog.stop()
+    }
+  })
+})
+
 describe('bundled CLI lease watchdog', () => {
   it('kills an authorized child when the lease disappears underneath it', async () => {
     const home = await isolatedHome()
     const stderr = new MemoryStderr()
     const killSignals: NodeJS.Signals[] = []
     let authorized = false
+    let resolveExit: ((exit: { code: number | null; signal: string | null }) => void) | undefined
     const spawn: SpawnCliChild = () => {
       const handle: CliChildHandle = {
         pid: 5556,
@@ -149,12 +186,13 @@ describe('bundled CLI lease watchdog', () => {
             authorized = true
           }
         },
-        exited: new Promise<{ code: number | null; signal: string | null }>(() => {
-          // The child never exits on its own; only the watchdog's kill
-          // resolves it below.
+        exited: new Promise<{ code: number | null; signal: string | null }>((resolve) => {
+          resolveExit = resolve
         }),
         kill(signal = 'SIGTERM') {
           killSignals.push(signal)
+          // A killed child dies: the CLI's exit path must run to completion.
+          resolveExit?.({ code: null, signal })
         },
       }
       return handle
@@ -180,11 +218,22 @@ describe('bundled CLI lease watchdog', () => {
     // Destroy the lease from the filesystem the way a foreign doctor would.
     const { rm: removeDir } = await import('node:fs/promises')
     await removeDir(path.join(home, 'run', 'host.lock'), { recursive: true, force: true })
-    // Two watchdog failures at 20ms intervals must SIGKILL the child.
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    // Two watchdog failures at 20ms intervals must SIGKILL the child AND
+    // the CLI call must SETTLE (never stay pending): after the kill the
+    // lease is genuinely gone, so settling as a lease error is the correct
+    // completion of the exit path.
+    const settled = await Promise.race([
+      running.then(
+        (code) => `exit:${code}`,
+        (error: unknown) => `error:${(error as { code?: string }).code ?? 'unknown'}`,
+      ),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error('CLI did not settle after the kill')), 2_000),
+      ),
+    ])
     expect(killSignals).toContain('SIGKILL')
     expect(stderr.text()).toContain('home lease lost')
-    void running
+    expect(settled.startsWith('exit:') || settled.startsWith('error:')).toBe(true)
   })
 })
 

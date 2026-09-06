@@ -97,7 +97,7 @@ export interface CliChildHandle {
  * writing the same home. Two consecutive non-contention failures kill the
  * child; guard contention never counts.
  */
-function startLeaseWatchdog(
+export function startLeaseWatchdog(
   lease: HomeLease,
   child: CliChildHandle,
   stderr: Pick<NodeJS.WriteStream, 'write'>,
@@ -428,14 +428,16 @@ export async function runBundledCli(
       authorized = true
       const watchdog = startLeaseWatchdog(lease, child, stderr, options.watchdogIntervalMs)
       let exit: { code: number | null; signal: string | null }
+      let descendantsGone: boolean
       try {
         exit = await child.exited
+        // The direct child exiting does NOT mean the home is idle: pnpm and
+        // anything the official CLI spawned may still be writing. The
+        // watchdog stays armed through the descendant wait.
+        descendantsGone = await waitForDescendants(child.pid, options)
       } finally {
         watchdog.stop()
       }
-      // Wait for write-home descendants (pnpm and anything the official CLI
-      // spawned) before proving the home is writable again.
-      const descendantsGone = await waitForDescendants(child.pid, options)
       if (!descendantsGone) {
         leaseKeptForDiagnosis = true
         stderr.write(
