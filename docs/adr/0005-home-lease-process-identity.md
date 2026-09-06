@@ -19,7 +19,7 @@ M1 起 Desktop 与 `dsh-native` 顺序共享同一 DSH home。任何 Host boot �
 新增 Electron-free 的 `packages/home-lease`，所有受支持的 launcher/CLI 包装进程在触碰 home 前持有它：
 
 1. **获取**：`<home>/run/host.lock/` 目录用原子 `mkdir` 获取；成功者写入 closed-schema 的 `owner.json`（generation、supervisor/Host 的操作系统进程身份、entrypoint、profile、pendingSpawn、时间与版本）。
-2. **身份**：操作系统级身份 = PID + 进程启动时间（macOS `proc_pidinfo` 的启动秒/微秒，混入系统 boottime 以跨重启唯一），由小型原生 C helper 提供。它与 M0 私有握手用的随机 `startIdentity` nonce 是两回事，二者分开存储、互不替代。
+2. **身份**：操作系统级身份 = PID + 进程启动时间（macOS `proc_pidinfo` 的启动秒/微秒），由小型原生 C helper 提供。它与 M0 私有握手用的随机 `startIdentity` nonce 是两回事，二者分开存储、互不替代。_修订（2026-09-06，M4 验收 §5.10）_：初版把系统 `KERN_BOOTTIME` 混入身份串以"跨重启唯一"；实测 boottime 是墙钟推导值、NTP 对时会使其在进程存续期间漂移（同 pid 记录 `…451.434515-…` vs 自身 `…451.538858-…`，启动时间分量完全一致），健康会话在释放时被误判 `different` 而留锁。身份改为纯进程启动时间；pid 复用无法复现同一启动时间，判别力不受影响，boottime 无贡献。旧格式遗留锁判 stale，由 doctor 清理。
 3. **短临界区**：新增永久 owner-only 文件 `<home>/run/host-lease.guard`。获取、owner 更新、释放与 doctor 清理都在 helper 持有的 `flock(LOCK_EX|LOCK_NB)` 短临界区内执行。guard 不代表长 lease、不按年龄删除；helper 退出由 OS 释放内核锁，避免两个 doctor 删除新 generation 的竞态。
 4. **Host 登记**：子进程先等待私有 bootstrap；owner 先持久化 `pendingSpawn`，随后写入子进程 OS 身份并清除标记，之后才发出 boot 授权。
 5. **释放**：确认所有 Host 子进程退出后才移除自己持有的 lock；owner 未知、Host 活跃或身份无法证明时拒绝释放。M1 的正常 acquire 遇已有 owner 只报 busy/stale/unknown，不自动回收旧锁；清理走显式 `dsh-native doctor --unlock`。

@@ -6,7 +6,7 @@
  * Protocol: one JSON object per line on stdout; diagnostics on stderr.
  *
  *   lease-helper identity <pid>
- *       -> {"ok":true,"pid":N,"start":"<bootSec>.<bootUsec>-<startSec>.<startUsec>"}
+ *       -> {"ok":true,"pid":N,"start":"<startSec>.<startUsec>"}
  *       -> {"ok":false,"error":"unknown"} (permission or missing process)
  *
  *   lease-helper probe <pid> <start>
@@ -70,32 +70,25 @@ static void fail(const char *error) {
 
 #define PATH_BUFFER_SIZE PROC_PIDPATHINFO_MAXSIZE
 
-static bool boot_identity(char *out, size_t capacity) {
-    struct timeval boottime;
-    size_t length = sizeof(boottime);
-    int mib[2] = {CTL_KERN, KERN_BOOTTIME};
-    if (sysctl(mib, 2, &boottime, &length, NULL, 0) != 0) return false;
-    int written = snprintf(out, capacity, "%" PRIdMAX ".%06d",
-                           (intmax_t)boottime.tv_sec, (int)boottime.tv_usec);
-    return written > 0 && (size_t)written < capacity;
-}
-
 static bool process_identity(pid_t pid, char *out, size_t capacity) {
-    /* Zero first AND demand a full-length fill: pbi_pid sits at the front of
-     * the struct and the start time at the end, so a short proc_pidinfo fill
-     * could yield a correct pid with a zero (or garbage) start time and read
-     * as a bogus 'different'. Any result that is not exactly sizeof(info) is
-     * unidentifiable. */
+    /* The identity is the kernel-recorded PROCESS START TIME only. An earlier
+     * format prefixed KERN_BOOTTIME — but that value is DERIVED (wall clock
+     * minus uptime), so a wall-clock adjustment retroactively shifts it while
+     * the process runs: observed live as recorded boot 1788322451.434515 vs
+     * self boot 1788322451.538858 for the SAME pid, refusing a healthy lease
+     * release as 'different'. pbi_start_* is written once at fork and never
+     * recomputed, so both compared copies are immutable; pid recycling cannot
+     * reproduce the same start time. Zero the struct AND demand a full-length
+     * fill: a short proc_pidinfo fill could yield a correct pid with a
+     * zero/garbage start time. */
     struct proc_bsdinfo info;
     memset(&info, 0, sizeof(info));
     if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != (int)sizeof(info)) {
         return false;
     }
     if ((pid_t)info.pbi_pid != pid) return false;
-    char boot[64];
-    if (!boot_identity(boot, sizeof(boot))) return false;
-    int written = snprintf(out, capacity, "%s-%" PRIdMAX ".%06" PRIdMAX,
-                           boot, (intmax_t)info.pbi_start_tvsec,
+    int written = snprintf(out, capacity, "%" PRIdMAX ".%06" PRIdMAX,
+                           (intmax_t)info.pbi_start_tvsec,
                            (intmax_t)info.pbi_start_tvusec);
     return written > 0 && (size_t)written < capacity;
 }
