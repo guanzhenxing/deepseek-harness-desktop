@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.9 轮残留全部处置后全链重验通过，2026-09-06，13/13 步 + 演练 16/16；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.10 轮全部处置——含 lease `different` 根因判定与修复——后全链重验通过，2026-09-06，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -102,26 +102,40 @@ codex 复核后认定原始 5 项中 2 项为部分修复（①⑤），并修�
 - **演练中断清理**：`rehearse:upgrade` 接入 SIGINT/SIGTERM → `emergencyCleanup`（此前仅 `smoke:package` 接线）；`installFromDmg` 的 hdiutil mount 注册进应急注册表（此前中断即残留挂载）。中断残留的 detached 进程组/mock LLM 推高系统负载，是"不同步骤偶发失败、单独重跑通过"现象的候选机制之一（D 项）。
 - `listSessions` 逐行裸 `JSON.parse` 容错化：仅容忍未闭合的 torn 尾行（写入中快照），行中损坏带文件与内容上下文抛出。
 
+## 5.10 codex 复审第三轮（2026-09-06，基线 `84b154a`）与 lease `different` 根因判定
+
+codex 三审 5 项（Standards 2 + Spec 3）逐条核实**全部属实**，处置如下；随后全链重验时 **lease `different` 根因在真实故障中被三重身份诊断当场判定**（§5.9 的 C 项由此闭合）。
+
+| #   | 级别 | 发现                                                                                                                                            | 处置                                                                                                                                                                                                                               |
+| --- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | P1   | 勘察上限静默截断 fail-open：第 65 个 storage 单元（及同族的第 33 个 session project / 会话 / profile）内的 planted symlink 不被检查，兼容链放行 | 勘察纪律重构为**containment 全量、分类采样**：目录走查 lstat 每一层的每一个条目（任何位置的外形异常必进 `unknownPaths`），昂贵的内容读取按导出的分类上限采样；内层 512 功能上限改为 65,536 防御性上限。7 个新上限边界测试（47→53） |
+| S2  | P2   | `proc_pidinfo` 只判 `<=0`，短填充可产出"pid 正确 + 启动时间为零/垃圾"的假 `different`                                                           | 要求返回值恰为 `sizeof(info)`，否则不可识别（`0d1a53d` 之前已提交，本轮并入验证）                                                                                                                                                  |
+| Sp1 | P1   | `emergencyCleanup` 对同步 cleanup 调 `.catch` → TypeError，首次清理即崩、排水中断                                                               | 每项 cleanup 独立 try/catch 排空（混合同步/抛错/拒绝的行为测试通过）；`installFromDmg` 先 detach 后注销；注册函数导出为 `registerEmergencyCleanup`                                                                                 |
+| Sp2 | P2   | `verify:release` 子进程可解析到另一个 Node；`rehearse:upgrade`/`smoke:package` 断言位于静态 import 之后（重型模块先行加载）                     | 子步骤 PATH 前置验证过的 runtime；两个入口改为断言先行 + 动态 import（smoke:package 拆为薄入口 + package-main.mjs）                                                                                                                |
+| Sp3 | P2   | 内层 512 上限把表目录也计数，512 条合法 projcache 记录被拒（正常大数据 home 无法启动）                                                          | 随 S1 重构消解：走查 lstat-only 无功能上限，512 记录合法放行（回归测试在案）                                                                                                                                                       |
+
+**lease `different` 根因判定（C 项闭合，`ead506d`）**：第三轮全链的 smoke `installed-lifecycle` 场景中，三重身份诊断在真实故障里输出——同 pid 88282，记录身份 `1788322451.434515-1788659221.434966` vs 自身/观测身份 `1788322451.538858-1788659221.434966`：**启动时间分量逐位一致，仅 boottime 分量漂移 0.104s**。`KERN_BOOTTIME` 是"当前墙钟 − 开机时长"的推导值，NTP 对时会使其在进程存续期间整体平移；acquire 记录的身份在 release 时读出不同 boottime → `different` → 拒绝释放留锁 → 后续启动 HOME_STALE（同一日志可见 "home lock owner is no longer running"）。修复：身份改为**纯进程启动时间**（内核 fork 时一次性写入、不可变；pid 固定时已唯一，boottime 无判别贡献），ADR-0005 与 home-lease 协议文档同步修订；旧格式遗留锁判 stale 走 doctor。修复后全链 `probe: different` 与留锁均零出现。历史归因修正：§5.8 的"高负载下对活进程读到一次 different"实为同一 boottime 漂移机制，与负载无关。
+
 ## 6. 门禁结果
 
-**最终轮（§5.9 残留处置后，2026-09-06）**：`pnpm verify:release` 聚合链于 HEAD `fd9a23a` 实跑，**13 步全部退出码 0**（含收尾 `git diff --check`）：check（329 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（61 测试，9 文件，含新语义下的 doctor-race）→ test:shared-home（4 测试）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（15/15 场景）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：新增 `storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。验收入口此时已 pin Node 24.11.1。
+**最终轮（§5.10 全部处置后，2026-09-06）**：`pnpm verify:release` 聚合链于 HEAD `ead506d` 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（335 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（67 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**，含身份修复后恢复的 installed-auth）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。
 
-早期轮（2026-09-05，HEAD `e487138`/`5ccfd4f`）：13 步全过（311 单测/54 集成/演练 15/15），数字见 git 历史；被 §5.9 轮取代。
+前两轮（2026-09-06，`fd9a23a` 13/13+16/16；同日 `b595907` 轮 smoke 14/15 后触发根因排查）记录保留于 git 历史；`fd9a23a` 轮的制品标记在被第三轮修复取代后作废。
 
 链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
 ## 7. 制品记录（最终 verify:release 轮）
 
-| 项                             | 值                                                                                                                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-fd9a23a`，DMG SHA `1f6d4e88c5edbfed362f28719c31abba28891c926ca3f31b7b152be71d95b9f7`（绑定 §5.9 轮全部提交，docs 提交前） |
-| previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`       |
-| 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                        |
-| 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                          |
+| 项                             | 值                                                                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-ead506d`，DMG SHA `effa17dd290e7196dd441af09d8716a67ca9a001c3451ea766ab8d28e408cd08`（绑定 §5.10 轮全部提交，docs 提交前） |
+| previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`        |
+| 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                         |
+| 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                           |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.9 轮残留全部处置后于 `fd9a23a` 重验通过，2026-09-06）。
+- 自动测试完成 → **`candidate-verified`**（§5.10 轮全部处置后于 `ead506d` 重验通过，2026-09-06）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
