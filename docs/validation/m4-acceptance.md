@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.12 轮全部处置——storage 记录级分类、zstd 帧魔数、保留 profile 前缀、排空重试 + 端到端勘察预算——后于制品 HEAD `434d214` 全链重验通过，2026-09-06，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.13 轮全部处置——记录版本绑定、双编码拒绝、共享保留前缀闸、报错式 detach 重试——后于制品 HEAD `f782c02` 全链重验通过，2026-09-06，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -144,11 +144,27 @@ codex 五审 4 项 Spec + 2 项 Standards，逐条核实**全部属实**，处�
 | St1 | P2   | 65,536 是单目录上限不是端到端预算：sessions 可 65,536×65,536 层嵌套放大，unknownPaths 与读字节无共享上界                                                          | 一次勘察共享 `createInspectionBudget`（条目 262,144 / 字节 128MiB / unknown 8,192，可注入测试），任一耗尽把正在走的槽位判 unknown（fail-closed）；预算共享跨槽位有测试。协议文档"端到端有界"措辞与实现对齐 |
 | St2 | P2   | 三个"位置无关"测试不能证明旧采样会失败（APFS readdir 不按创建序，损坏项可能落在索引 0，旧实现也会读到）                                                           | 三个测试改为读**原始 readdir 顺序**、改写恰位于旧采样上限（64/32/32）之外的条目——采样一旦复活这些测试必红；另补 projcache v99（原 512 上限之外）与普通域损坏记录两个记录级负例                             |
 
+## 5.13 codex 复审第六轮（2026-09-06，基线 `c9c0e17`）
+
+codex 六审 4 项 Spec + 4 项 Standards，逐条核实**全部属实**，处置如下。
+
+| #   | 级别 | 发现                                                                                                                                        | 处置                                                                                                                                                                                                                                                                                   |
+| --- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sp1 | P1   | 普通 unit 的记录版本未绑定：`workspace` global v1 + `records/future.json` v99 仍放行——上游 storage 会把版本不符的记录静默当不存在           | unit 的 global 戳记作为锚传入 interior 走查，每条记录必须与之一致；无 global 的 unit 以首条记录锚定、全部记录须一致（混版即拒）。锚定语义有正反测试（global 锚定 + 无锚混版）                                                                                                          |
+| Sp2 | P1   | plain 与 zstd 并存时 else-if 跳过 zstd：合法 `session.jsonl` + 损坏 `.zstd` 同目录放行；上游 backend 拒绝双编码                             | 并存即拒绝（flag plain 路径）；测试在案                                                                                                                                                                                                                                                |
+| Sp3 | P1   | 保留前缀可从 `dsh-native` 绕过：`createProfileRef` 拒绝但 lease 的 `validateProfile` 不拒，CLI 规划得 `{"profile":".dsh-desktop-run-user"}` | 保留规则上移共享命名契约 `@dsh-desktop/desktop-contracts/profile-name`（新 capability 子路径），`createProfileRef` 与 lease `validateProfile`（CLI 一切 profile 入口的闸门，含无 profile 透传）一并强制；lease 侧新增拒绝测试。lockfile 由 pnpm 生成两条 workspace link（frozen 复核） |
+| Sp4 | P1   | detach 吞错使重试失效：注册的 cleanup 捕获 hdiutil 失败正常返回，排空当成功移除；`beforeExit` 注册被已有 listener 整体跳过                  | 注册的 cleanup 改为**报错式**（抛出→排空重新登记重试）；正常路径 quiet-probe 仅成功才注销；`beforeExit` 无条件注册。行为测试入库为回归门禁（`tests/helpers/emergency-cleanup.test.mjs`，vitest include 扩展到 `tests/helpers/*.test.mjs`）                                             |
+| St1 | P2   | unknown 预算没限制输出：`unknowns:1` + 20 条坏记录返回 20 条、预算 -19                                                                      | sessions 与 records 内循环每项前查预算，耗尽即以槽位/单元级 unknown 收束遍历                                                                                                                                                                                                           |
+| St2 | P2   | 字节预算是读取后记账：剩 1 字节仍按整文件 cap 分配读取                                                                                      | 读取长度改为 `min(fileCap+1, remainingBudget+1)`（readBoundedText/isKnownSessionHeader/帧头验证三处）                                                                                                                                                                                  |
+| St3 | P2   | zstd 只验四字节魔数（正例测试本身就是魔数+垃圾）                                                                                            | 升级为 RFC 8878 帧头验证：魔数 + 帧头描述符（保留位为零）+ 描述符声明的 window/dictionary/content-size 字段齐全；截断（FHD 声明 14 字节头只给 10）与保留位非法两负例 + 最小合法帧头正例（`28 B5 2F FD 20 00`）                                                                         |
+| St4 | P2   | "行为测试"未提交仓库，验收所称无法作为回归门禁                                                                                              | 入库为 `emergency-cleanup.test.mjs` 三个用例：失败重试/排空不中断/子进程验证 beforeExit 有界退出                                                                                                                                                                                       |
+| St5 | P2   | 位置测试用 `readdir()`、实现用 `opendir()`，两次顺序无 API 契约保证（较低风险）                                                             | 三个位置测试改用与实现相同的 `boundedEntries()` 取序                                                                                                                                                                                                                                   |
+
 ## 6. 门禁结果
 
-**最终轮（§5.12 全部处置后，2026-09-06）**：`pnpm verify:release` 聚合链于**制品 HEAD `434d214`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（343 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（72 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `434d214`。
+**最终轮（§5.13 全部处置后，2026-09-06）**：`pnpm verify:release` 聚合链于**制品 HEAD `f782c02`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（350 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（75 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `f782c02`。
 
-前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2` 13/13+16/16+15/15。均被 §5.12 轮取代，记录保留于 git 历史。
+前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2` 13/13+16/16+15/15；`434d214` 13/13+16/16+15/15。均被 §5.13 轮取代，记录保留于 git 历史。
 
 链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
@@ -156,14 +172,14 @@ codex 五审 4 项 Spec + 2 项 Standards，逐条核实**全部属实**，处�
 
 | 项                             | 值                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-434d214`，DMG SHA `57596f0cf36085ce68b151db63caf6f7f5a6d90aade8331ae8b4a6a5f9293012`（绑定 §5.12 轮全部代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-f782c02`，DMG SHA `bdc0fe15535b3c0a6a7c5c348439ac2749a64e98cd914c082a271b91af5cbeba`（绑定 §5.13 轮全部代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`            |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                             |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                               |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.12 轮全部处置后于制品 HEAD `434d214` 重验通过，2026-09-06）。
+- 自动测试完成 → **`candidate-verified`**（§5.13 轮全部处置后于制品 HEAD `f782c02` 重验通过，2026-09-06）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
