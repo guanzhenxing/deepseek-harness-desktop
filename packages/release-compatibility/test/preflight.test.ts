@@ -1,17 +1,11 @@
-import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import {
-  inspectHomeFormats,
-  PROFILE_CLASSIFICATION_CAP,
-  SESSIONS_PER_PROJECT_CLASSIFICATION_CAP,
-  SESSION_PROJECT_CLASSIFICATION_CAP,
-  STORAGE_CLASSIFICATION_CAP,
-} from '../src/inspect-home.js'
+import { ENUMERATION_CEILING, boundedEntries, inspectHomeFormats } from '../src/inspect-home.js'
 import { preflightHome } from '../src/preflight.js'
 import type { ReleaseManifest } from '../src/manifest.js'
 
@@ -511,192 +505,139 @@ describe('inspectHomeFormats', () => {
     }
   })
 
-  it('flags a symlink planted in a storage unit beyond the classification cap', async () => {
+  it('classifies EVERY storage unit regardless of position (no sampling)', async () => {
     const home = await tempHome()
     try {
-      const outside = await tempHome()
-      try {
-        await writeFile(path.join(outside, 'escape.json'), '{"version":1,"record":null}')
-        for (let index = 0; index < 72; index += 1) {
-          const domain = path.join(home, 'storages', `domain-${index}`)
-          await mkdir(domain, { recursive: true })
-          await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
-        }
-        // readdir order is arbitrary on APFS: plant strictly in the entries
-        // that actually fall beyond the classification cap for THIS listing.
-        const listed = (await readdir(path.join(home, 'storages'))).sort()
-        const beyondCap = listed.slice(STORAGE_CLASSIFICATION_CAP)
-        expect(beyondCap.length).toBeGreaterThan(0)
-        for (const domain of beyondCap) {
-          const table = path.join(home, 'storages', domain, 'sessions')
-          await mkdir(table, { recursive: true })
-          await symlink(path.join(outside, 'escape.json'), path.join(table, 'record.json'))
-        }
-        const observed = await inspectHomeFormats(home)
-        for (const domain of beyondCap) {
-          expect(observed.unknownPaths).toContain(`storages/${domain}/sessions/record.json`)
-        }
-        expect(observed.formats.storages).toBeUndefined()
-      } finally {
-        await rm(outside, { recursive: true, force: true })
+      // 65 legit units + one corrupt JSON unit created LAST — with full
+      // classification its position in the readdir order is irrelevant.
+      for (let index = 0; index < 65; index += 1) {
+        const domain = path.join(home, 'storages', `domain-${index}`)
+        await mkdir(domain, { recursive: true })
+        await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
       }
+      await mkdir(path.join(home, 'storages', 'corrupt-unit'), { recursive: true })
+      await writeFile(path.join(home, 'storages', 'corrupt-unit', 'global.json'), '{not json')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('storages/corrupt-unit/global.json')
+      expect(observed.formats.storages).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
 
-  it('flags a symlinked storage unit itself beyond the classification cap', async () => {
+  it('classifies EVERY session regardless of position (no sampling)', async () => {
     const home = await tempHome()
     try {
-      const outside = await tempHome()
-      try {
-        for (let index = 0; index < 72; index += 1) {
-          const domain = path.join(home, 'storages', `domain-${index}`)
-          await mkdir(domain, { recursive: true })
-          await writeFile(path.join(domain, 'global.json'), '{"version":1,"record":null}')
-        }
-        await mkdir(path.join(outside, 'imposter-unit'), { recursive: true })
-        const listed = (await readdir(path.join(home, 'storages'))).sort()
-        const beyondCap = listed.slice(STORAGE_CLASSIFICATION_CAP)
-        expect(beyondCap.length).toBeGreaterThan(0)
-        for (const domain of beyondCap) {
-          await rm(path.join(home, 'storages', domain), { recursive: true, force: true })
-          await symlink(path.join(outside, 'imposter-unit'), path.join(home, 'storages', domain))
-        }
-        const observed = await inspectHomeFormats(home)
-        for (const domain of beyondCap) {
-          expect(observed.unknownPaths).toContain(`storages/${domain}`)
-        }
-        expect(observed.formats.storages).toBeUndefined()
-      } finally {
-        await rm(outside, { recursive: true, force: true })
-      }
-    } finally {
-      await rm(home, { recursive: true, force: true })
-    }
-  })
-
-  it('keeps a large legitimate per-record unit admissible', async () => {
-    const home = await tempHome()
-    try {
-      const table = path.join(home, 'storages', 'session_projcache', 'sessions')
-      await mkdir(table, { recursive: true })
-      for (let index = 0; index < 512; index += 1) {
+      const projectDir = path.join(home, 'sessions', '--fixture--')
+      for (let index = 0; index < 40; index += 1) {
+        const sessionDir = path.join(projectDir, `s-${index}`)
+        await mkdir(sessionDir, { recursive: true })
         await writeFile(
-          path.join(table, `session-${index}.json`),
-          '{"version":4,"record":{"watermark":7}}',
+          path.join(sessionDir, 'session.jsonl'),
+          '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
         )
       }
+      // A foreign-version header created LAST must still be flagged.
+      const foreign = path.join(projectDir, 's-future')
+      await mkdir(foreign, { recursive: true })
+      await writeFile(
+        path.join(foreign, 'session.jsonl'),
+        '{"type":"session","version":99,"id":"f","createdAt":0,"delegationDepth":0}\n',
+      )
       const observed = await inspectHomeFormats(home)
-      expect(observed.unknownPaths).toEqual([])
-      expect(observed.formats.projcache).toBe('dsh-session-projcache-4')
-      expect(observed.formats.storages).toBe('dsh-storage-unit-0.1.2-alpha.3')
+      expect(observed.unknownPaths).toContain('sessions/--fixture--/s-future/session.jsonl')
+      expect(observed.formats.sessions).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
 
-  it('flags a symlinked session beyond the per-project classification cap', async () => {
+  it('classifies EVERY profile manifest regardless of position (no sampling)', async () => {
     const home = await tempHome()
     try {
-      const outside = await tempHome()
-      try {
-        await writeFile(path.join(outside, 'escape.jsonl'), 'not a session\n')
-        const projectDir = path.join(home, 'sessions', '--fixture--')
-        for (let index = 0; index < 40; index += 1) {
-          const sessionDir = path.join(projectDir, `s-${index}`)
-          await mkdir(sessionDir, { recursive: true })
-          await writeFile(
-            path.join(sessionDir, 'session.jsonl'),
-            '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
-          )
-        }
-        // readdir order is arbitrary: plant strictly beyond the cap for THIS
-        // listing.
-        const listed = (await readdir(projectDir)).sort()
-        const beyondCap = listed.slice(SESSIONS_PER_PROJECT_CLASSIFICATION_CAP)
-        expect(beyondCap.length).toBeGreaterThan(0)
-        for (const sessionId of beyondCap) {
-          await rm(path.join(projectDir, sessionId, 'session.jsonl'), { force: true })
-          await symlink(
-            path.join(outside, 'escape.jsonl'),
-            path.join(projectDir, sessionId, 'session.jsonl'),
-          )
-        }
-        const observed = await inspectHomeFormats(home)
-        for (const sessionId of beyondCap) {
-          expect(observed.unknownPaths).toContain(`sessions/--fixture--/${sessionId}/session.jsonl`)
-        }
-        expect(observed.formats.sessions).toBeUndefined()
-      } finally {
-        await rm(outside, { recursive: true, force: true })
+      for (let index = 0; index < 40; index += 1) {
+        const profileDir = path.join(home, 'profiles', `p-${index}`)
+        await mkdir(profileDir, { recursive: true })
+        await writeFile(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p' }))
       }
+      const corrupt = path.join(home, 'profiles', 'p-corrupt')
+      await mkdir(corrupt, { recursive: true })
+      await writeFile(path.join(corrupt, 'package.json'), '{not json')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('profiles/p-corrupt/package.json')
+      expect(observed.formats.profiles).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
 
-  it('flags a symlinked project directory beyond the classification cap', async () => {
+  it('flags dot-prefixed profiles: createProfileRef accepts names like .prod', async () => {
     const home = await tempHome()
     try {
       const outside = await tempHome()
       try {
-        await mkdir(path.join(outside, 'imposter-project'), { recursive: true })
-        for (let index = 0; index < 40; index += 1) {
-          await mkdir(path.join(home, 'sessions', `p-${index}`), { recursive: true })
-        }
-        const listed = (await readdir(path.join(home, 'sessions'))).sort()
-        const beyondCap = listed.slice(SESSION_PROJECT_CLASSIFICATION_CAP)
-        expect(beyondCap.length).toBeGreaterThan(0)
-        for (const project of beyondCap) {
-          await rm(path.join(home, 'sessions', project), { recursive: true, force: true })
-          await symlink(
-            path.join(outside, 'imposter-project'),
-            path.join(home, 'sessions', project),
-          )
-        }
+        await mkdir(path.join(home, 'profiles'), { recursive: true })
+        await mkdir(path.join(outside, 'escape-profile'), { recursive: true })
+        // A symlink wearing a dot-prefixed profile name must be flagged.
+        await symlink(path.join(outside, 'escape-profile'), path.join(home, 'profiles', '.prod'))
+        // A dot-prefixed profile DIRECTORY with a corrupt manifest too.
+        const corruptDot = path.join(home, 'profiles', '.staging')
+        await mkdir(corruptDot, { recursive: true })
+        await writeFile(path.join(corruptDot, 'package.json'), '{not json')
         const observed = await inspectHomeFormats(home)
-        for (const project of beyondCap) {
-          expect(observed.unknownPaths).toContain(`sessions/${project}`)
-        }
-        expect(observed.formats.sessions).toBeUndefined()
-      } finally {
-        await rm(outside, { recursive: true, force: true })
-      }
-    } finally {
-      await rm(home, { recursive: true, force: true })
-    }
-  })
-
-  it('flags a symlinked profile beyond the classification cap', async () => {
-    const home = await tempHome()
-    try {
-      const outside = await tempHome()
-      try {
-        await mkdir(path.join(outside, 'imposter-profile'), { recursive: true })
-        for (let index = 0; index < 40; index += 1) {
-          const profileDir = path.join(home, 'profiles', `p-${index}`)
-          await mkdir(profileDir, { recursive: true })
-          await writeFile(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p' }))
-        }
-        const listed = (await readdir(path.join(home, 'profiles'))).sort()
-        const beyondCap = listed.slice(PROFILE_CLASSIFICATION_CAP)
-        expect(beyondCap.length).toBeGreaterThan(0)
-        for (const profile of beyondCap) {
-          await rm(path.join(home, 'profiles', profile), { recursive: true, force: true })
-          await symlink(
-            path.join(outside, 'imposter-profile'),
-            path.join(home, 'profiles', profile),
-          )
-        }
-        const observed = await inspectHomeFormats(home)
-        for (const profile of beyondCap) {
-          expect(observed.unknownPaths).toContain(`profiles/${profile}`)
-        }
+        expect(observed.unknownPaths).toContain('profiles/.prod')
+        expect(observed.unknownPaths).toContain('profiles/.staging/package.json')
         expect(observed.formats.profiles).toBeUndefined()
       } finally {
         await rm(outside, { recursive: true, force: true })
       }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('exempts only real .dsh-desktop-run-* launch roots, not lookalikes', async () => {
+    const home = await tempHome()
+    try {
+      const outside = await tempHome()
+      try {
+        // A real launch root with runtime junk inside is not data.
+        const runRoot = path.join(home, 'profiles', '.dsh-desktop-run-abc123')
+        await mkdir(path.join(runRoot, 'bin'), { recursive: true })
+        await writeFile(path.join(runRoot, 'bin', 'dsh'), '#!/bin/sh\n')
+        // Finder noise: loose regular files are not profiles.
+        await writeFile(path.join(home, 'profiles', '.DS_Store'), 'noise')
+        // A symlink WEARING the launch-root name is flagged.
+        await symlink(
+          path.join(outside, 'escape'),
+          path.join(home, 'profiles', '.dsh-desktop-run-evil'),
+        )
+        const observed = await inspectHomeFormats(home)
+        expect(observed.unknownPaths).toEqual(['profiles/.dsh-desktop-run-evil'])
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('bounds enumeration and fails closed on overflow', async () => {
+    const home = await tempHome()
+    try {
+      const dir = path.join(home, 'many')
+      await mkdir(dir, { recursive: true })
+      for (let index = 0; index < 5; index += 1) {
+        await writeFile(path.join(dir, `entry-${index}`), 'x')
+      }
+      expect(await boundedEntries(dir, 10)).toHaveLength(5)
+      expect(await boundedEntries(dir, 5)).toHaveLength(5)
+      expect(await boundedEntries(dir, 4)).toBe('overflow')
+      expect(await boundedEntries(path.join(home, 'missing'), 10)).toEqual([])
+      await writeFile(path.join(home, 'plain'), 'x')
+      expect(await boundedEntries(path.join(home, 'plain'), 10)).toBe('unreadable')
+      // The ceiling constant stays far above real homes.
+      expect(ENUMERATION_CEILING).toBeGreaterThan(10_000)
     } finally {
       await rm(home, { recursive: true, force: true })
     }
