@@ -311,7 +311,13 @@ export async function runUpgradeRehearsal(input) {
     // for the driven rounds, so without this the whole chain never
     // exercises zstd admission on the upgrade path (self-review R4).
     const { zstdCompressSync } = await import('node:zlib')
-    const zstdSessionDir = path.join(path.dirname(seededSessions[0].file), 'zstd-seeded-session')
+    // The zstd sibling must be a SESSION entry (inside the project
+    // directory), not a child of an existing session directory — admission
+    // never descends below a session directory.
+    const zstdSessionDir = path.join(
+      path.dirname(path.dirname(seededSessions[0].file)),
+      'zstd-seeded-session',
+    )
     await mkdir(zstdSessionDir, { recursive: true })
     const zstdBytes = Buffer.concat([
       zstdCompressSync(
@@ -412,7 +418,11 @@ export async function runUpgradeRehearsal(input) {
     }
     await assertThirdPartyBundleUnchanged(bundle)
     const zstdAfter = await readFile(
-      path.join(path.dirname(seededFile.file), 'zstd-seeded-session', 'session.jsonl.zstd'),
+      path.join(
+        path.dirname(path.dirname(seededFile.file)),
+        'zstd-seeded-session',
+        'session.jsonl.zstd',
+      ),
     )
     if (!zstdAfter.equals(zstdBytes)) {
       fail('candidate upgrade', 'the real compressed session was rewritten or lost')
