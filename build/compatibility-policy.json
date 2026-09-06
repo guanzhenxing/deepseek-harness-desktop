@@ -58,7 +58,7 @@
       "evidence": [
         "npm:@deepseek-ai/dsh-storage-json@0.1.2-alpha.3:lib/index.js",
         "npm:@deepseek-ai/dsh-storage-domain@0.1.2-alpha.3:lib/index.js",
-        "fixture:tests/fixtures/home-formats/storage-unit-single.json#21d897868aaffe11a237f0a854db2c5496c929633d84e6e7a2093d84d1bae9be",
+        "fixture:tests/fixtures/home-formats/storage-unit-single.json#77f214e92930f98e6ed4ada6cd48f87ac4d41f85709d84575401cb1c5717a82b",
         "upstream:dd6322d604e00eec1ba5e0c8541159906a21094a"
       ],
       "$notes": "Single-layout units are one document with a nested {unit:{name,version}} header; per-record units are directories of {version,record} documents (global.json carries the unit version stamp) plus the domain identity from the directory name. Per-domain versions are declared by the owning package and checked with version-mismatch refusal."
@@ -71,7 +71,7 @@
       "writable": "dsh-session-projcache-4",
       "evidence": [
         "npm:@deepseek-ai/dsh-session-projection-cache@0.1.2-alpha.3:lib/index.js",
-        "fixture:tests/fixtures/home-formats/projcache-unit.json#78cfdd6c07979423b945b3bbe86226ceb8285012d70fa7d028dc420d90c53a90",
+        "fixture:tests/fixtures/home-formats/projcache-unit.json#de4b07ee998d8e17a2d9156767e7b5a4fcf81d6316dab9ed83c1516133a86f33",
         "upstream:dd6322d604e00eec1ba5e0c8541159906a21094a"
       ],
       "$notes": "The session_projcache storage domain is declared at version 4 with the per-record layout in this baseline."
