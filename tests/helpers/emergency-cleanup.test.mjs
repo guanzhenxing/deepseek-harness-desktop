@@ -84,8 +84,8 @@ describe('emergency cleanup registry', () => {
         'registerEmergencyCleanup(async () => { attempts += 1; ',
         `if (attempts < 2) throw new Error("busy mount"); `,
         `await writeFile(${JSON.stringify(marker)}, "ok"); }); `,
-        "for (const signal of ['SIGINT']) {",
-        'process.on(signal, () => { void drainWithRetries().finally(() => process.exit(130)) }); }',
+        "for (const signal of ['SIGINT', 'SIGTERM']) {",
+        "process.on(signal, () => { void drainWithRetries().finally(() => process.exit(signal === 'SIGINT' ? 130 : 143)) }); }",
         'process.stdout.write("watchdog-ready\\n"); ',
         'setInterval(() => {}, 60000)',
       ].join('')
@@ -101,11 +101,12 @@ describe('emergency cleanup registry', () => {
         child.stdout.setEncoding('utf8')
         child.stdout.on('data', (chunk) => {
           buffered += chunk
-          if (buffered.includes('watchdog-ready')) child.kill('SIGINT')
+          if (buffered.includes('watchdog-ready')) child.kill('SIGTERM')
         })
       })
-      // The signal handler exits 130 AFTER the drain retried and succeeded.
-      expect(exit.code).toBe(130)
+      // SIGTERM keeps its own exit code (143), distinct from SIGINT's 130,
+      // after the drain retried and succeeded.
+      expect(exit.code).toBe(143)
       expect(await readFile(marker, 'utf8')).toBe('ok')
     } finally {
       await rm(markerRoot, { recursive: true, force: true })

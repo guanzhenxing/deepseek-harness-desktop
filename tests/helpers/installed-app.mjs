@@ -95,17 +95,16 @@ export function registerEmergencyCleanup(cleanup) {
  * mount is always detached, including on failure paths.
  */
 export async function installFromDmg(dmgPath, productName) {
-  const output = execFileSync('hdiutil', ['attach', '-readonly', '-nobrowse', dmgPath], {
+  const output = execFileSync('hdiutil', ['attach', '-readonly', '-nobrowse', '-plist', dmgPath], {
     encoding: 'utf8',
   })
-  const mountPoint = output
-    .trim()
-    .split('\n')
-    .at(-1)
-    ?.split('\t')
-    .map((column) => column.trim())
-    .filter((column) => column.startsWith('/'))
-    .at(-1)
+  // The plist carries the mount point in a <string> element; a regex
+  // fallback keeps working even if the plist shape drifts. Registration
+  // happens the moment ANY mount path is visible — a parse error after a
+  // successful attach must not leak the mount.
+  const plistMatch = /<string>(\/Volumes\/[^<]+)<\/string>/.exec(output)
+  const fallbackMatch = /(^|\s)(\/Volumes\/\S+)/.exec(output)
+  const mountPoint = plistMatch?.[1] ?? fallbackMatch?.[2]
   if (mountPoint === undefined || !mountPoint.startsWith('/')) {
     throw new Error(`could not parse hdiutil mount point from: ${output}`)
   }
