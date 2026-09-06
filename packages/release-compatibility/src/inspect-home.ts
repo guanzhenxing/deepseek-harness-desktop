@@ -37,12 +37,28 @@ export const ENUMERATION_CEILING = 65_536
  * a nested walk by itself, so the whole walk shares one budget. Exported for
  * the budget tests.
  */
-export type InspectionBudget = { entries: number; bytes: number; unknowns: number }
+export type InspectionBudget = {
+  entries: number
+  bytes: number
+  unknowns: number
+  /**
+   * Set when the unknowns budget ran dry: the walk could not record
+   * everything it found. An exhausted budget NEVER means known format — an
+   * empty output array with this flag set is a refusal, not a pass.
+   */
+  exhausted: boolean
+}
 
 export function createInspectionBudget(
   overrides: Partial<InspectionBudget> = {},
 ): InspectionBudget {
-  return { entries: 262_144, bytes: 128 * 1024 * 1024, unknowns: 8_192, ...overrides }
+  return {
+    entries: 262_144,
+    bytes: 128 * 1024 * 1024,
+    unknowns: 8_192,
+    exhausted: false,
+    ...overrides,
+  }
 }
 
 function budgetExhausted(budget: InspectionBudget): boolean {
@@ -65,7 +81,10 @@ function takeBytes(budget: InspectionBudget, count: number): boolean {
  * refuse the slot, and the OUTPUT stays bounded by the budget.
  */
 function flagUnknown(budget: InspectionBudget, unknown: string[], relative: string): void {
-  if (budget.unknowns <= 0) return
+  if (budget.unknowns <= 0) {
+    budget.exhausted = true
+    return
+  }
   budget.unknowns -= 1
   unknown.push(relative)
 }
@@ -97,11 +116,11 @@ export async function inspectHomeFormats(
 
   const credentials = await credentialsFormatId(path.join(home, '.credentials.yaml'), budget)
   if (credentials.state === 'known') formats.credentials = credentials.formatId
-  if (credentials.state === 'unknown') unknownPaths.push(credentials.relative)
+  if (credentials.state === 'unknown') flagUnknown(budget, unknownPaths, credentials.relative)
 
   const settings = await settingsFormatId(home)
   if (settings.state === 'known') formats.settings = settings.formatId
-  if (settings.state === 'unknown') unknownPaths.push(settings.relative)
+  if (settings.state === 'unknown') flagUnknown(budget, unknownPaths, settings.relative)
 
   const sessions = await sessionsFormatId(home, budget)
   if (sessions.state === 'known') {
@@ -128,6 +147,25 @@ export async function inspectHomeFormats(
   if (profiles.state === 'known') {
     if (profiles.unknown.length === 0) formats.profiles = profiles.formatId
     else for (const relative of profiles.unknown) unknownPaths.push(relative)
+  }
+
+  // An exhausted unknowns budget means the walk found more than it could
+  // record: no data slot may claim a known format on that evidence, and
+  // every slot that had claimed one surfaces a budget-level unknown path.
+  if (budget.exhausted) {
+    const dataSlots: Array<[string, string | undefined]> = [
+      ['credentials', formats.credentials],
+      ['settings', formats.settings],
+      ['sessions', formats.sessions],
+      ['storages', formats.storages],
+      ['profiles', formats.profiles],
+    ]
+    for (const [slot, claimed] of dataSlots) {
+      if (claimed !== undefined) {
+        delete formats[slot]
+        if (!unknownPaths.includes(slot)) unknownPaths.push(slot)
+      }
+    }
   }
 
   const fresh =
@@ -431,8 +469,18 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
     // nothing to verify.
     const stat = await handle.stat()
     let offset = 0
-    for (let hop = 0; hop < 4; hop += 1) {
-      const { buffer, bytesRead } = await handle.read(Buffer.alloc(8), 0, 8, offset)
+    // The skippable-prefix walk is bounded by the SHARED byte budget (each
+    // hop costs at least its 8-byte header) plus a defensive frame ceiling
+    // far above any real writer; exceeding either fails closed.
+    for (let hop = 0; hop < 65_536; hop += 1) {
+      const readLength = Math.min(8, budget.bytes + 1)
+      if (readLength < 5) return false
+      const { buffer, bytesRead } = await handle.read(
+        Buffer.alloc(readLength),
+        0,
+        readLength,
+        offset,
+      )
       if (!takeBytes(budget, bytesRead)) return false
       if (bytesRead < 5) return false
       const magic = buffer.readUInt32LE(0)
@@ -457,7 +505,9 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
         singleSegment === 1 ? ([1, 2, 4, 8][fcsCode] ?? 1) : ([0, 2, 4, 8][fcsCode] ?? 0)
       const headerLength = 5 + (singleSegment === 1 ? 0 : 1) + dictLength + fcsLength
       if (headerLength > 8) {
-        const extended = await handle.read(Buffer.alloc(headerLength), 0, headerLength, offset)
+        const extendedLength = Math.min(headerLength, budget.bytes + 1)
+        if (extendedLength < headerLength) return false
+        const extended = await handle.read(Buffer.alloc(extendedLength), 0, extendedLength, offset)
         if (!takeBytes(budget, extended.bytesRead)) return false
         if (extended.bytesRead < headerLength) return false
       }
