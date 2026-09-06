@@ -59,8 +59,13 @@ function takeBytes(budget: InspectionBudget, count: number): boolean {
   return !budgetExhausted(budget)
 }
 
-/** Record one unknown path against the shared budget. */
+/**
+ * Record one unknown path against the shared budget. Once the unknowns
+ * budget is spent, nothing more is appended — the already-recorded paths
+ * refuse the slot, and the OUTPUT stays bounded by the budget.
+ */
 function flagUnknown(budget: InspectionBudget, unknown: string[], relative: string): void {
+  if (budget.unknowns <= 0) return
   budget.unknowns -= 1
   unknown.push(relative)
 }
@@ -419,28 +424,46 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
   const handle = await openFile(file)
   if (handle === undefined) return false
   try {
-    const readLength = Math.min(18, budget.bytes + 1)
-    if (readLength < 8) return false
-    const { buffer, bytesRead } = await handle.read(Buffer.alloc(readLength), 0, readLength, 0)
-    if (!takeBytes(budget, bytesRead)) return false
-    if (bytesRead < 5) return false
-    const magic = buffer.readUInt32LE(0)
-    if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {
-      // Skippable frame: magic + 4-byte frame size.
-      return bytesRead >= 8
+    // Skippable frames carry a declared payload size; the file must actually
+    // cover it, and a session stream must eventually contain a STANDARD
+    // frame — skippable-only or truncated skippable prefixes are refused.
+    // The size check uses the stat size, so a huge declared payload costs
+    // nothing to verify.
+    const stat = await handle.stat()
+    let offset = 0
+    for (let hop = 0; hop < 4; hop += 1) {
+      const { buffer, bytesRead } = await handle.read(Buffer.alloc(8), 0, 8, offset)
+      if (!takeBytes(budget, bytesRead)) return false
+      if (bytesRead < 5) return false
+      const magic = buffer.readUInt32LE(0)
+      if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {
+        if (bytesRead < 8) return false
+        const payload = buffer.readUInt32LE(4)
+        const frameEnd = offset + 8 + payload
+        if (!Number.isSafeInteger(frameEnd) || stat.size < frameEnd) return false
+        if (stat.size === frameEnd) return false // skippable-only stream
+        offset = frameEnd
+        continue
+      }
+      if (magic !== 0xfd2fb528) return false
+      const descriptor = buffer[4]
+      if (descriptor === undefined) return false
+      if ((descriptor & 0b0000_1000) !== 0) return false // reserved bit must be zero
+      const fcsCode = (descriptor >> 6) & 0b11
+      const singleSegment = (descriptor >> 5) & 0b1
+      const dictCode = descriptor & 0b11
+      const dictLength = [0, 1, 2, 4][dictCode] ?? 0
+      const fcsLength =
+        singleSegment === 1 ? ([1, 2, 4, 8][fcsCode] ?? 1) : ([0, 2, 4, 8][fcsCode] ?? 0)
+      const headerLength = 5 + (singleSegment === 1 ? 0 : 1) + dictLength + fcsLength
+      if (headerLength > 8) {
+        const extended = await handle.read(Buffer.alloc(headerLength), 0, headerLength, offset)
+        if (!takeBytes(budget, extended.bytesRead)) return false
+        if (extended.bytesRead < headerLength) return false
+      }
+      return true
     }
-    if (magic !== 0xfd2fb528) return false
-    const descriptor = buffer[4]
-    if (descriptor === undefined) return false
-    if ((descriptor & 0b0000_1000) !== 0) return false // reserved bit must be zero
-    const fcsCode = (descriptor >> 6) & 0b11
-    const singleSegment = (descriptor >> 5) & 0b1
-    const dictCode = descriptor & 0b11
-    const dictLength = [0, 1, 2, 4][dictCode] ?? 0
-    const fcsLength =
-      singleSegment === 1 ? ([1, 2, 4, 8][fcsCode] ?? 1) : ([0, 2, 4, 8][fcsCode] ?? 0)
-    const headerLength = 5 + (singleSegment === 1 ? 0 : 1) + dictLength + fcsLength
-    return bytesRead >= headerLength
+    return false
   } finally {
     await handle.close()
   }
@@ -736,6 +759,10 @@ async function readRecordStamp(
     if (typeof document.version !== 'number' || !Number.isSafeInteger(document.version)) {
       return undefined
     }
+    // The full envelope is `{version, record}` (dsh-storage-json
+    // serializeRecord): a stamp without its own `record` key (null allowed —
+    // the global document carries record: null) is not a record document.
+    if (!('record' in document)) return undefined
     return document.version
   } catch {
     return undefined
