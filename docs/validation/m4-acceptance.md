@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified 至 §5.8 轮为止；§5.9 轮（2026-09-06）代码变更后待全链重验（`current` 状态另等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.9 轮残留全部处置后全链重验通过，2026-09-06，13/13 步 + 演练 16/16；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -104,31 +104,24 @@ codex 复核后认定原始 5 项中 2 项为部分修复（①⑤），并修�
 
 ## 6. 门禁结果
 
-`pnpm verify:release` 聚合链（`scripts/verify-release.mjs`）于最终 HEAD `e487138` 实跑，**13 步全部退出码 0**（2026-09-05，含收尾 `git diff --check`）：
+**最终轮（§5.9 残留处置后，2026-09-06）**：`pnpm verify:release` 聚合链于 HEAD `fd9a23a` 实跑，**13 步全部退出码 0**（含收尾 `git diff --check`）：check（329 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（61 测试，9 文件，含新语义下的 doctor-race）→ test:shared-home（4 测试）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（15/15 场景）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：新增 `storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。验收入口此时已 pin Node 24.11.1。
 
-1. `check`（prettier/eslint+boundaries/tsc/311 Vitest 单测/Node test 组/36 文档校验）
-2. `generate:compatibility` → 3. `verify:dsh-closure`（921 条去重闭包记录）→ 4. `verify:patches`（显式空账本）
-3. `test:integration`（54 测试，9 文件）→ 6. `test:shared-home`（真实 DSH 图双向会话）
-4. `package:dir`（当前 HEAD 重建 staging + 内联门禁）→ 8. `verify:compatibility`（fresh staging 字节一致）
-5. `package:dmg` → 10. `verify:artifacts` → 11. `smoke:package`（15 场景安装级冒烟）
-6. candidate 归档 + `rehearse:upgrade`（15/15 步）
+早期轮（2026-09-05，HEAD `e487138`/`5ccfd4f`）：13 步全过（311 单测/54 集成/演练 15/15），数字见 git 历史；被 §5.9 轮取代。
 
 链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
-最终轮数字（制品 SHA、releaseId、测试计数）见 §7；单测/集成确切计数以 `verify:release` 日志为准。
-
 ## 7. 制品记录（最终 verify:release 轮）
 
-| 项                             | 值                                                                                                                                         |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| candidate releaseId            | （见 `release/candidate/artifacts.json`，绑定最终 docs 提交前的 HEAD）                                                                     |
-| previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/` |
-| 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                  |
-| 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                    |
+| 项                             | 值                                                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-fd9a23a`，DMG SHA `1f6d4e88c5edbfed362f28719c31abba28891c926ca3f31b7b152be71d95b9f7`（绑定 §5.9 轮全部提交，docs 提交前） |
+| previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`       |
+| 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                        |
+| 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                          |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.5–5.8 轮；§5.9 轮代码变更后失效，待重跑 `verify:release` 全链恢复）。
+- 自动测试完成 → **`candidate-verified`**（§5.9 轮残留全部处置后于 `fd9a23a` 重验通过，2026-09-06）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
