@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.13 轮全部处置——记录版本绑定、双编码拒绝、共享保留前缀闸、报错式 detach 重试——后于制品 HEAD `f782c02` 全链重验通过，2026-09-06，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.14 五轮独立自查处置——含 1 项真缺陷（beforeExit 重试链）与真实 zstd 端到端盲区——后于制品 HEAD `e213fbf` 全链重验通过，2026-09-07，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -174,9 +174,9 @@ codex 六审 4 项 Spec + 4 项 Standards，逐条核实**全部属实**，处�
 
 ## 6. 门禁结果
 
-**最终轮（§5.13 全部处置后，2026-09-06）**：`pnpm verify:release` 聚合链于**制品 HEAD `f782c02`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（350 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（75 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `f782c02`。
+**最终轮（§5.14 五轮自查处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `e213fbf`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（351 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（76 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `e213fbf`。演练本轮起含真实 zstd 会话保全断言（candidate-upgrade-boot 步）。
 
-前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2` 13/13+16/16+15/15；`434d214` 13/13+16/16+15/15。均被 §5.13 轮取代，记录保留于 git 历史。
+前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`/`434d214`/`f782c02` 均 13/13+16/16+15/15。均被 §5.14 轮取代，记录保留于 git 历史。
 
 链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
@@ -184,14 +184,14 @@ codex 六审 4 项 Spec + 4 项 Standards，逐条核实**全部属实**，处�
 
 | 项                             | 值                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-f782c02`，DMG SHA `bdc0fe15535b3c0a6a7c5c348439ac2749a64e98cd914c082a271b91af5cbeba`（绑定 §5.13 轮全部代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-e213fbf`，DMG SHA `1f8fb9e0e01e37c109ae0848367b3c79e845e0436a8f9d99510aee372884778e`（绑定 §5.14 轮全部代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`            |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                             |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                               |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.13 轮全部处置后于制品 HEAD `f782c02` 重验通过，2026-09-06）。
+- 自动测试完成 → **`candidate-verified`**（§5.14 轮全部处置后于制品 HEAD `e213fbf` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
