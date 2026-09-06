@@ -101,7 +101,17 @@ const steps = [
 ]
 
 function spawnPnpm(args) {
-  const result = spawnSync(pnpm, args, { cwd: repositoryRoot, stdio: 'inherit' })
+  const result = spawnSync(pnpm, args, {
+    cwd: repositoryRoot,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      // Keep every substep on the exact runtime the pinned entry validated:
+      // a PATH-resolved pnpm may otherwise run its scripts (and their node
+      // children) under a completely different Node installation.
+      PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
+    },
+  })
   if (result.status !== 0) {
     throw new Error(`pnpm ${args.join(' ')} exited with ${result.status}`)
   }

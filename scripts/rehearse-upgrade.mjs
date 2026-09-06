@@ -9,10 +9,13 @@
 import process from 'node:process'
 
 import { assertAcceptanceRuntime } from '../tests/helpers/acceptance-runtime.mjs'
-import { emergencyCleanup } from '../tests/helpers/installed-app.mjs'
-import { runUpgradeRehearsal } from '../tests/upgrade/rehearsal.mjs'
 
+// Refuse a wrong runtime BEFORE any heavy module (Electron binary resolution,
+// app/CLI drivers) is even imported: the static import below would otherwise
+// do real work first on a clean snapshot.
 assertAcceptanceRuntime('rehearse:upgrade')
+
+const { emergencyCleanup } = await import('../tests/helpers/installed-app.mjs')
 
 // An interrupted rehearsal (Ctrl-C, CI cancel) must never leave installed-app
 // process groups, temp install trees, or DMG mounts behind: leftovers raise
@@ -22,6 +25,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     void emergencyCleanup().finally(() => process.exit(130))
   })
 }
+
+const { runUpgradeRehearsal } = await import('../tests/upgrade/rehearsal.mjs')
 
 function argumentValue(flag) {
   const index = process.argv.indexOf(flag)
