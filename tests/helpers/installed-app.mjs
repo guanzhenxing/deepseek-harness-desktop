@@ -19,13 +19,29 @@ export async function emergencyCleanup() {
   const pending = [...liveCleanups]
   liveCleanups.clear()
   for (const cleanup of pending) {
-    await cleanup().catch(() => undefined)
+    try {
+      // await on a sync (undefined-returning) cleanup is fine; the try/catch
+      // is what matters — one failed cleanup must never abort the drain and
+      // strand the rest of the processes, trees, and mounts.
+      await cleanup()
+    } catch {
+      /* keep draining */
+    }
   }
 }
 
 function registerCleanup(cleanup) {
   liveCleanups.add(cleanup)
   return () => liveCleanups.delete(cleanup)
+}
+
+/**
+ * Register a cleanup for the emergency drain (SIGINT/SIGTERM handlers and
+ * abnormal exits). Cleanups may be sync or async; a failing one never stops
+ * the rest of the drain. Returns an unregister function.
+ */
+export function registerEmergencyCleanup(cleanup) {
+  return registerCleanup(cleanup)
 }
 
 /**
@@ -74,8 +90,11 @@ export async function installFromDmg(dmgPath, productName) {
     await rm(installDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     throw error
   } finally {
-    unregisterMount()
+    // Detach first, then unregister: a mount that is live but unregistered
+    // would survive an emergency drain; a detach repeated by the drain is
+    // harmless (already gone, swallowed inside detachMount).
     detachMount()
+    unregisterMount()
   }
   const appPath = path.join(installDirectory, `${productName}.app`)
   const resources = path.join(appPath, 'Contents', 'Resources')
