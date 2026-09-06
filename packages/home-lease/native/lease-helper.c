@@ -81,13 +81,14 @@ static bool boot_identity(char *out, size_t capacity) {
 }
 
 static bool process_identity(pid_t pid, char *out, size_t capacity) {
-    /* Zero first: a partially-filled struct (proc_pidinfo returning a short
-     * byte count) must surface as pid 0 — caught by the pbi_pid check below
-     * and reported as unidentifiable — never as stack garbage wearing a
-     * plausible-but-wrong start time, which would read as 'different'. */
+    /* Zero first AND demand a full-length fill: pbi_pid sits at the front of
+     * the struct and the start time at the end, so a short proc_pidinfo fill
+     * could yield a correct pid with a zero (or garbage) start time and read
+     * as a bogus 'different'. Any result that is not exactly sizeof(info) is
+     * unidentifiable. */
     struct proc_bsdinfo info;
     memset(&info, 0, sizeof(info));
-    if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) <= 0) {
+    if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != (int)sizeof(info)) {
         return false;
     }
     if ((pid_t)info.pbi_pid != pid) return false;
