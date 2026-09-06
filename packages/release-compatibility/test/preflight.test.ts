@@ -640,6 +640,32 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('accepts sessions compressed by the real upstream zstd writer', async () => {
+    const home = await tempHome()
+    try {
+      // node:zlib zstdCompressSync is what the upstream session persistence
+      // uses (frames appended per turn). A hand-built header could drift
+      // from what real writers emit; this pins the real bytes.
+      const { zstdCompressSync } = await import('node:zlib')
+      const projectDir = path.join(home, 'sessions', '--real--')
+      const multi = path.join(projectDir, 'multi-frame')
+      await mkdir(multi, { recursive: true })
+      const frames = [
+        '{"type":"session","version":0,"id":"s","createdAt":0,"delegationDepth":0}\n',
+        '{"type":"turn/end"}\n',
+      ].map((chunk) => zstdCompressSync(Buffer.from(chunk, 'utf8')))
+      await writeFile(path.join(multi, 'session.jsonl.zstd'), Buffer.concat(frames))
+      const single = path.join(projectDir, 'single-frame')
+      await mkdir(single, { recursive: true })
+      await writeFile(path.join(single, 'session.jsonl.zstd'), frames[0])
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.sessions).toBe('dsh-session-jsonl-0')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('refuses plain and compressed encodings coexisting in one session directory', async () => {
     const home = await tempHome()
     try {
