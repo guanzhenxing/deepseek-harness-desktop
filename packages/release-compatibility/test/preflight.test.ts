@@ -655,9 +655,11 @@ describe('inspectHomeFormats', () => {
         '{"type":"turn/end"}\n',
       ].map((chunk) => zstdCompressSync(Buffer.from(chunk, 'utf8')))
       await writeFile(path.join(multi, 'session.jsonl.zstd'), Buffer.concat(frames))
+      const firstFrame = frames[0]
+      if (firstFrame === undefined) throw new Error('test bug: empty frame list')
       const single = path.join(projectDir, 'single-frame')
       await mkdir(single, { recursive: true })
-      await writeFile(path.join(single, 'session.jsonl.zstd'), frames[0])
+      await writeFile(path.join(single, 'session.jsonl.zstd'), firstFrame)
       const observed = await inspectHomeFormats(home)
       expect(observed.unknownPaths).toEqual([])
       expect(observed.formats.sessions).toBe('dsh-session-jsonl-0')
