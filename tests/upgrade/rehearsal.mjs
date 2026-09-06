@@ -307,28 +307,6 @@ export async function runUpgradeRehearsal(input) {
     if (seededSessions.length !== 2) {
       fail('seed sessions', `expected two synthetic sessions, found ${seededSessions.length}`)
     }
-    // Plant a REAL compressed session: the fixture forces compression:none
-    // for the driven rounds, so without this the whole chain never
-    // exercises zstd admission on the upgrade path (self-review R4).
-    const { zstdCompressSync } = await import('node:zlib')
-    // The zstd sibling must be a SESSION entry (inside the project
-    // directory), not a child of an existing session directory — admission
-    // never descends below a session directory.
-    const zstdSessionDir = path.join(
-      path.dirname(path.dirname(seededSessions[0].file)),
-      'zstd-seeded-session',
-    )
-    await mkdir(zstdSessionDir, { recursive: true })
-    const zstdBytes = Buffer.concat([
-      zstdCompressSync(
-        Buffer.from(
-          '{"type":"session","version":0,"id":"zstd-seeded-session","createdAt":0,"delegationDepth":0}\n',
-          'utf8',
-        ),
-      ),
-      zstdCompressSync(Buffer.from('{"type":"turn/end"}\n', 'utf8')),
-    ])
-    await writeFile(path.join(zstdSessionDir, 'session.jsonl.zstd'), zstdBytes)
     record('previous-cli-round', true, 'two synthetic sessions from the previous artifact')
 
     // -- Step 4: verify the copy, then retire the original for the day. -----
@@ -417,20 +395,10 @@ export async function runUpgradeRehearsal(input) {
       )
     }
     await assertThirdPartyBundleUnchanged(bundle)
-    const zstdAfter = await readFile(
-      path.join(
-        path.dirname(path.dirname(seededFile.file)),
-        'zstd-seeded-session',
-        'session.jsonl.zstd',
-      ),
-    )
-    if (!zstdAfter.equals(zstdBytes)) {
-      fail('candidate upgrade', 'the real compressed session was rewritten or lost')
-    }
     record(
       'candidate-upgrade-boot',
       true,
-      `history preserved (incl. a real zstd session, byte-identical), marker reserved by ${candidateMarker.lastWriterReleaseId}, third-party bundle intact`,
+      `history preserved, marker reserved by ${candidateMarker.lastWriterReleaseId}, third-party bundle intact`,
     )
 
     const continued = await runInstalledCli(
@@ -525,6 +493,60 @@ export async function runUpgradeRehearsal(input) {
       true,
       'restart re-reads the seeded history (continued in place, all three rounds preserved)',
     )
+
+    // -- Step 6.5: a real compressed session must cross candidate admission. --
+    // The fixture forces compression:none so the driven rounds stay
+    // plaintext, and the upstream backend refuses to LIST a .zstd artifact
+    // under a none-compression home — so the compressed session lives on an
+    // INDEPENDENT copy: the candidate CLI's admission walk must inspect and
+    // accept it (exit 0 needs a passed preflight), and the artifact must
+    // survive its round byte-identical.
+    {
+      const zstdRoot = await mkdtemp(path.join(tmpdir(), 'dsh-zstd-admission-'))
+      const zstdHome = path.join(zstdRoot, 'home')
+      await cp(rehearsalCopy.home, zstdHome, { recursive: true })
+      try {
+        const { zstdCompressSync } = await import('node:zlib')
+        const sessionDir = path.join(zstdHome, 'sessions', '--zstd-probe--', 'zstd-seeded-session')
+        await mkdir(sessionDir, { recursive: true })
+        const zstdBytes = Buffer.concat([
+          zstdCompressSync(
+            Buffer.from(
+              '{"type":"session","version":0,"id":"zstd-seeded-session","createdAt":0,"delegationDepth":0}\n',
+              'utf8',
+            ),
+          ),
+          zstdCompressSync(Buffer.from('{"type":"turn/end"}\n', 'utf8')),
+        ])
+        await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), zstdBytes)
+        // Admission-only probe: the profile-less passthrough (--version)
+        // runs the same read-only admission chain and exits 5 on refusal —
+        // a full round is impossible here because the upstream backend
+        // itself refuses to operate on .zstd artifacts under a
+        // none-compression home (which admission is NOT supposed to reject).
+        const round = await runInstalledCli(candidateInstall.cliEntry, ['--version'], {
+          home: zstdHome,
+          cwd: fixture.cwd,
+        })
+        if (round.code !== 0) {
+          fail(
+            'zstd-session-admission',
+            `candidate admission refused a home with a real zstd session (${round.code}): ${round.output.slice(-300)}`,
+          )
+        }
+        const after = await readFile(path.join(sessionDir, 'session.jsonl.zstd'))
+        if (!after.equals(zstdBytes)) {
+          fail('zstd-session-admission', 'the real compressed session was rewritten')
+        }
+        record(
+          'zstd-session-admission',
+          true,
+          'a real compressed session crosses candidate admission byte-identical',
+        )
+      } finally {
+        await rm(zstdRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      }
+    }
 
     // -- Step 7: refusal negatives against the real installed artifacts. ----
     const cases = JSON.parse(
