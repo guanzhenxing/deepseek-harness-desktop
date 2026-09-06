@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.15 轮全部处置——lease watchdog、完整记录信封、skippable 帧长核对、预算输出上界、信号重试排空、全量植入位置测试、独立 zstd admission 步骤——后于制品 HEAD `6fe04f5` 全链重验通过，2026-09-07，13/13 步 + 演练 16/16 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.15 轮全部处置——lease watchdog、完整记录信封、skippable 帧长核对、预算输出上界、信号重试排空、全量植入位置测试、独立 zstd admission 步骤——后于制品 HEAD `6fe04f5` 全链重验通过，2026-09-07，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -190,7 +190,7 @@ codex 七审 5 项 Standards + 3 项 Spec，逐条核实**全部属实**；其�
 
 ## 6. 门禁结果
 
-**最终轮（§5.15 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `6fe04f5`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（358 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（80 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**16/16 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `6fe04f5`。演练本轮起含独立的 zstd admission 步骤（17 步）。
+**最终轮（§5.15 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `6fe04f5`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（358 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（80 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记；独立 `zstd-session-admission` 步骤在本轮引入）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `6fe04f5`。
 
 前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`/`434d214`/`f782c02`/`e213fbf` 均 13/13。均被 §5.15 轮取代，记录保留于 git 历史。
 
