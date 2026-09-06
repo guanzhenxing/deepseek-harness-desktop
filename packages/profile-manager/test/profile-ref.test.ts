@@ -21,6 +21,19 @@ describe('ProfileRef', () => {
     },
   )
 
+  it.each(['.dsh-desktop-run-user', '.dsh-desktop-run-', '.dsh-desktop-run-abc123'])(
+    'reserves the runtime launch-root prefix from profile name %j',
+    (name) => {
+      expect(() => createProfileRef('/tmp/explicit-test-home', name)).toThrow(
+        /reserved runtime launch-root prefix/u,
+      )
+    },
+  )
+
+  it('allows dot-prefixed profile names outside the reserved prefix', () => {
+    expect(createProfileRef('/tmp/explicit-test-home', '.prod').name).toBe('.prod')
+  })
+
   it('requires an explicit non-root home', () => {
     expect(() => createProfileRef('', 'desktop')).toThrow(/explicit home/u)
     expect(() => createProfileRef(path.parse(process.cwd()).root, 'desktop')).toThrow(
