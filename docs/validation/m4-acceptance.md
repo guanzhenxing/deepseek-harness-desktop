@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.19 zcode 复核轮修复 zstd 走查与真实解码器的三处分歧（RLE-0 错位、block 上限、FCS 记账）并对称加固勘察/lease 的 open 路径——制品 HEAD `7cf5cde` 于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.20 启动性能轮：zstd 全帧走查改前向分块缓冲读（真实 home admission 4726ms → 195ms，消除随会话历史线性增长的启动回归）+ 主窗口主题背景色消除白色闪屏——制品 HEAD `0f8275e` 于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察（在 0f8275e 制品上重新起算，见 §5.20 事故记录），见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -257,7 +257,22 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 ## 6. 门禁结果
 
-**最终轮（§5.19 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `7cf5cde`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**384 Vitest 单测**，32 文件 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（91 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `7cf5cde`。本轮前两次运行在 `package:dir` 步因 electron-builder 下载时 TLS 连接中断而停止（缓存内 Electron zip 完好、单步复跑成功，属 §5.18 已记录的同类网络抖动）；从头重跑的第三次为本段记录的 13/13 结果。
+**最终轮（§5.20 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `0f8275e`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**385 Vitest 单测**，32 文件 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（92 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `0f8275e`。本轮首次运行因 dist 下旧制品正被运行（见 §5.20 事故记录）在 `package:dir` 止于 ENOTEMPTY；制品释放后从头重跑的本轮为 13/13。
+
+## 5.20 启动性能与首帧体验轮（2026-09-07，jesen 试用反馈驱动，基线 `2e56dfa`）
+
+jesen 首日观察反馈"打开后白屏一段才显示、启动偏久"。实测分解（本机）：admission 勘察 4.7s + 上游 Host 冷启动 ~3.5-4s + 窗口显示后 SPA 首帧 ~1s。其中 **admission 的 4.4s 是 §5.18/§5.19 引入的性能回归**：真实 home 的 41 个 zstd 会话共 193,358 帧（上游流式按消息 flush，平均每会话约 4,700 帧），全帧走查对每个帧/块头做独立 pread——386,861 次 syscall，且启动耗时随会话历史线性增长。
+
+| #   | 级别 | 问题                                                                            | 处置                                                                                                                                                                                                                                                           |
+| --- | ---- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P1   | zstd 全帧走查逐头 pread,真实 home 勘察 4.4s 且随历史线性增长                    | 前向 64KiB 分块缓冲读（`ChunkedReader`）:保留位置读语义、预算按 OS 实读字节照收;真实 home 勘察 **4726ms → 195ms**,结果逐位一致（6 槽位全知、unknownPaths 空）。回归:20,000 帧合法流接受 + `FileHandle.prototype.read` 调用数上界断言（修复前 40,000 次复现红） |
+| 2   | P2   | 主窗口未设背景色:上游 web surface 客户端渲染,`loadURL` 完成到首帧之间是白色闪屏 | 窗口 `backgroundColor` 用恢复页同色 `#1e1e20`                                                                                                                                                                                                                  |
+
+提交：`fd8a373`（缓冲读 + 性能回归）、`0f8275e`（主题背景色）。
+
+**操作事故记录（诚实账）**：为交付新制品在 jesen 仍运行旧 `release/dist` 下 .app 时启动重打包链，electron-builder 清空输出目录导致**运行中的 7cf5cde 实例被抽走制品目录**（其后退出;`~/.dsh` 数据完好、锁干净释放——单写者与退出路径经受了这次真实事故）。教训入链语义:**verify:release 不得在 dist 制品被运行时执行**（后续可加进程守卫）。此事故直接决定:jesen 的观察日在 0f8275e 制品上重新起算。
+
+§5.19 轮（2026-09-07，制品 HEAD `7cf5cde`）：13/13（384 单测、91 集成、烟雾 15/15、演练 17/17），candidate `m4-0.0.0-darwin-arm64-7cf5cde`。被 §5.20 轮取代，记录保留于 git 历史。
 
 §5.18 轮（2026-09-07，制品 HEAD `5e7ac8c`）：13/13（378 单测、85 集成、烟雾 15/15、演练 17/17），candidate `m4-0.0.0-darwin-arm64-5e7ac8c`。已被 §5.19 轮取代，记录保留于 git 历史。
 
@@ -269,14 +284,14 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 | 项                             | 值                                                                                                                                                                                                                               |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-7cf5cde`，DMG SHA `a8e79f999d3f62b915951ed9e5619645a19b2db090cc0f2d749da2057267662d`，兼容清单 SHA `5a98cc16ee6ea9f275a6fab69891df7163b8d8e54b8fd472c1f6d8fd32d59714`（绑定 §5.19 代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-0f8275e`，DMG SHA `33b27a8cfbec7271e5ba2dbcdf117f24a781fc066de4827f364e672fe4427963`，兼容清单 SHA `8df3cb94cef412ae14997ae3a5fdcac6cad1c01968adb05040c8272b143aa9b4`（绑定 §5.20 代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`                                                                                       |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                                                                                                        |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                                                                                                          |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.19 轮全部处置后于制品 HEAD `7cf5cde` 重验通过，2026-09-07）。
+- 自动测试完成 → **`candidate-verified`**（§5.20 轮全部处置后于制品 HEAD `0f8275e` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
