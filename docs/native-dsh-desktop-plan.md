@@ -455,9 +455,9 @@ Host 在 ready 前失败时，launcher 保持运行并显示结构化失败阶�
 
 初始化版本直接使用当时最新的上游 DSH 发布 tag，不先落到旧版本再升级。
 
-截至 2026-09-01，最新 tag 为 [`dsh-v0.1.2-alpha.3`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.3)。
+初始基线为 `dsh-v0.1.2-alpha.3`（commit `dd6322d604e00eec1ba5e0c8541159906a21094a`，M1–M4 交付于其上）。
 
-对应 commit 为 [`dd6322d604e00eec1ba5e0c8541159906a21094a`](https://github.com/deepseek-ai/deepseek-harness/commit/dd6322d604e00eec1ba5e0c8541159906a21094a)，因此它是当前初始基线。
+2026-09-08 经独立资格验证升级为 [`dsh-v0.1.2-rc.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-rc.1)（commit [`a66e4702047846cdaa10c66c9d3df3951f5ea70d`](https://github.com/deepseek-ai/deepseek-harness/commit/a66e4702047846cdaa10c66c9d3df3951f5ea70d)，见 [验收记录](validation/dsh-0.1.2-rc.1-acceptance.md)）。
 
 正式开始实现前再次查询上游 tag；如果已有更新，则同步更新本节记录和依赖锁。
 
