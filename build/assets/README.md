@@ -2,7 +2,9 @@
 
 本目录只存放图标素材源与生成命令记录。`icon.svg` 使用
 `@deepseek-ai/dsh-web-frontend` 的官方黑色鲸鱼图形（MIT，Copyright 2026 DeepSeek）；
-`tray-template.svg` 使用同一份官方黑色鲸鱼图形，并按 macOS 模板图标规范输出为透明单色资源。
+构图按 Apple 图标网格：圆角方块 824/1024、圆角半径 184，鲸鱼宽度占方块 76% 且按包围盒居中，
+使 Dock 中与相邻应用图标平齐。`tray-template.svg` 使用同一份官方黑色鲸鱼图形，并按 macOS
+模板图标规范输出为透明单色资源。
 
 生成命令（macOS 自带工具，无第三方依赖），由 `scripts/build-icons.mjs` 自动执行：
 
