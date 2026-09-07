@@ -83,9 +83,19 @@ const smokeMode = process.env.DSH_DESKTOP_SMOKE
 const isLoadingSmoke = smokeMode === 'loading'
 const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
 
-if (userDataOverride !== undefined) app.setPath('userData', path.resolve(userDataOverride))
+if (userDataOverride !== undefined) {
+  app.setPath('userData', path.resolve(userDataOverride))
+} else {
+  // app.name below follows the display name, and the default userData
+  // directory derives from app.name — pin it to the functional identity so
+  // the directory never follows a display-name change.
+  app.setPath('userData', path.join(app.getPath('appData'), PRODUCT.name))
+}
 
-app.setName(PRODUCT.name)
+// The running application reports this name to macOS: the Dock tooltip and
+// the About/Hide menu-role labels. Menu-role labels follow it, not the
+// custom submenu label, so this must be the display name.
+app.setName(PRODUCT.displayName)
 // Set the Dock icon as a PNG via nativeImage: Dock/LaunchServices icon caching
 // for ad-hoc rebuilds is unreliable, and nativeImage guarantees display.
 if (process.platform === 'darwin') {
