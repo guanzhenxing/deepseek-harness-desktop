@@ -74,7 +74,7 @@ corepack pnpm@11.7.0 dsh-native -- --profile headless "..."   # 开发入口（�
 
 ## 文档
 
-- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1、M2、M3 已合并 `main`；M4 已实施并通过制品级演练验收（`codex/m4-release-compatibility`，见 [M4 验收](docs/validation/m4-acceptance.md)）；
+- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1、M2、M3 已合并 `main`；M4 已实施并通过制品级演练验收（`codex/m4-release-compatibility`，见 [M4 验收](docs/validation/m4-acceptance.md)）；[Post-M4 交付路线](docs/superpowers/plans/2026-09-07-post-m4-delivery-roadmap.md)：DSH 0.1.2-rc.1 升级资格 GO（[rc.1 验收](docs/validation/dsh-0.1.2-rc.1-acceptance.md)）、M5 发行证据与插件引入已验收（[M5 验收](docs/validation/m5-acceptance.md)）；
 - [实施方案](docs/native-dsh-desktop-plan.md)：v1 范围、里程碑、测试和扩展路线；
 - [架构](docs/architecture.md)：组件、进程、信任边界和依赖方向；
 - [Host-control 1.0](docs/protocols/host-control.md)：launcher/Host normative 协议；
