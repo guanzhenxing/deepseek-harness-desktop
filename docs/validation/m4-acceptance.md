@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.22 将系统展示名改为 `DeepSeek Harness`，并保持 Electron 子进程 Helper 包同步重命名以保住启动路径；制品 HEAD `7ed4426`（含 §5.21 加载页串行化与 `88d34f6` Dock 图标网格修复）于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 16/16；`current` 状态仍等待 jesen 至少一个正常工作日的人工使用观察（在新候选上重新起算），见 §8）**
+- **状态：candidate-verified（§5.22 将系统展示名改为 `DeepSeek Harness`，并保持 Electron 子进程 Helper 包同步重命名以保住启动路径；制品 HEAD `caa5c51`（§5.22 打包层展示名 + §5.23 运行时应用名，含 §5.21 加载页串行化与 `88d34f6` Dock 图标网格修复）于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 16/16，运行时名表面实机核验；`current` 状态仍等待 jesen 至少一个正常工作日的人工使用观察（在新候选上重新起算），见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -257,7 +257,7 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 ## 6. 门禁结果
 
-**最终轮（§5.22 展示名轮后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `7ed4426`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**386 Vitest 单测**，32 文件 + 新增 helper 重命名脚本测试（node:test）+ 37 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（92 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**16/16 场景**，对 Helper 改名后的包做真实启动——Helper 名失配会直接 FATAL，通过即启动路径受证）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。制品落盘核验：`CFBundleName`/`CFBundleDisplayName` 均为 `DeepSeek Harness`，四个 `DeepSeek Harness Helper*.app` 目录与可执行名一致。本文件随后的 docs 提交不改代码与制品，制品绑定 `7ed4426`。
+**最终轮（§5.23 运行时应用名轮后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `caa5c51`** 实跑（386 单测/闭包 921/集成 92/共享 home 4/冒烟 16/16/演练 17/17）。**§5.22 轮（历史记录）**：`pnpm verify:release` 聚合链于**制品 HEAD `7ed4426`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**386 Vitest 单测**，32 文件 + 新增 helper 重命名脚本测试（node:test）+ 37 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（92 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**16/16 场景**，对 Helper 改名后的包做真实启动——Helper 名失配会直接 FATAL，通过即启动路径受证）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。制品落盘核验（§5.22 轮）：`CFBundleName`/`CFBundleDisplayName` 均为 `DeepSeek Harness`，四个 `DeepSeek Harness Helper*.app` 目录与可执行名一致；§5.23 轮另加运行时名表面实机核验（localizedName/菜单角色/数据目录）。本文件随后的 docs 提交不改代码与制品，制品绑定 `caa5c51`。
 
 **§5.21 轮（2026-09-07，历史记录）**：`pnpm verify:release` 聚合链于**制品 HEAD `8997ef3`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**386 Vitest 单测**，32 文件 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（92 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**16/16 场景**，新增加载页端到端场景）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `8997ef3`。此前 §5.20 的 0f8275e 轮为历史记录；本轮未在 dist 制品运行时打包。
 
@@ -302,21 +302,27 @@ jesen 要求 Dock 与菜单栏显示 "DeepSeek Harness"。机制核实（全部�
 
 门禁：`pnpm verify:release` 13/13 于制品 HEAD `7ed4426`（第 3 次实跑通过，前两次为环境抖动如实记录：第 1 次败于 Finder 在 `release/dist/mac-arm64` 留下的 `.DS_Store` 令 electron-builder 清目录 `rmdir ENOTEMPTY`；第 2 次进行到末步 `rehearse:upgrade` 时，"seed sessions" 步出现同秒双 CLI 抢同一排练 home 的 `LEASE_CHANGED`——持锁方为 M3 旧制品自带 CLI，与本轮改动无关，单独重跑演练 17/17 全绿后全链重跑通过）。本轮未在 dist 制品运行时打包。
 
+## 5.23 运行时应用名轮（2026-09-07 深夜，jesen 截图定位，基线 `caa5c51`）
+
+§5.22 的展示名轮**不完整**：jesen 实际看到的 Dock 悬停与菜单栏 About/Hide 仍是 `DeepSeek Harness Desktop`。根因：macOS 对运行中应用显示的名字有两层打包配置够不到的来源——菜单 About/Hide 等角色标签与 `NSRunningApplication.localizedName`（Dock 悬停、Cmd+Tab 的取值来源）跟随 **Electron `app.setName` 在运行时报名的名字**，而 `main.ts` 仍 `app.setName(PRODUCT.name)`。
+
+处置（`caa5c51`）：改名前先把 userData 钉到功能身份（`app.setPath('userData', join(appData, PRODUCT.name))`——Electron 的默认 userData 派生自 app.name，不钉住会随改名搬家），再 `app.setName(PRODUCT.displayName)`。验证于打包制品实机启动读出：`localizedName` = `DeepSeek Harness`、菜单栏应用名、`About DeepSeek Harness`/`Hide DeepSeek Harness` 角色标签、LaunchServices 注册名全部为新名；数据目录仍在 `Application Support/DeepSeek Harness Desktop` 且未生成新目录（localizedName 可用 JXA `NSRunningApplication.runningApplicationsWithBundleIdentifier(...).firstObject.localizedName` 程序化读取，Dock 悬停文字本身不开放读取）。进程名（活动监视器可见）仍为可执行文件名 `DeepSeek Harness Desktop`——非用户界面，保持不动。`pnpm verify:release` 13/13 @ `caa5c51`。§5.22 轮制品 `7ed4426` 作废为历史记录。
+
 ## 7. 制品记录（最终 verify:release 轮）
 
 | 项                             | 值                                                                                                                                                                                                                               |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-7ed4426`，DMG SHA `20919a332bad0d0db0e1d6f0d6adcda3c956bcb1d8b137b44ec5767dbd69b8c4`，兼容清单 SHA `1d8d958daf22bd0472bc2145e42966882319c33ecc25870ff7ab1ac4b70f0440`（绑定 §5.22 代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-caa5c51`，DMG SHA `4f2db31b16023ffa86858cc4be28f362c18e419fa6468e548c3d80478d64040f`，兼容清单 SHA `36e9273e831b39ecae53a5cee00b465b51e5d377698347a550f45c85218cd5f6`（绑定 §5.23 代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`                                                                                       |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                                                                                                        |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                                                                                                          |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.22 展示名轮后于制品 HEAD `7ed4426` 重验通过，2026-09-07）。
+- 自动测试完成 → **`candidate-verified`**（§5.23 运行时应用名轮后于制品 HEAD `caa5c51` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
   - darwin-x64 未构建。
   - 公开发行（Developer ID 签名/notarization/自动更新）不在 v1 范围。
-  - 人工观察周期未开始（见上）。此前在 `8997ef3` 制品上的使用不延续到 `7ed4426`：观察日随新候选（含展示名与 Dock 图标修复）重新起算。
+  - 人工观察周期未开始（见上）。此前在 `8997ef3`/`7ed4426` 制品上的使用不延续到 `caa5c51`：观察日随新候选（含完整展示名与 Dock 图标修复）重新起算。
