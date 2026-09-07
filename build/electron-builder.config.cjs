@@ -7,10 +7,8 @@
 //
 // Version facts are read from the repository manifests and the compiled
 // product-config package; nothing is hand-duplicated here:
-//   - appId/productName      ← packages/product-config (PRODUCT)
-//   - display name           ← PRODUCT.displayName (mac.extendInfo + the
-//     afterPack helper-bundle rename that keeps Electron's child-process
-//     lookup working)
+//   - appId/productName      ← packages/product-config (PRODUCT); the
+//     bundle filename IS the product name — the Dock shows it
 //   - electronVersion        ← apps/desktop-launcher devDependencies.electron
 //   - app version            ← release/staging/app-shell/package.json
 //     (written by scripts/stage-runtime.mjs from the root package.json)
@@ -35,9 +33,6 @@ const root = path.resolve(__dirname, '..')
 // Node >= 22.12 require(esm) gives us the compiled PRODUCT without duplicating
 // the appId/productName strings (CI/dev baseline is Node 24.11.1).
 const { PRODUCT } = require(path.join(root, 'packages', 'product-config', 'lib', 'index.js'))
-const { renameMacHelperBundles } = require(
-  path.join(root, 'scripts', 'rename-mac-helper-bundles.mjs'),
-)
 const launcherManifest = require(path.join(root, 'apps', 'desktop-launcher', 'package.json'))
 const staging = path.join(root, 'release', 'staging')
 const icons = path.join(root, 'release', 'icons')
@@ -88,18 +83,7 @@ module.exports = {
     },
   },
   async afterPack(context) {
-    const appContents = path.join(context.appOutDir, `${PRODUCT.name}.app`, 'Contents')
-    const renamedHelpers = renameMacHelperBundles({
-      appContentsPath: appContents,
-      fromName: PRODUCT.name,
-      toName: PRODUCT.displayName,
-    })
-    if (renamedHelpers.length === 0) {
-      throw new Error(
-        'no helper bundles were renamed — CFBundleName and the helper bundle names must stay in sync',
-      )
-    }
-    const resources = path.join(appContents, 'Resources')
+    const resources = path.join(context.appOutDir, `${PRODUCT.name}.app`, 'Contents', 'Resources')
     for (const entry of [
       'runtime-host',
       'runtime-cli',

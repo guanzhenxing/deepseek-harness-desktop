@@ -86,10 +86,10 @@ const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_D
 if (userDataOverride !== undefined) {
   app.setPath('userData', path.resolve(userDataOverride))
 } else {
-  // app.name below follows the display name, and the default userData
-  // directory derives from app.name — pin it to the functional identity so
-  // the directory never follows a display-name change.
-  app.setPath('userData', path.join(app.getPath('appData'), PRODUCT.name))
+  // The default userData directory derives from app.name, which now follows
+  // the product display name — pin it to the frozen data-directory identity
+  // so existing data never follows a rename.
+  app.setPath('userData', path.join(app.getPath('appData'), PRODUCT.dataDirectoryName))
 }
 
 // The running application reports this name to macOS: the Dock tooltip and

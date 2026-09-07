@@ -28,7 +28,7 @@ import {
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const driverPath = path.join(repositoryRoot, 'tests', 'fixtures', 'installed-controller-driver.mjs')
-const PRODUCT_NAME = 'DeepSeek Harness Desktop'
+const PRODUCT_NAME = 'DeepSeek Harness'
 
 // An interrupted run (Ctrl-C, CI cancel) must never leave installed-app
 // processes, temp install trees, or DMG mounts on the user's machine. The

@@ -37,7 +37,10 @@ import {
 } from '../helpers/shared-home-driver.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const PRODUCT_NAME = 'DeepSeek Harness Desktop'
+// The archived previous artifact (M3) still carries the historical bundle
+// name; the candidate carries the current product name.
+const PREVIOUS_APP_NAME = 'DeepSeek Harness Desktop'
+const CANDIDATE_APP_NAME = 'DeepSeek Harness'
 const UPSTREAM_REPO = 'https://github.com/deepseek-ai/deepseek-harness.git'
 const CURRENT_BASELINE = { tag: 'dsh-v0.1.2-alpha.3', npmVersion: '0.1.2-alpha.3' }
 
@@ -262,8 +265,8 @@ export async function runUpgradeRehearsal(input) {
   )
 
   // -- Step 2: install both candidates; verify embedded manifests. ----------
-  const previousInstall = await installFromDmg(previous.dmgPath, PRODUCT_NAME)
-  const candidateInstall = await installFromDmg(candidate.dmgPath, PRODUCT_NAME)
+  const previousInstall = await installFromDmg(previous.dmgPath, PREVIOUS_APP_NAME)
+  const candidateInstall = await installFromDmg(candidate.dmgPath, CANDIDATE_APP_NAME)
   const previousManifest = await verifyEmbeddedManifest(previousInstall, previous)
   const candidateManifest = await verifyEmbeddedManifest(candidateInstall, candidate)
   record(

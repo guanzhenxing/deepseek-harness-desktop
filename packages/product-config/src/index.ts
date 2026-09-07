@@ -5,10 +5,17 @@
  * runtime.
  */
 export const PRODUCT = Object.freeze({
-  name: 'DeepSeek Harness Desktop',
-  // What the system chrome (Dock, menu bar) displays. `name` stays the
-  // functional identity — user-data directory, .app bundle filename and
-  // executable — and must not follow the display name.
+  // The .app bundle filename, the executable, the helpers and every
+  // system-facing name. The Dock hover of a running app shows the bundle
+  // filename, so this is the name users see.
+  name: 'DeepSeek Harness',
+  // Frozen historical directory name: user data lives in
+  // ~/Library/Application Support/<dataDirectoryName> and must never follow
+  // product renames (Electron derives the default from app.name, so the
+  // launcher pins userData to this value instead).
+  dataDirectoryName: 'DeepSeek Harness Desktop',
+  // Same value as `name`; kept as the explicit display identity for UI
+  // labels so a future split (if ever needed) has one place to change.
   displayName: 'DeepSeek Harness',
   appId: 'local.dsh.harness.desktop',
   binName: 'dsh-desktop',
