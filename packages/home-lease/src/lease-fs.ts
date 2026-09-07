@@ -92,7 +92,10 @@ export async function directoryIdentity(dirname: string, label: string): Promise
 }
 
 export async function syncDirectory(dirname: string): Promise<void> {
-  const handle = await open(dirname, 'r')
+  // The fsync target must be the directory the guard validated, never a
+  // swapped symlink referent or non-directory.
+  const flags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW
+  const handle = await open(dirname, flags)
   try {
     await handle.sync()
   } finally {

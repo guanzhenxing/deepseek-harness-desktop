@@ -629,9 +629,30 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
   }
 }
 
+/**
+ * Shape-safe open for every file the inspection reads: O_NOFOLLOW refuses a
+ * path swapped for a symlink after the lstat shape check, O_NONBLOCK keeps a
+ * swapped FIFO from blocking the open, and the descriptor itself must be a
+ * regular file before it reaches a read path. Every refusal degrades to the
+ * same 'unreadable' the shape check already reports.
+ */
 async function openFile(file: string) {
-  const fs = await import('node:fs/promises')
-  return fs.open(file, 'r').catch(() => undefined)
+  const { constants, open } = await import('node:fs/promises')
+  const handle = await open(
+    file,
+    constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
+  ).catch(() => undefined)
+  if (handle === undefined) return undefined
+  try {
+    if (!(await handle.stat()).isFile()) {
+      await handle.close()
+      return undefined
+    }
+    return handle
+  } catch {
+    await handle.close().catch(() => undefined)
+    return undefined
+  }
 }
 
 /**
