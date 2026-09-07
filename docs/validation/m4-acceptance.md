@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.17 轮全部处置——哨兵身份判定封死跨副本 doctor 误删、anchor-less 域 fail-closed、截断帧拒绝、CLI watchdog 覆盖后代窗口——后于制品 HEAD `3c558db` 全链重验通过，2026-09-07，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.18 修复 ownerless 哨兵、zstd 截断帧、watchdog 停止竞态、DMG 挂载失败清理与预算收束——制品 HEAD `5e7ac8c` 于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -225,9 +225,23 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 **本轮自查（复现驱动攻击新鲜代码）**：真实 `~/.dsh` 预检复跑仍 allow（anchor-less 收紧不误拒真实布局）；伪造/畸形哨兵均落保守拒绝（DoS 方向安全）；31c9d84 前候选的旧格式哨兵（无身份）遇新 doctor 按不可解析拒删——内部候选共存边界，记录于本节，不入协议。
 
+## 5.18 codex 修复轮（2026-09-07，基线 `feea931`）
+
+本轮未采纳“只修测试或仅记录限制”的结论；以下问题均已复现、修复并加入回归。
+
+| # | 级别 | 问题 | 处置 |
+| --- | --- | --- | --- |
+| 1 | P1 | owner 缺失时，doctor 将不可读/链接/FIFO 哨兵视为旧布局缺失，FIFO 还能阻塞清理 | 哨兵改为有界 `O_NOFOLLOW|O_NONBLOCK` 普通文件读取；异常一律 `IDENTITY_UNKNOWN` 拒删。新增 FIFO 不阻塞、不可读拒删和链接替换回归。`owner.json` 的读取与 fsync 同步同样改为无跟随普通文件路径。 |
+| 2 | P1 | 哨兵只含 supervisor，supervisor 退出但已获授权 Host 仍写入时，owner 被删后 doctor 可拆锁 | 哨兵以原子 JSON 镜像 generation、supervisor、Host、`pendingSpawn`；Host/supervisor 任一存活或不可识别，或 spawn 尚待确认，doctor 均拒删。 |
+| 3 | P1 | `.zstd` 完整帧头但没有 block payload 仍被格式勘察接受 | 解析标准帧的 block 头、块类型、声明负载和可选 checksum，并要求完整终止 block；6 字节 header-only 负例拒绝，真实 `zstdCompressSync` 正例接受。 |
+| 4 | P2 | CLI watchdog 可并发积累检查；停止后旧检查失败仍可杀子进程 | 单飞检查 + stopped 前后复核；停止后完成的失败不再计数或终止进程，`GUARD_BUSY` 仍不视为丢锁。 |
+| 5 | P2 | `hdiutil attach` 成功、输出处理失败的窗口没有清理登记 | 改为预建确定 mountpoint，attach 成功后立刻登记 detach；异常路径也卸载并删除临时 mountpoint。 |
+| 6 | P2 | 根槽位与 foreign projcache 的 unknown 记录可绕过共享预算 | 所有根槽位走 `flagUnknown`，预算耗尽时清除全部格式声明（包括 projcache）并仅附加固定 `home` 标记，输出上界保持 `unknowns + 1`。 |
+| 7 | P2 | 真正的 SIGTERM 退出仍沿用了 SIGINT 的 130 | smoke、rehearsal 共用信号安装器，SIGINT=130、SIGTERM=143；行为测试在真实 handler 上断言清理重试后退出。 |
+
 ## 6. 门禁结果
 
-**最终轮（§5.17 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `3c558db`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（369 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（83 测试，9 文件，含旧格式身份兼容）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**：`storage-inner-symlink` 负例命中 CLI exit 5；重启轮续写播种会话并字节级验证三轮原文标记；独立 `zstd-session-admission` 步骤在本轮引入）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交（如本节本身）不改代码与制品，制品绑定 `3c558db`。
+**最终轮（§5.18 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `5e7ac8c`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（378 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（85 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `5e7ac8c`。首次 `package:dir` 曾因 Electron 下载 TLS 连接中断而停止，未生成候选制品；缓存下载完成后从头重跑的本轮才是本段记录的 13/13 结果。
 
 前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`…`6fe04f5`/`31c9d84` 均 13/13。均被 §5.17 轮取代，记录保留于 git 历史。
 
@@ -237,14 +251,14 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 | 项                             | 值                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-3c558db`，DMG SHA `ecf6ee304e70419d49e079e080f13391d357c4ac78353cb082a51d3f5dfabc4b`（绑定 §5.17 轮全部代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-5e7ac8c`，DMG SHA `29b59d69a6b4967704a749291253f03e1da783ad7c988ab31aa216d48ff00334`，兼容清单 SHA `1d03ddc1d5ed1b73d063a93f865723edc81cc3ea1266dae144c49a23bd6a21d2`（绑定 §5.18 代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`            |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                             |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                               |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.17 轮全部处置后于制品 HEAD `3c558db` 重验通过，2026-09-07）。
+- 自动测试完成 → **`candidate-verified`**（§5.18 轮全部处置后于制品 HEAD `5e7ac8c` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
