@@ -38,6 +38,8 @@ export type InstalledRuntimePaths = Readonly<{
   leaseHelper: string
   recoveryHtml: string
   recoveryPreload: string
+  compileCachePreload: string
+  loadingHtml: string
   compatibilityManifest: string
   trayIcon: string
 }>
@@ -60,6 +62,8 @@ export function resolveInstalledRuntime(resourcesPath: string): InstalledRuntime
     leaseHelper: path.join(root, 'native', 'lease-helper'),
     recoveryHtml: path.join(recovery, 'recovery-view.html'),
     recoveryPreload: path.join(recovery, 'recovery-preload.cjs'),
+    compileCachePreload: path.join(recovery, 'host-compile-cache.cjs'),
+    loadingHtml: path.join(recovery, 'loading-view.html'),
     compatibilityManifest: path.join(root, 'compatibility.json'),
     trayIcon: path.join(root, 'icons', 'trayTemplate.png'),
   })

@@ -351,6 +351,11 @@ async function stageRecoveryAssets() {
     path.join(launcherLib, 'recovery-preload.cjs'),
     path.join(target, 'recovery-preload.cjs'),
   )
+  await cp(
+    path.join(launcherLib, 'host-compile-cache.cjs'),
+    path.join(target, 'host-compile-cache.cjs'),
+  )
+  await cp(path.join(launcherSrc, 'loading-view.html'), path.join(target, 'loading-view.html'))
 }
 
 async function assertIcons() {

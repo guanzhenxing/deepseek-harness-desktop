@@ -4,6 +4,20 @@ import type { HostBootstrap } from '@dsh-desktop/host-supervisor'
 import { runDshHost, type HostControlTransport } from '@dsh-desktop/host-supervisor/host-runner'
 import { assertBootProfile, type BootMode } from '@dsh-desktop/host-supervisor/boot-profile'
 
+// Must run before the dynamically loaded upstream app graph starts
+// compiling. The launcher also injects a --require preload for the same
+// purpose; this in-graph enabler covers every entry route (and is a no-op
+// when the preload already armed the cache).
+try {
+  const cacheDir = process.env.DSH_HOST_COMPILE_CACHE
+  const nodeModule = (await import('node:module')) as {
+    enableCompileCache?: (directory?: string) => unknown
+  }
+  nodeModule.enableCompileCache?.(cacheDir === undefined || cacheDir === '' ? undefined : cacheDir)
+} catch {
+  /* uncached boot is always safe */
+}
+
 type ElectronHostBootstrap = Omit<HostBootstrap, 'mode'> & {
   mode: BootMode
   startIdentity: string

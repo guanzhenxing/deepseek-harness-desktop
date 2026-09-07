@@ -70,12 +70,33 @@ class ElectronManagedHostProcess implements ManagedHostProcess {
  * registers the child's OS identity on the home lease first and only then
  * delivers the bootstrap message through `deliverBootstrap`.
  */
-export function createElectronHostProcessFactory(hostEntry: string): HostProcessFactory {
+export function createElectronHostProcessFactory(input: {
+  hostEntry: string
+  /**
+   * Node's on-disk compile cache for the Host's module graph: the upstream
+   * runtime's cold boot spends most of its wall time compiling hundreds of
+   * modules, and the cache removes that work from every boot after the
+   * first.
+   */
+  compileCache?: Readonly<{ preloadPath: string; cacheDirectory: string }>
+}): HostProcessFactory {
   return {
     async spawnWaiting() {
       const startIdentity = randomUUID()
-      const child = utilityProcess.fork(hostEntry, [], {
-        env: sanitizeHostEnvironment(process.env),
+      const sanitized = sanitizeHostEnvironment(process.env)
+      const env =
+        input.compileCache === undefined
+          ? sanitized
+          : {
+              ...sanitized,
+              // Sanitization stripped any inherited NODE_OPTIONS; the
+              // compile-cache preload is the single deliberate addition.
+              // The quotes carry resource paths with spaces.
+              NODE_OPTIONS: `--require "${input.compileCache.preloadPath}"`,
+              DSH_HOST_COMPILE_CACHE: input.compileCache.cacheDirectory,
+            }
+      const child = utilityProcess.fork(input.hostEntry, [], {
+        env,
         serviceName: 'DeepSeek Harness Host',
         stdio: 'ignore',
       })
