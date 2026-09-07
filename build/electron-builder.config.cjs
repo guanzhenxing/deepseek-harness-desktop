@@ -8,6 +8,9 @@
 // Version facts are read from the repository manifests and the compiled
 // product-config package; nothing is hand-duplicated here:
 //   - appId/productName      ← packages/product-config (PRODUCT)
+//   - display name           ← PRODUCT.displayName (mac.extendInfo + the
+//     afterPack helper-bundle rename that keeps Electron's child-process
+//     lookup working)
 //   - electronVersion        ← apps/desktop-launcher devDependencies.electron
 //   - app version            ← release/staging/app-shell/package.json
 //     (written by scripts/stage-runtime.mjs from the root package.json)
@@ -32,6 +35,9 @@ const root = path.resolve(__dirname, '..')
 // Node >= 22.12 require(esm) gives us the compiled PRODUCT without duplicating
 // the appId/productName strings (CI/dev baseline is Node 24.11.1).
 const { PRODUCT } = require(path.join(root, 'packages', 'product-config', 'lib', 'index.js'))
+const { renameMacHelperBundles } = require(
+  path.join(root, 'scripts', 'rename-mac-helper-bundles.mjs'),
+)
 const launcherManifest = require(path.join(root, 'apps', 'desktop-launcher', 'package.json'))
 const staging = path.join(root, 'release', 'staging')
 const icons = path.join(root, 'release', 'icons')
@@ -70,9 +76,30 @@ module.exports = {
     target: process.env.DSH_PACKAGE_TARGET === 'dmg' ? 'dmg' : 'dir',
     icon: path.join(icons, 'icon.icns'),
     identity: null,
+    // The Dock and the menu bar display these keys, not the bundle filename.
+    // extendInfo is deep-assigned after electron-builder's CFBundleName/
+    // CFBundleDisplayName defaults (verified in the installed app-builder-lib
+    // 26.15.3, macPackager.applyCommonInfo). CFBundleName is what Electron
+    // uses to resolve child-process helpers, so afterPack below renames the
+    // helper bundles to the same base name — a mismatch aborts at startup.
+    extendInfo: {
+      CFBundleName: PRODUCT.displayName,
+      CFBundleDisplayName: PRODUCT.displayName,
+    },
   },
   async afterPack(context) {
-    const resources = path.join(context.appOutDir, `${PRODUCT.name}.app`, 'Contents', 'Resources')
+    const appContents = path.join(context.appOutDir, `${PRODUCT.name}.app`, 'Contents')
+    const renamedHelpers = renameMacHelperBundles({
+      appContentsPath: appContents,
+      fromName: PRODUCT.name,
+      toName: PRODUCT.displayName,
+    })
+    if (renamedHelpers.length === 0) {
+      throw new Error(
+        'no helper bundles were renamed — CFBundleName and the helper bundle names must stay in sync',
+      )
+    }
+    const resources = path.join(appContents, 'Resources')
     for (const entry of [
       'runtime-host',
       'runtime-cli',

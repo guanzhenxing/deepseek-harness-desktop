@@ -6,6 +6,10 @@
  */
 export const PRODUCT = Object.freeze({
   name: 'DeepSeek Harness Desktop',
+  // What the system chrome (Dock, menu bar) displays. `name` stays the
+  // functional identity — user-data directory, .app bundle filename and
+  // executable — and must not follow the display name.
+  displayName: 'DeepSeek Harness',
   appId: 'local.dsh.harness.desktop',
   binName: 'dsh-desktop',
   cliName: 'dsh-native',

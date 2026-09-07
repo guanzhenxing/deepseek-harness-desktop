@@ -132,7 +132,7 @@ function loadReleaseDshLine(): string | undefined {
 const releaseDshLine = loadReleaseDshLine()
 app.setAboutPanelOptions(
   buildAboutPanelOptions({
-    productName: PRODUCT.name,
+    displayName: PRODUCT.displayName,
     desktopVersion: app.getVersion(),
     electronVersion: process.versions.electron,
     ...(releaseDshLine === undefined ? {} : { dshLine: releaseDshLine }),
@@ -184,7 +184,7 @@ class ElectronWindowPort {
       minWidth: minimum.width,
       minHeight: minimum.height,
       show: false,
-      title: PRODUCT.name,
+      title: PRODUCT.displayName,
       webPreferences: DESKTOP_WEB_PREFERENCES,
     })
     if (restored.maximized) this.window.maximize()
@@ -421,7 +421,7 @@ function createNativeUi(showMainWindow: () => void): NativeUiSession {
           })
           image.setTemplateImage(true)
           const created = new Tray(image)
-          created.setToolTip(PRODUCT.name)
+          created.setToolTip(PRODUCT.displayName)
           created.on('click', () => session.showMain())
           return created
         })()

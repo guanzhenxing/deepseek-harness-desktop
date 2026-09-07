@@ -35,11 +35,11 @@ export type MenuItemSpec =
  * only through the system terminate path and the shared before-quit state
  * machine, and no system-wide shortcut is shadowed.
  */
-export function buildApplicationMenuSpec(input: { productName: string }): MenuItemSpec[] {
+export function buildApplicationMenuSpec(input: { displayName: string }): MenuItemSpec[] {
   return [
     {
       kind: 'submenu',
-      label: input.productName,
+      label: input.displayName,
       items: [
         { kind: 'role', role: 'about' },
         { kind: 'separator' },
@@ -49,7 +49,7 @@ export function buildApplicationMenuSpec(input: { productName: string }): MenuIt
         { kind: 'role', role: 'hideOthers' },
         { kind: 'role', role: 'unhide' },
         { kind: 'separator' },
-        { kind: 'action', action: 'quit', label: `退出 ${input.productName}` },
+        { kind: 'action', action: 'quit', label: `退出 ${input.displayName}` },
       ],
     },
     { kind: 'role', role: 'editMenu', label: 'Edit' },
@@ -68,7 +68,7 @@ export function buildApplicationMenuSpec(input: { productName: string }): MenuIt
       kind: 'submenu',
       label: 'Window',
       items: [
-        { kind: 'action', action: 'show', label: `显示 ${input.productName}` },
+        { kind: 'action', action: 'show', label: `显示 ${input.displayName}` },
         { kind: 'separator' },
         { kind: 'role', role: 'minimize' },
         { kind: 'role', role: 'zoom' },
@@ -100,7 +100,7 @@ export function buildTrayMenuSpec(status: TrayStatus): MenuItemSpec[] {
  * the artifact embedded, not a separately maintained copy.
  */
 export function buildAboutPanelOptions(input: {
-  productName: string
+  displayName: string
   desktopVersion: string
   electronVersion: string
   dshLine?: string
@@ -111,7 +111,7 @@ export function buildAboutPanelOptions(input: {
   credits?: string
 }> {
   return Object.freeze({
-    applicationName: input.productName,
+    applicationName: input.displayName,
     applicationVersion: input.desktopVersion,
     version: `Electron ${input.electronVersion}`,
     ...(input.dshLine === undefined ? {} : { credits: input.dshLine }),
@@ -143,7 +143,7 @@ export class NativeUiSession {
 
   initialize(status: TrayStatus): void {
     this.#status = status
-    this.#port.setApplicationMenu(buildApplicationMenuSpec({ productName: PRODUCT.name }))
+    this.#port.setApplicationMenu(buildApplicationMenuSpec({ displayName: PRODUCT.displayName }))
     this.#port.setTrayMenu(buildTrayMenuSpec(status))
   }
 

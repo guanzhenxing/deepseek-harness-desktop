@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { BrowserWindow, ipcMain } from 'electron'
 
+import { PRODUCT } from '@dsh-desktop/product-config'
 import type { RecoveryView } from '@dsh-desktop/shell-core'
 
 import { RECOVERY_DOCUMENT_PATH, toIpcView, validateRecoveryIpc } from './recovery-ipc.js'
@@ -34,7 +35,7 @@ export function createRecoveryWindow(options: {
     width: 720,
     height: 480,
     show: false,
-    title: 'DeepSeek Harness Desktop — 恢复',
+    title: `${PRODUCT.displayName} — 恢复`,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
