@@ -828,6 +828,44 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('inspects a many-frame session with bounded file reads, not per-block syscalls', async () => {
+    const { open } = await import('node:fs/promises')
+    const { zstdDecompressSync } = await import('node:zlib')
+    const { vi } = await import('vitest')
+    // The upstream writer flushes one small zstd frame per append; real
+    // homes hold thousands of frames per session. Walking every frame must
+    // stay I/O-bounded: sequential buffered reads, never one syscall per
+    // block header.
+    const frame = Buffer.concat([
+      Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x01]), // single-segment, fcs 1
+      blockHeader({ last: true, type: 0b01, size: 1 }), // RLE: one content byte
+      Buffer.from([0x41]),
+    ])
+    expect(() => zstdDecompressSync(Buffer.concat(Array(20_000).fill(frame)))).not.toThrow()
+    const home = await tempHome()
+    const probe = await open(path.join(home, '.probe'), 'w')
+    const fileHandlePrototype = Object.getPrototypeOf(probe)
+    await probe.close()
+    const readSpy = vi.spyOn(fileHandlePrototype, 'read')
+    try {
+      const sessionDir = path.join(home, 'sessions', '--p--', 'many-frames')
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(
+        path.join(sessionDir, 'session.jsonl.zstd'),
+        Buffer.concat(Array(20_000).fill(frame)),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.formats.sessions).toBe('dsh-session-jsonl-0')
+      expect(observed.unknownPaths).toEqual([])
+      // 20k frames were 40k+ positional reads before buffering; buffered
+      // sequential reads need orders of magnitude fewer syscalls.
+      expect(readSpy.mock.calls.length).toBeLessThan(300)
+    } finally {
+      readSpy.mockRestore()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('fails anchor-less storage domains closed instead of self-anchoring', async () => {
     const home = await tempHome()
     try {

@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 
 export type HomeFormatState = Readonly<{
@@ -297,6 +298,48 @@ function readFrameContentSize(header: Buffer, at: number, length: number): numbe
   return value > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(value)
 }
 
+/**
+ * Sequential buffered positional reads for the zstd walk. The upstream
+ * writer flushes one small frame per append, so real session files hold
+ * thousands of frames; reading every frame or block header with its own
+ * pread made admission I/O-bound (hundreds of thousands of syscalls on
+ * real homes). One forward-moving chunk at a time keeps positional-read
+ * semantics — every byte still comes from the file at the offset the walk
+ * is at — while the shared budget accounts for each byte the OS reads.
+ */
+class ChunkedReader {
+  readonly #handle: FileHandle
+  #chunk: Buffer = Buffer.alloc(0)
+  #start = 0
+
+  constructor(handle: FileHandle) {
+    this.#handle = handle
+  }
+
+  /**
+   * Exactly `length` bytes at `position` when the file has them, fewer at
+   * EOF, or undefined when the shared budget cannot cover the read.
+   */
+  async read(
+    position: number,
+    length: number,
+    budget: InspectionBudget,
+  ): Promise<Buffer | undefined> {
+    const cached = position - this.#start
+    if (cached >= 0 && cached + length <= this.#chunk.length) {
+      return this.#chunk.subarray(cached, cached + length)
+    }
+    const want = Math.min(64 * 1024, budget.bytes + 1)
+    if (want < length) return undefined
+    const chunk = Buffer.alloc(want)
+    const { bytesRead } = await this.#handle.read(chunk, 0, want, position)
+    if (!takeBytes(budget, bytesRead)) return undefined
+    this.#chunk = chunk.subarray(0, bytesRead)
+    this.#start = position
+    return this.#chunk.subarray(0, Math.min(length, bytesRead))
+  }
+}
+
 async function readBoundedText(
   file: string,
   capBytes: number,
@@ -501,6 +544,7 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
     // The size check uses the stat size, so a huge declared payload costs
     // nothing to verify.
     const stat = await handle.stat()
+    const reader = new ChunkedReader(handle)
     let offset = 0
     let sawStandardFrame = false
     // The skippable-prefix walk is bounded by the SHARED byte budget (each
@@ -509,18 +553,12 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
     for (let hop = 0; hop < 65_536; hop += 1) {
       const readLength = Math.min(8, budget.bytes + 1)
       if (readLength < 5) return false
-      const { buffer, bytesRead } = await handle.read(
-        Buffer.alloc(readLength),
-        0,
-        readLength,
-        offset,
-      )
-      if (!takeBytes(budget, bytesRead)) return false
-      if (bytesRead < 5) return false
-      const magic = buffer.readUInt32LE(0)
+      const probe = await reader.read(offset, readLength, budget)
+      if (probe === undefined || probe.length < 5) return false
+      const magic = probe.readUInt32LE(0)
       if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {
-        if (bytesRead < 8) return false
-        const payload = buffer.readUInt32LE(4)
+        if (probe.length < 8) return false
+        const payload = probe.readUInt32LE(4)
         const frameEnd = offset + 8 + payload
         if (!Number.isSafeInteger(frameEnd) || stat.size < frameEnd) return false
         if (stat.size === frameEnd) return sawStandardFrame
@@ -528,7 +566,7 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
         continue
       }
       if (magic !== 0xfd2fb528) return false
-      const descriptor = buffer[4]
+      const descriptor = probe[4]
       if (descriptor === undefined) return false
       if ((descriptor & 0b0000_1000) !== 0) return false // reserved bit must be zero
       const fcsCode = (descriptor >> 6) & 0b11
@@ -541,14 +579,12 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
       // The file must COVER the complete header — a 5-byte file with a
       // 6-byte-header descriptor is truncated, whatever was read so far.
       if (stat.size < offset + headerLength) return false
-      let headerBytes = buffer.subarray(0, bytesRead)
+      let headerBytes = probe
       if (headerLength > 8) {
-        const extendedLength = Math.min(headerLength, budget.bytes + 1)
-        if (extendedLength < headerLength) return false
-        const extended = await handle.read(Buffer.alloc(extendedLength), 0, extendedLength, offset)
-        if (!takeBytes(budget, extended.bytesRead)) return false
-        if (extended.bytesRead < headerLength) return false
-        headerBytes = extended.buffer.subarray(0, extended.bytesRead)
+        if (headerLength > budget.bytes + 1) return false
+        const extended = await reader.read(offset, headerLength, budget)
+        if (extended === undefined || extended.length < headerLength) return false
+        headerBytes = extended
       }
       // RFC 8878 grammar the block walk must agree with: every block's
       // declared size is bounded by Block_Maximum_Size = min(Window_Size,
@@ -584,9 +620,9 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
       let hasCompressedBlock = false
       let regenerated = 0
       for (let block = 0; block < 65_536; block += 1) {
-        const header = await handle.read(Buffer.alloc(3), 0, 3, blockOffset)
-        if (!takeBytes(budget, header.bytesRead) || header.bytesRead !== 3) return false
-        const blockHeader = header.buffer.readUIntLE(0, 3)
+        const header = await reader.read(blockOffset, 3, budget)
+        if (header === undefined || header.length !== 3) return false
+        const blockHeader = header.readUIntLE(0, 3)
         const lastBlock = (blockHeader & 0b1) === 1
         const blockType = (blockHeader >> 1) & 0b11
         const blockSize = blockHeader >>> 3
