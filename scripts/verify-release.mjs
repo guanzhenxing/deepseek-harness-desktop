@@ -49,9 +49,19 @@ const steps = [
     name: 'archive candidate + rehearse:upgrade',
     run() {
       // The rehearsal needs explicit previous/candidate indexes: the previous
-      // candidate is the archived M3 DMG; the candidate is the DMG this chain
-      // just built and verified.
-      const previousIndex = path.join(repositoryRoot, 'release', 'previous', 'artifacts.json')
+      // candidate is the frozen M4 baseline when present (rc.1 qualification
+      // rehearses M4 → rc.1); release/previous (M3) stays as the historical
+      // fallback for chains that predate the freeze.
+      const m4Baseline = path.join(
+        repositoryRoot,
+        'release',
+        'baselines',
+        'm4-caa5c51',
+        'artifacts.json',
+      )
+      const previousIndex = existsSync(m4Baseline)
+        ? m4Baseline
+        : path.join(repositoryRoot, 'release', 'previous', 'artifacts.json')
       const candidateIndex = path.join(repositoryRoot, 'release', 'candidate', 'artifacts.json')
       const candidateDir = path.join(repositoryRoot, 'release', 'candidate')
       if (!existsSync(previousIndex)) {

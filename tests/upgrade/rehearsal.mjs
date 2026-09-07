@@ -7,13 +7,13 @@
 //
 // Usage (via scripts/rehearse-upgrade.mjs):
 //   pnpm rehearse:upgrade -- \
-//     --previous release/previous/artifacts.json \
+//     --previous release/baselines/m4-caa5c51/artifacts.json \
 //     --candidate release/candidate/artifacts.json
 import { spawn } from 'node:child_process'
 import { clearTimeout, setTimeout } from 'node:timers'
 import { existsSync } from 'node:fs'
 import { Buffer } from 'node:buffer'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -37,8 +37,9 @@ import {
 } from '../helpers/shared-home-driver.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-// The archived previous artifact (M3) still carries the historical bundle
-// name; the candidate carries the current product name.
+// The frozen M4 baseline was built at caa5c51 — BEFORE the app-bundle rename
+// (56c9c6e) — so its DMG still carries 'DeepSeek Harness Desktop.app'; the
+// rc.1 candidate carries the renamed bundle.
 const PREVIOUS_APP_NAME = 'DeepSeek Harness Desktop'
 const CANDIDATE_APP_NAME = 'DeepSeek Harness'
 const UPSTREAM_REPO = 'https://github.com/deepseek-ai/deepseek-harness.git'
@@ -176,6 +177,11 @@ async function seedSessionWithCli(cliEntry, fixture, text) {
   }
 }
 
+/** The session/list item carries its title inside the cached projection. */
+function titleOf(item) {
+  return item?.projections?.values?.title
+}
+
 async function observeUpstreamTags() {
   return new Promise((resolve) => {
     const child = spawn('git', ['ls-remote', '--tags', UPSTREAM_REPO], {
@@ -271,8 +277,11 @@ export async function runUpgradeRehearsal(input) {
   const candidateManifest = await verifyEmbeddedManifest(candidateInstall, candidate)
   record(
     'embedded-manifests',
-    previousManifest.schemaVersion === 1 && candidateManifest.schemaVersion === 2,
-    `previous schema ${previousManifest.schemaVersion} (M3 reader-only), candidate schema ${candidateManifest.schemaVersion}`,
+    previousManifest.schemaVersion === 2 &&
+      candidateManifest.schemaVersion === 2 &&
+      previousManifest.dsh?.npmVersion === '0.1.2-alpha.3' &&
+      candidateManifest.dsh?.npmVersion === CURRENT_BASELINE.npmVersion,
+    `previous ${previousManifest.dsh?.npmVersion} (schema ${previousManifest.schemaVersion}), candidate ${candidateManifest.dsh?.npmVersion} (schema ${candidateManifest.schemaVersion})`,
   )
 
   let fixture
@@ -283,6 +292,7 @@ export async function runUpgradeRehearsal(input) {
     const bundle = await seedThirdPartyBundle(fixture.home)
 
     let seededSessionId
+    let seededTitle
     await runInstalledApp({
       executable: previousInstall.executable,
       mode: 'conversation',
@@ -296,6 +306,28 @@ export async function runUpgradeRehearsal(input) {
           cwd: fixture.cwd,
           text: 'previous desktop seeds the home',
         })
+        // Pin an explicit human title from the PREVIOUS release: titles are
+        // projection-cache values, so the candidate keeping this title after
+        // the upgrade is the API-level proof that rc.1 reads M4's cached v4
+        // projections (upstream's cross-version read-compat contract).
+        const renamed = await client.rpc('session/rename', {
+          request: { sessionId: seededSessionId, title: 'rehearsal-cross-version-title' },
+        })
+        if (renamed.title !== 'rehearsal-cross-version-title') {
+          fail(
+            'previous-desktop-boot',
+            `rename did not accept the title: ${JSON.stringify(renamed).slice(0, 200)}`,
+          )
+        }
+        const listed = await client.rpc('session/list', { _request: {} })
+        const item = (listed.items ?? []).find((entry) => entry.sessionId === seededSessionId)
+        if (item === undefined || titleOf(item) !== 'rehearsal-cross-version-title') {
+          fail(
+            'previous-desktop-boot',
+            `previous list does not show the pinned title: ${JSON.stringify(item).slice(0, 200)}`,
+          )
+        }
+        seededTitle = titleOf(item)
       },
     })
     await waitForPreviousLeaseGone(previousInstall.cliEntry, fixture.home, fixture.cwd)
@@ -351,6 +383,12 @@ export async function runUpgradeRehearsal(input) {
           fail(
             'candidate upgrade',
             `session/list after upgrade does not include the seeded session ${seededSessionId}`,
+          )
+        }
+        if (titleOf(oldItem) !== seededTitle) {
+          fail(
+            'candidate upgrade',
+            `upgraded session lost its M4 title: expected ${JSON.stringify(seededTitle)}, listed ${JSON.stringify(oldItem.title)}`,
           )
         }
         const continued = await driveOneTurn(client, {
@@ -446,8 +484,15 @@ export async function runUpgradeRehearsal(input) {
         const client = await createWebApiClient(ready.surfaceUrl)
         const listed = await client.rpc('session/list', { _request: {} })
         const items = listed.items ?? []
-        if (!items.some((item) => item.sessionId === seededSessionId)) {
+        const restartedItem = items.find((item) => item.sessionId === seededSessionId)
+        if (restartedItem === undefined) {
           fail('candidate restart', `restart cannot list the seeded session ${seededSessionId}`)
+        }
+        if (titleOf(restartedItem) !== seededTitle) {
+          fail(
+            'candidate restart',
+            `restarted session lost its title: expected ${JSON.stringify(seededTitle)}, listed ${JSON.stringify(restartedItem.title)}`,
+          )
         }
         if (items.length < 3) {
           fail('candidate restart', `restart lists ${items.length} sessions, expected at least 3`)
@@ -496,6 +541,71 @@ export async function runUpgradeRehearsal(input) {
       true,
       'restart re-reads the seeded history (continued in place, all three rounds preserved)',
     )
+
+    // -- Step 6.6: the upgraded home's format facts and the M4 refusal. -----
+    // The candidate must have kept data epoch 1; the projection cache may now
+    // hold v4 records M4 wrote and v5 records rc.1 wrote (identity = newest
+    // stamp). If any v5 exists, the M4 release — which reads only v4 — must
+    // refuse this home without touching it.
+    {
+      const upgradedMarker = JSON.parse(
+        await readFile(path.join(candidateHome, 'run', 'compatibility.json'), 'utf8'),
+      )
+      if (upgradedMarker.dataEpoch !== 1) {
+        fail(
+          'upgraded-home formats',
+          `candidate wrote data epoch ${upgradedMarker.dataEpoch}, expected 1`,
+        )
+      }
+      const projcacheSessions = path.join(
+        candidateHome,
+        'storages',
+        'session_projcache',
+        'sessions',
+      )
+      const stamps = []
+      if (existsSync(projcacheSessions)) {
+        for (const file of await readdir(projcacheSessions)) {
+          if (!file.endsWith('.json')) continue
+          const document = JSON.parse(await readFile(path.join(projcacheSessions, file), 'utf8'))
+          stamps.push(document.version)
+        }
+      }
+      if (stamps.length === 0 || stamps.some((stamp) => stamp !== 4 && stamp !== 5)) {
+        fail(
+          'upgraded-home formats',
+          `projection cache holds stamps outside {4,5}: ${JSON.stringify(stamps)}`,
+        )
+      }
+      const sawV5 = stamps.includes(5)
+      if (sawV5) {
+        const downgradeRoot = await mkdtemp(path.join(tmpdir(), 'dsh-downgrade-'))
+        const downgradeHome = path.join(downgradeRoot, 'home')
+        await cp(candidateHome, downgradeHome, { recursive: true })
+        try {
+          const before = await dataDigests(downgradeHome)
+          const refused = await runInstalledCli(
+            previousInstall.cliEntry,
+            ['--profile', 'headless', 'must be refused'],
+            { home: downgradeHome, cwd: fixture.cwd },
+          )
+          if (refused.code !== 5) {
+            fail(
+              'm4 downgrade refusal',
+              `previous cli exit ${refused.code} on the rc1-written home: ${refused.output.slice(-300)}`,
+            )
+          }
+          await assertOnlyCoordinationChanged('m4 downgrade refusal', downgradeHome, before)
+        } finally {
+          await rm(downgradeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+        }
+      }
+      record(
+        'upgraded-home-formats',
+        true,
+        `epoch 1 kept; projcache stamps ${JSON.stringify([...new Set(stamps)].sort())}${sawV5 ? '; M4 refuses the rc1-written home untouched' : '; no v5 record written yet — M4 refusal not exercised'}`,
+      )
+    }
 
     // -- Step 6.5: a real compressed session must cross candidate admission. --
     // The fixture forces compression:none so the driven rounds stay
@@ -727,8 +837,19 @@ export async function runUpgradeRehearsal(input) {
       } — a real cross-version upgrade requires its own codex/upgrade-dsh-<tag> branch`,
     )
   } finally {
-    if (rehearsalCopy !== undefined) await rehearsalCopy.dispose()
-    if (fixture !== undefined) await fixture.dispose()
+    // Log-then-rethrow keeps a teardown failure from silently masking the
+    // step error it interrupted (an ENOTEMPTY race on the stale-lock removal
+    // once hid the real action error for a whole debugging cycle).
+    if (rehearsalCopy !== undefined)
+      await rehearsalCopy.dispose().catch((error) => {
+        console.error('rehearsal dispose(copy) failed:', error)
+        throw error
+      })
+    if (fixture !== undefined)
+      await fixture.dispose().catch((error) => {
+        console.error('rehearsal dispose(fixture) failed:', error)
+        throw error
+      })
     await candidateInstall.dispose()
     await previousInstall.dispose()
   }
