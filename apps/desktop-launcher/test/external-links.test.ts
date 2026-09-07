@@ -125,6 +125,45 @@ describe('decideMainFrameNavigation', () => {
       decideMainFrameNavigation({ allowedOrigin: undefined, target: 'https://example.com/leave' }),
     ).toBe('deny')
   })
+
+  it('allows exactly the bundled loading page, and only before a surface loads', () => {
+    const loadingPageUrl =
+      'file:///Applications/App.app/Contents/Resources/recovery/loading-view.html'
+    expect(
+      decideMainFrameNavigation({
+        allowedOrigin: undefined,
+        target: loadingPageUrl,
+        loadingPageUrl,
+        surfaceLoaded: false,
+      }),
+    ).toBe('allow')
+    // Any other file URL — including lookalikes — stays blocked.
+    expect(
+      decideMainFrameNavigation({
+        allowedOrigin: undefined,
+        target: 'file:///Applications/App.app/Contents/Resources/recovery/loading-view.html?x=1',
+        loadingPageUrl,
+        surfaceLoaded: false,
+      }),
+    ).toBe('deny')
+    expect(
+      decideMainFrameNavigation({
+        allowedOrigin: undefined,
+        target: 'file:///etc/passwd',
+        loadingPageUrl,
+        surfaceLoaded: false,
+      }),
+    ).toBe('deny')
+    // Once a surface has loaded, the loading page is no longer navigable.
+    expect(
+      decideMainFrameNavigation({
+        allowedOrigin: surfaceOrigin,
+        target: loadingPageUrl,
+        loadingPageUrl,
+        surfaceLoaded: true,
+      }),
+    ).toBe('deny')
+  })
 })
 
 describe('createWindowOpenGuard', () => {

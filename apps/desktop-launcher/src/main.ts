@@ -1,7 +1,7 @@
 import os from 'node:os'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import {
   app,
@@ -156,6 +156,8 @@ class ElectronWindowPort {
   readonly #stateFile: string
   readonly #isQuitting: () => boolean
   readonly #openExternal: OpenExternalAdapter
+  readonly #loadingHtml: string | undefined
+  readonly #loadingPageUrl: string | undefined
   #saveTimer: NodeJS.Timeout | undefined
 
   constructor(input: {
@@ -163,10 +165,14 @@ class ElectronWindowPort {
     stateFile: string
     isQuitting: () => boolean
     openExternal: OpenExternalAdapter
+    loadingHtml?: string
   }) {
     this.#stateFile = input.stateFile
     this.#isQuitting = input.isQuitting
     this.#openExternal = input.openExternal
+    this.#loadingHtml = input.loadingHtml
+    this.#loadingPageUrl =
+      input.loadingHtml === undefined ? undefined : pathToFileURL(input.loadingHtml).href
     const restored = restoreWindowState(input.initialState, workAreas())
     const minimum = minWindowSizeFor(restored)
     this.window = new BrowserWindow({
@@ -196,7 +202,14 @@ class ElectronWindowPort {
     )
     this.window.webContents.on('will-attach-webview', (event) => event.preventDefault())
     const guardNavigation = (event: Electron.Event, target: string): void => {
-      if (decideMainFrameNavigation({ allowedOrigin: this.#allowedOrigin, target }) === 'allow') {
+      if (
+        decideMainFrameNavigation({
+          allowedOrigin: this.#allowedOrigin,
+          target,
+          loadingPageUrl: this.#loadingPageUrl,
+          surfaceLoaded: this.#revealed,
+        }) === 'allow'
+      ) {
         return
       }
       // In-frame navigation is blocked outright — user gesture cannot be
@@ -230,6 +243,29 @@ class ElectronWindowPort {
     this.reloadBudget.noteSurfaceLoaded()
     this.#revealed = true
     this.window.show()
+  }
+
+  /**
+   * Show the bundled loading page while the Host runtime boots, so the app
+   * answers within the first second instead of appearing dead until the
+   * surface is ready. The surface load replaces the page; failures hand the
+   * screen to the recovery window (which hides this one).
+   */
+  async showLoading(): Promise<void> {
+    if (this.#loadingHtml === undefined || this.window.isDestroyed()) return
+    try {
+      await this.window.loadFile(this.#loadingHtml)
+      if (this.window.isDestroyed()) return
+      // The user has now seen this window; dock/tray reveal may target it.
+      this.#revealed = true
+      this.window.show()
+    } catch {
+      /* the surface or the recovery view owns every failure */
+    }
+  }
+
+  hideIfVisible(): void {
+    if (!this.window.isDestroyed() && this.window.isVisible()) this.window.hide()
   }
 
   /**
@@ -483,8 +519,19 @@ async function startApplication(): Promise<void> {
       : async (url) => {
           smokeReport({ kind: 'external-opened', url })
         }
-  const port = new ElectronWindowPort({ initialState, stateFile, isQuitting, openExternal })
+  const port = new ElectronWindowPort({
+    initialState,
+    stateFile,
+    isQuitting,
+    openExternal,
+    // Automated sequences assert against the official surface's load events;
+    // manual launches get the loading page instead of a dead dock icon.
+    ...(smokeMode === undefined && installedRuntime !== undefined
+      ? { loadingHtml: installedRuntime.loadingHtml }
+      : {}),
+  })
   windowPort = port
+  if (smokeMode === undefined) void port.showLoading()
   const showMainWindow = (): void => {
     const port = windowPort
     if (port === undefined) return
@@ -507,8 +554,11 @@ async function startApplication(): Promise<void> {
   })
   // The recovery window is created lazily on first failure: an eagerly
   // created, never-loaded hidden window stalls Electron's quit sequence.
-  const ensureRecoveryWindow = (): RecoveryWindowHandle =>
-    (recoveryWindow ??= createRecoveryWindow({
+  const ensureRecoveryWindow = (): RecoveryWindowHandle => {
+    // The recovery view owns the screen now; the loading window must not
+    // sit behind it claiming a boot that already failed.
+    port.hideIfVisible()
+    return (recoveryWindow ??= createRecoveryWindow({
       onAction: (action) => {
         if (shell === undefined) return
         shell
@@ -531,6 +581,7 @@ async function startApplication(): Promise<void> {
             preloadPath: installedRuntime.recoveryPreload,
           }),
     }))
+  }
   // A dead renderer reloads at most once on the same live Host surface;
   // anything beyond that budget goes to the launcher-owned recovery view.
   port.window.webContents.on('render-process-gone', (_event, details) => {
@@ -594,7 +645,15 @@ async function startApplication(): Promise<void> {
     shutdownDeadlineMs: 1_000,
     createAttempt: (lease, mode) => {
       const attemptSupervisor = new HostSupervisor({
-        factory: createElectronHostProcessFactory(hostEntryPath),
+        factory: createElectronHostProcessFactory({
+          hostEntry: hostEntryPath,
+          compileCache: {
+            preloadPath:
+              installedRuntime?.compileCachePreload ??
+              fileURLToPath(new URL('./host-compile-cache.cjs', import.meta.url)),
+            cacheDirectory: path.join(app.getPath('userData'), 'node-compile-cache'),
+          },
+        }),
         stabilityMs: smokeMode === undefined ? 1_000 : 100,
         onEvent: (event) => {
           if (event.kind === 'failed') {

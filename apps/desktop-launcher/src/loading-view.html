@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+    <title>DeepSeek Harness Desktop</title>
+    <style>
+      /* Deliberately neutral: system-white background, no theme decisions.
+         The real interface replaces this page the moment it is ready. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #fff;
+        color: #333;
+        font: 14px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      .center {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+      }
+      .name {
+        font-size: 15px;
+        letter-spacing: 0.02em;
+      }
+      .hint {
+        color: #888;
+        font-size: 12px;
+      }
+      .spinner {
+        width: 22px;
+        height: 22px;
+        border: 2px solid #ddd;
+        border-top-color: #888;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="center">
+      <div class="spinner"></div>
+      <div class="name">DeepSeek Harness Desktop</div>
+      <div class="hint">正在启动，请稍等…</div>
+    </div>
+  </body>
+</html>

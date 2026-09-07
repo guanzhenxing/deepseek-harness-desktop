@@ -43,14 +43,28 @@ export function externalUrlPolicy(input: {
  * in-frame navigation cannot be reliably attributed to a user gesture, so it
  * must never hand a URL to the system browser. External handoff happens only
  * through the window-open guard (target=_blank links).
+ *
+ * The one addition before a surface exists is the launcher's own bundled
+ * loading page, matched by its exact file URL: the window opens with it
+ * while the Host runtime boots, and once a surface has loaded nothing but
+ * that surface's origin may ever navigate the main frame again.
  */
 export function decideMainFrameNavigation(input: {
   allowedOrigin: string | undefined
   target: string
+  loadingPageUrl?: string | undefined
+  surfaceLoaded?: boolean
 }): 'allow' | 'deny' {
   if (
     input.allowedOrigin !== undefined &&
     isAllowedMainFrameNavigation(input.allowedOrigin, input.target)
+  ) {
+    return 'allow'
+  }
+  if (
+    input.surfaceLoaded !== true &&
+    input.loadingPageUrl !== undefined &&
+    input.target === input.loadingPageUrl
   ) {
     return 'allow'
   }
