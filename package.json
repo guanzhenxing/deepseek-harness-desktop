@@ -17,6 +17,7 @@
     "check:docs": "node scripts/verify-docs.mjs",
     "dsh-native": "node scripts/dsh-native.mjs",
     "generate:compatibility": "node scripts/generate-compatibility.mjs",
+    "generate:release-evidence": "node scripts/generate-release-evidence.mjs",
     "verify:compatibility": "node scripts/verify-compatibility.mjs",
     "verify:dsh-closure": "node scripts/verify-dsh-closure.mjs",
     "verify:patches": "node scripts/verify-patches.mjs",
