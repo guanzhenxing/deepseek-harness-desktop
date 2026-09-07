@@ -9,16 +9,16 @@
 
 | 事实        | 值                                                         |
 | ----------- | ---------------------------------------------------------- |
-| 上游 tag    | `dsh-v0.1.2-alpha.3`                                       |
-| 上游 commit | `dd6322d604e00eec1ba5e0c8541159906a21094a`                 |
-| npm 版本    | `0.1.2-alpha.3`                                            |
+| 上游 tag    | `dsh-v0.1.2-rc.1`                                          |
+| 上游 commit | `a66e4702047846cdaa10c66c9d3df3951f5ea70d`                 |
+| npm 版本    | `0.1.2-rc.1`                                               |
 | 消费方式    | 官方 npm 发布包，逐包精确 pin；零 fork release、零本地补丁 |
 
 证据链接：
 
-- Tag：<https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.3>
-- Commit：<https://github.com/deepseek-ai/deepseek-harness/commit/dd6322d604e00eec1ba5e0c8541159906a21094a>
-- npm tarball：<https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.2-alpha.3.tgz>（integrity 记录于 upstream-artifacts，lockfile 逐包 integrity 由 `verify:dsh-closure` 对照）
+- Tag：<https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-rc.1>
+- Commit：<https://github.com/deepseek-ai/deepseek-harness/commit/a66e4702047846cdaa10c66c9d3df3951f5ea70d>
+- npm tarball：<https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.2-rc.1.tgz>（integrity 记录于 upstream-artifacts，lockfile 逐包 integrity 由 `verify:dsh-closure` 对照）
 
 红线（主方案 §7.1）：DSH 包逐包精确 pin；catalog/overrides/lockfile 由脚本校验，禁止手工漂移；历史本地补丁不自动继承。
 
@@ -28,7 +28,7 @@
 | --------------------- | --------------- | --------------------------------------------------------------------------------- |
 | `@deepseek-ai/cordis` | `4.0.2`         | 独立版本轴，**不是** DSH 版本；按本表声明值检查，绝不按 `@deepseek-ai/*` 前缀推断 |
 | `react`               | `18.3.1`        | 第三方 UI singleton，版本随上游 peer 约束记录                                     |
-| `@deepseek-ai/dsh`    | `0.1.2-alpha.3` | DSH runtime 本体                                                                  |
+| `@deepseek-ai/dsh`    | `0.1.2-rc.1`     | DSH runtime 本体                                                                  |
 
 singleton 规则：整个闭包（lockfile 与每个 staged closure）中每个受监视包只允许一个版本；Host runner（host-supervisor）与 normal bundle（desktop-plugin）是解析锚点，实测必须解析到同一 store 实例。Safe Mode bundle（desktop-recovery-bridge）由 Host 的 cordis loader 加载、自身零 Node import——它的保证来自闭包级唯一性 + 必备文件清单（含 `cordis.patch.yml`），不做解析探测。Node CLI 与 Electron Host 允许各持一份依赖树，但 native ABI 分别以 bundled Node / Electron 验证（`verify-runtime-tree`），两闭包间禁止 symlink 逃逸。
 
@@ -40,7 +40,7 @@ singleton 规则：整个闭包（lockfile 与每个 staged closure）中每个�
 
 执行 M4 时上游已出现新 tag：`dsh-v0.1.2-alpha.4`、`dsh-v0.1.2-alpha.5`、`dsh-v0.1.2-rc.1`（npm dist-tag `latest`）、`dsh-v0.1.3-alpha.1`（未发布 npm）。
 
-按 M4 计划：真实升级只在独立候选分支 `codex/upgrade-dsh-<实际标签>` 上更新 tag/commit/闭包并演练，与本功能分支严格隔离；本分支不制造版本跳转。升级演练以 previous（M3 DMG，`m3-0.0.0-darwin-arm64-f972354`，SHA 见 `release/artifacts.json`）→ candidate 的同基线重装 + 拒绝降级负例完成；演练结论记录于 `docs/upgrade-guide.md`（Task 4 交付）与 `docs/validation/m4-acceptance.md`（Task 5 交付）。
+按 [Post-M4 交付设计](superpowers/specs/2026-09-07-post-m4-delivery-design.md)：真实升级在独立候选分支 `feat/upgrade-dsh-0.1.2-rc.1` 上更新 tag/commit/闭包并演练；升级失败不阻塞 M5/M6，回退保留 M4 `caa5c51` 基线。`0.1.3-alpha.1` 改动 Session 持久化所有权并写 Session v2，属后续独立迁移资格计划，不在本交付列车内。升级演练以 previous（M4 `caa5c51` DMG，SHA 见 `release/artifacts.json` 归档）→ candidate 的同基线重装 + 拒绝降级负例完成；演练结论记录于 `docs/validation/dsh-0.1.2-rc.1-acceptance.md`。
 
 ## 5. 工具链出处
 

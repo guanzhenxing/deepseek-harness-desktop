@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import {
@@ -161,4 +162,55 @@ test('patch ledger validation accepts the explicit empty ledger and refuses malf
     'dd6322d604e00eec1ba5e0c8541159906a21094a',
   )
   assert.match(staleUpstream.problems[0], /not the baseline/)
+})
+
+test('the repository declares exactly the qualified rc.1 upstream baseline', () => {
+  const expectedDshBaseline = Object.freeze({
+    tag: 'dsh-v0.1.2-rc.1',
+    commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
+    npmVersion: '0.1.2-rc.1',
+  })
+  const artifacts = JSON.parse(
+    readFileSync(new URL('../build/upstream-artifacts.json', import.meta.url), 'utf8'),
+  )
+  const compatibility = JSON.parse(
+    readFileSync(new URL('../docs/compatibility.json', import.meta.url), 'utf8'),
+  )
+
+  assert.deepEqual(
+    {
+      tag: artifacts.dsh.tag,
+      commit: artifacts.dsh.commit,
+      npmVersion: artifacts.dsh.npmVersion,
+    },
+    expectedDshBaseline,
+    'build/upstream-artifacts.json must pin the qualified rc.1 baseline',
+  )
+  assert.deepEqual(
+    {
+      tag: compatibility.dsh.tag,
+      commit: compatibility.dsh.commit,
+      npmVersion: compatibility.dsh.npmVersion,
+    },
+    expectedDshBaseline,
+    'docs/compatibility.json must pin the qualified rc.1 baseline',
+  )
+  assert.ok(artifacts.dsh.packages.length > 0, 'the ledger must own at least one package record')
+  for (const entry of artifacts.dsh.packages) {
+    assert.equal(
+      entry.version,
+      expectedDshBaseline.npmVersion,
+      `${entry.name} must be pinned to the family version`,
+    )
+    assert.match(entry.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/u, `${entry.name} needs integrity`)
+    assert.equal(
+      entry.tarball,
+      `https://registry.npmjs.org/${entry.name}/-/${entry.name.split('/').pop()}-${expectedDshBaseline.npmVersion}.tgz`,
+      `${entry.name} tarball URL must name the family version`,
+    )
+    assert.ok(
+      artifacts.dsh.evidence.some((url) => url.includes(expectedDshBaseline.commit)),
+      'the evidence links must name the baseline commit',
+    )
+  }
 })
