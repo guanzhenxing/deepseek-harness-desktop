@@ -15,11 +15,11 @@ Desktop 与 `dsh-native` 在共享 DSH home 上顺序互斥：任何 Host boot�
 ├── host-lease.guard        0600 永久 owner-only advisory lock 文件
 └── host.lock/              0700 目录，原子 mkdir 获取
     ├── owner.json          0600 closed-schema owner 记录
-    └── .dsh-writer-sentinel 0600 写者哨兵：内容为 supervisor 的
-                              "<pid>\n<startIdentity>\n<generation>\n"
+    └── .dsh-writer-sentinel 0600 closed-schema 写者哨兵：持久化
+                              schemaVersion、generation、supervisor、host 与 pendingSpawn
 ```
 
-哨兵是布局 v2 的规范成员（非可选）：它使锁目录恒非空——一切版本的 doctor/release 对非空锁目录的 `rmdir` 都 `ENOTEMPTY` 拒绝，冻结旧制品的 doctor 即便误读新身份格式也删不掉 v2 活锁目录（单写者由布局承载）。owner 文件被外部工具删除后，doctor 以哨兵内的身份判定存活（same→拒删、unknown→拒删、absent/different→放行到原流程）；本版本的 release/doctor 在 rmdir 前先清己方哨兵。
+哨兵是布局 v2 的规范成员（非可选）：它使锁目录恒非空——一切版本的 doctor/release 对非空锁目录的 `rmdir` 都 `ENOTEMPTY` 拒绝，冻结旧制品的 doctor 即便误读新身份格式也删不掉 v2 活锁目录（单写者由布局承载）。它以原子替换写入；读取只接受有界普通文件，链接、FIFO、损坏或不可读内容一律拒绝清锁。owner 文件被外部工具删除后，doctor 同时核验哨兵中的 supervisor 与已登记 Host：任一存活或不可识别、或 `pendingSpawn=true` 都拒绝删除；只有所有记录的进程可证明已退出才放行到原流程。本版本的 release/doctor 在 rmdir 前先清己方哨兵。
 
 `owner.json` 字段（schemaVersion 固定 1）：
 
@@ -54,11 +54,11 @@ owner 文件不含凭据、capability、authenticated URL 或完整命令行。
 acquire:   mkdir(host.lock) ──EEXIST→ 读 owner ── same → HOME_BUSY
                                         ├─ unknown → LEASE_UNKNOWN
                                         └─ absent/different → HOME_STALE（不自动回收）
-           成功 → 写 owner（host=null, pendingSpawn=false）
+           成功 → 原子写 sentinel → 原子写 owner（host=null, pendingSpawn=false）
 
-beforeSpawn(profile): 校验 generation/身份/profile 一致 → pendingSpawn=true
-attachHost(identity): 要求 pendingSpawn → host=identity, pendingSpawn=false
-confirmHostExited():  host=null, pendingSpawn=false（幂等）
+beforeSpawn(profile): 校验 generation/身份/profile 一致 → 原子更新 sentinel、owner 的 pendingSpawn=true
+attachHost(identity): 要求 pendingSpawn → 原子更新 sentinel、owner 的 host=identity, pendingSpawn=false
+confirmHostExited():  原子更新 sentinel、owner 的 host=null, pendingSpawn=false（幂等）
 assertHeld():         重读 owner，generation 与 supervisor 身份必须仍是本进程
 
 release:   generation 不匹配 → LEASE_CHANGED
@@ -69,8 +69,8 @@ release:   generation 不匹配 → LEASE_CHANGED
            重复 release 幂等
 
 doctor:    owner 可读 → 身份判定（活→ACTIVE_OWNER 拒；不可识别→拒）
-           owner 缺失/损坏且哨兵在 → 按哨兵身份判定
-             （same → ACTIVE_OWNER 拒；unknown → 拒；absent/different → 续走）
+           owner 缺失/损坏且哨兵在 → 按哨兵 supervisor 与 Host 身份判定
+             （任一 same → ACTIVE_OWNER 拒；任一 unknown、哨兵异常或 pendingSpawn → 拒；全 absent/different → 续走）
            owner 缺失且无哨兵（v1 旧布局）→ scanSupported 兜底
            放行路径统一为：删 owner → 删哨兵 → rmdir
 ```

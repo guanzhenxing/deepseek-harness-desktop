@@ -89,6 +89,12 @@ function flagUnknown(budget: InspectionBudget, unknown: string[], relative: stri
   unknown.push(relative)
 }
 
+function singleUnknown(budget: InspectionBudget, relative: string): string[] {
+  const unknown: string[] = []
+  flagUnknown(budget, unknown, relative)
+  return unknown
+}
+
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 
 /**
@@ -140,7 +146,9 @@ export async function inspectHomeFormats(
     if (storages.unknown.length === 0) formats.storages = storages.formatId
     else for (const relative of storages.unknown) unknownPaths.push(relative)
     if (storages.projcache === 4) formats.projcache = PROJCACHE_FORMAT_ID
-    if (storages.projcache === 'foreign') unknownPaths.push('storages/session_projcache')
+    if (storages.projcache === 'foreign') {
+      flagUnknown(budget, unknownPaths, 'storages/session_projcache')
+    }
   }
 
   const profiles = await profilesFormatId(home, budget)
@@ -158,7 +166,14 @@ export async function inspectHomeFormats(
     // per-path budget — the output is thereby bounded by unknowns + 1, and
     // no slot may keep a claimed format on an inspection that could not
     // record everything it found.
-    for (const slot of ['credentials', 'settings', 'sessions', 'storages', 'profiles']) {
+    for (const slot of [
+      'credentials',
+      'settings',
+      'sessions',
+      'storages',
+      'projcache',
+      'profiles',
+    ]) {
       delete formats[slot]
     }
     if (!unknownPaths.includes('home')) unknownPaths.push('home')
@@ -334,18 +349,30 @@ async function sessionsFormatId(
   const dirIdentity = await safeLstat(sessionsDir)
   if (dirIdentity === undefined) return { state: 'absent' }
   if (dirIdentity.isSymbolicLink() || !dirIdentity.isDirectory()) {
-    return { state: 'known', formatId: SESSION_JSONL_FORMAT_ID, unknown: ['sessions'] }
+    return {
+      state: 'known',
+      formatId: SESSION_JSONL_FORMAT_ID,
+      unknown: singleUnknown(budget, 'sessions'),
+    }
   }
   const unknown: string[] = []
   let sawAny = false
   let sawAllKnown = true
   const projectsAll = await boundedEntries(sessionsDir, budget)
   if (projectsAll === 'unreadable' || projectsAll === 'overflow') {
-    return { state: 'known', formatId: SESSION_JSONL_FORMAT_ID, unknown: ['sessions'] }
+    return {
+      state: 'known',
+      formatId: SESSION_JSONL_FORMAT_ID,
+      unknown: singleUnknown(budget, 'sessions'),
+    }
   }
   for (const project of projectsAll) {
     if (budgetExhausted(budget)) {
-      return { state: 'known', formatId: SESSION_JSONL_FORMAT_ID, unknown: ['sessions'] }
+      return {
+        state: 'known',
+        formatId: SESSION_JSONL_FORMAT_ID,
+        unknown: singleUnknown(budget, 'sessions'),
+      }
     }
     const projectDir = path.join(sessionsDir, project)
     const projectKind = await directoryKind(projectDir)
@@ -465,6 +492,7 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
     // nothing to verify.
     const stat = await handle.stat()
     let offset = 0
+    let sawStandardFrame = false
     // The skippable-prefix walk is bounded by the SHARED byte budget (each
     // hop costs at least its 8-byte header) plus a defensive frame ceiling
     // far above any real writer; exceeding either fails closed.
@@ -485,7 +513,7 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
         const payload = buffer.readUInt32LE(4)
         const frameEnd = offset + 8 + payload
         if (!Number.isSafeInteger(frameEnd) || stat.size < frameEnd) return false
-        if (stat.size === frameEnd) return false // skippable-only stream
+        if (stat.size === frameEnd) return sawStandardFrame
         offset = frameEnd
         continue
       }
@@ -510,7 +538,37 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
         if (!takeBytes(budget, extended.bytesRead)) return false
         if (extended.bytesRead < headerLength) return false
       }
-      return true
+      let blockOffset = offset + headerLength
+      let completed = false
+      for (let block = 0; block < 65_536; block += 1) {
+        const header = await handle.read(Buffer.alloc(3), 0, 3, blockOffset)
+        if (!takeBytes(budget, header.bytesRead) || header.bytesRead !== 3) return false
+        const blockHeader = header.buffer.readUIntLE(0, 3)
+        const lastBlock = (blockHeader & 0b1) === 1
+        const blockType = (blockHeader >> 1) & 0b11
+        const blockSize = blockHeader >>> 3
+        if (blockType === 0b11) return false
+        const payloadSize = blockType === 0b01 && blockSize > 0 ? 1 : blockSize
+        const blockEnd = blockOffset + 3 + payloadSize
+        if (!Number.isSafeInteger(blockEnd) || stat.size < blockEnd) return false
+        // We only inspect headers, but the shared budget must still bound a
+        // claimed frame's declared payload before skipping over it.
+        if (!takeBytes(budget, payloadSize)) return false
+        blockOffset = blockEnd
+        if (!lastBlock) continue
+        if ((descriptor & 0b0000_0100) !== 0) {
+          const checksumEnd = blockOffset + 4
+          if (!Number.isSafeInteger(checksumEnd) || stat.size < checksumEnd) return false
+          if (!takeBytes(budget, 4)) return false
+          blockOffset = checksumEnd
+        }
+        completed = true
+        sawStandardFrame = true
+        break
+      }
+      if (!completed) return false
+      if (blockOffset === stat.size) return true
+      offset = blockOffset
     }
     return false
   } finally {
@@ -545,7 +603,7 @@ async function storagesFormatId(
     return {
       state: 'known',
       formatId: STORAGE_UNIT_FORMAT_ID,
-      unknown: ['storages'],
+      unknown: singleUnknown(budget, 'storages'),
       projcache: 'none',
     }
   }
@@ -560,7 +618,7 @@ async function storagesFormatId(
     return {
       state: 'known',
       formatId: STORAGE_UNIT_FORMAT_ID,
-      unknown: ['storages'],
+      unknown: singleUnknown(budget, 'storages'),
       projcache: 'none',
     }
   }
@@ -569,7 +627,7 @@ async function storagesFormatId(
       return {
         state: 'known',
         formatId: STORAGE_UNIT_FORMAT_ID,
-        unknown: ['storages'],
+        unknown: singleUnknown(budget, 'storages'),
         projcache: 'none',
       }
     }
@@ -832,14 +890,22 @@ async function profilesFormatId(
   const dirIdentity = await safeLstat(profilesDir)
   if (dirIdentity === undefined) return { state: 'absent' }
   if (dirIdentity.isSymbolicLink() || !dirIdentity.isDirectory()) {
-    return { state: 'known', formatId: PROFILE_FORMAT_ID, unknown: ['profiles'] }
+    return {
+      state: 'known',
+      formatId: PROFILE_FORMAT_ID,
+      unknown: singleUnknown(budget, 'profiles'),
+    }
   }
   const unknown: string[] = []
   let sawAny = false
   let sawUnknownManifest = false
   const entriesAll = await boundedEntries(profilesDir, budget)
   if (entriesAll === 'unreadable' || entriesAll === 'overflow') {
-    return { state: 'known', formatId: PROFILE_FORMAT_ID, unknown: ['profiles'] }
+    return {
+      state: 'known',
+      formatId: PROFILE_FORMAT_ID,
+      unknown: singleUnknown(budget, 'profiles'),
+    }
   }
   // The ONLY exempt entries are the runtime's own launch roots
   // (`.dsh-desktop-run-*`, mkdtemp-created by host-supervisor) when they are
@@ -852,7 +918,11 @@ async function profilesFormatId(
   // while symlinks, FIFOs, and any other non-regular shape are flagged.
   for (const entry of entriesAll) {
     if (budgetExhausted(budget)) {
-      return { state: 'known', formatId: PROFILE_FORMAT_ID, unknown: ['profiles'] }
+      return {
+        state: 'known',
+        formatId: PROFILE_FORMAT_ID,
+        unknown: singleUnknown(budget, 'profiles'),
+      }
     }
     const profileDir = path.join(profilesDir, entry)
     const identity = await safeLstat(profileDir)

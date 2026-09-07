@@ -15,6 +15,7 @@ import {
 import {
   planCliInvocation,
   runBundledCli,
+  startLeaseWatchdog,
   type CliChildHandle,
   type SpawnCliChild,
 } from '../src/main.js'
@@ -137,7 +138,6 @@ describe('planCliInvocation', () => {
 
 describe('startLeaseWatchdog', () => {
   it('never kills on sustained guard contention', async () => {
-    const { startLeaseWatchdog } = await import('../src/main.js')
     const killSignals: NodeJS.Signals[] = []
     const child: CliChildHandle = {
       pid: 1,
@@ -165,6 +165,41 @@ describe('startLeaseWatchdog', () => {
       await new Promise((resolve) => setTimeout(resolve, 120))
       expect(killSignals).toEqual([])
       expect(stderrLines).toEqual([])
+    } finally {
+      watchdog.stop()
+    }
+  })
+
+  it('ignores failed checks that complete after the watchdog has stopped', async () => {
+    const pending: Array<(error: Error) => void> = []
+    const killSignals: NodeJS.Signals[] = []
+    const child: CliChildHandle = {
+      pid: 1,
+      send() {},
+      exited: new Promise(() => {}),
+      kill(signal = 'SIGTERM') {
+        killSignals.push(signal)
+      },
+    }
+    const lease = {
+      home: '/tmp/h',
+      generation: 'g',
+      assertHeld: () =>
+        new Promise<void>((_resolve, reject) => {
+          pending.push(reject)
+        }),
+    } as unknown as Parameters<typeof startLeaseWatchdog>[0]
+    const watchdog = startLeaseWatchdog(lease, child, { write() {} } as never, 10)
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 35))
+      // A watchdog must keep at most one lease check in flight. Otherwise a
+      // stopped watchdog can still have several stale completions to race.
+      expect(pending).toHaveLength(1)
+      watchdog.stop()
+      const failure = Object.assign(new Error('lock disappeared'), { code: 'LEASE_CHANGED' })
+      pending[0]?.(failure)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(killSignals).toEqual([])
     } finally {
       watchdog.stop()
     }

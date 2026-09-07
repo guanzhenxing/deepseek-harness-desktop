@@ -630,6 +630,25 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('refuses a complete zstd frame header with no block payload', async () => {
+    const home = await tempHome()
+    try {
+      const sessionDir = path.join(home, 'sessions', '--p--', 'header-only')
+      await mkdir(sessionDir, { recursive: true })
+      // A valid six-byte frame header still needs at least a three-byte block
+      // header. Header-only data is a truncated stream, not a session.
+      await writeFile(
+        path.join(sessionDir, 'session.jsonl.zstd'),
+        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00]),
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--p--/header-only/session.jsonl.zstd')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('fails anchor-less storage domains closed instead of self-anchoring', async () => {
     const home = await tempHome()
     try {
@@ -680,6 +699,22 @@ describe('inspectHomeFormats', () => {
       expect(observed.unknownPaths).toContain('home')
       expect(budget.unknowns).toBeGreaterThanOrEqual(0)
       expect(observed.formats.storages).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('routes malformed slot roots through the shared unknown-path budget', async () => {
+    const home = await tempHome()
+    try {
+      for (const name of ['sessions', 'storages', 'profiles']) {
+        await writeFile(path.join(home, name), 'not a directory')
+      }
+      const budget = createInspectionBudget({ unknowns: 0 })
+      const observed = await inspectHomeFormats(home, budget)
+      expect(observed.unknownPaths).toEqual(['home'])
+      expect(observed.formats).toEqual({})
+      expect(budget.exhausted).toBe(true)
     } finally {
       await rm(home, { recursive: true, force: true })
     }
@@ -737,12 +772,10 @@ describe('inspectHomeFormats', () => {
       const projectDir = path.join(home, 'sessions', '--fixture--')
       const sessionDir = path.join(projectDir, 'framed')
       await mkdir(sessionDir, { recursive: true })
-      // Minimal RFC 8878 frame: magic 28 B5 2F FD + FHD 0x20 (single-segment,
-      // FCS code 0 → 1 content-size byte) + one FCS byte. Header-only
-      // inspection validates the frame header structure, not the blocks.
+      const { zstdCompressSync } = await import('node:zlib')
       await writeFile(
         path.join(sessionDir, 'session.jsonl.zstd'),
-        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x00]),
+        zstdCompressSync(Buffer.from('{"type":"session"}\n', 'utf8')),
       )
       const observed = await inspectHomeFormats(home)
       expect(observed.unknownPaths).toEqual([])

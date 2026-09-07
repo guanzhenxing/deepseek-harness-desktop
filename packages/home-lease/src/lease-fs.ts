@@ -1,11 +1,17 @@
 import type { Stats } from 'node:fs'
 import { constants as fsConstants } from 'node:fs'
-import { lstat, mkdir, open, readFile } from 'node:fs/promises'
+import { lstat, mkdir, open } from 'node:fs/promises'
 import path from 'node:path'
 
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
-import { LeaseError, parseLeaseOwner, serializeLeaseOwner, type LeaseOwner } from './owner.js'
+import {
+  LeaseError,
+  parseLeaseOwner,
+  serializeLeaseOwner,
+  type LeaseOwner,
+  type ProcessIdentity,
+} from './owner.js'
 
 export const RUN_DIRNAME = 'run'
 export const LOCK_DIRNAME = 'host.lock'
@@ -32,6 +38,27 @@ export type LeasePaths = Readonly<{
 export type ReadOwnerResult = Readonly<
   { kind: 'ok'; owner: LeaseOwner } | { kind: 'missing' } | { kind: 'corrupt' }
 >
+
+/**
+ * A crash-safe mirror of the writer identities. It remains when a frozen
+ * doctor deletes owner.json, so a current doctor can still prove that the
+ * supervisor or an already-authorized Host is alive before it removes the
+ * lock directory.
+ */
+export type LeaseSentinel = Readonly<{
+  schemaVersion: 1
+  generation: string
+  supervisor: ProcessIdentity
+  host: ProcessIdentity | null
+  pendingSpawn: boolean
+}>
+
+export type ReadSentinelResult = Readonly<
+  { kind: 'ok'; sentinel: LeaseSentinel } | { kind: 'missing' } | { kind: 'corrupt' }
+>
+
+const SENTINEL_READ_CAP = 16 * 1024
+const OWNER_READ_CAP = 64 * 1024
 
 export function leasePaths(home: string): LeasePaths {
   const run = path.join(home, RUN_DIRNAME)
@@ -136,24 +163,143 @@ export async function writeOwnerWithDurability(
   })
   // The upstream atomic writer does not promise crash durability, so fsync the
   // committed owner file and both parent directories here.
-  const handle = await open(ownerPath, 'r')
-  try {
-    await handle.sync()
-  } finally {
-    await handle.close()
-  }
+  await syncRegularFile(ownerPath, 'home lease owner')
   await syncDirectory(path.dirname(ownerPath))
   await syncDirectory(path.dirname(path.dirname(ownerPath)))
 }
 
-export async function readOwner(ownerPath: string): Promise<ReadOwnerResult> {
-  let identity: Stats
+function isProcessIdentity(value: unknown): value is ProcessIdentity {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.pid === 'number' &&
+    Number.isSafeInteger(record.pid) &&
+    record.pid > 0 &&
+    typeof record.startIdentity === 'string' &&
+    record.startIdentity.length > 0
+  )
+}
+
+function sentinelFromOwner(owner: LeaseOwner): LeaseSentinel {
+  return Object.freeze({
+    schemaVersion: 1,
+    generation: owner.generation,
+    supervisor: owner.supervisor,
+    host: owner.host,
+    pendingSpawn: owner.pendingSpawn,
+  })
+}
+
+function serializeLeaseSentinel(owner: LeaseOwner): string {
+  return `${JSON.stringify(sentinelFromOwner(owner))}\n`
+}
+
+function parseLeaseSentinel(raw: string): LeaseSentinel | undefined {
+  let value: unknown
   try {
-    identity = await lstat(ownerPath)
+    value = JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const expected = ['schemaVersion', 'generation', 'supervisor', 'host', 'pendingSpawn']
+  if (Object.keys(record).length !== expected.length || !expected.every((key) => key in record)) {
+    return undefined
+  }
+  if (
+    record.schemaVersion !== 1 ||
+    typeof record.generation !== 'string' ||
+    record.generation.length === 0 ||
+    !isProcessIdentity(record.supervisor) ||
+    (record.host !== null && !isProcessIdentity(record.host)) ||
+    typeof record.pendingSpawn !== 'boolean'
+  ) {
+    return undefined
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    generation: record.generation,
+    supervisor: record.supervisor,
+    host: record.host,
+    pendingSpawn: record.pendingSpawn,
+  })
+}
+
+async function syncRegularFile(filename: string, label: string): Promise<void> {
+  const flags = fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW
+  const handle = await open(filename, flags)
+  try {
+    if (!(await handle.stat()).isFile()) {
+      throw new LeaseError('LEASE_UNKNOWN', `${label} must be a regular file`)
+    }
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+/** Atomically replace the sentinel itself, never a symlink referent. */
+export async function writeSentinelWithDurability(
+  sentinelPath: string,
+  owner: LeaseOwner,
+): Promise<void> {
+  await writeFileAtomic(sentinelPath, serializeLeaseSentinel(owner), {
+    mode: 0o600,
+    dirMode: 0o700,
+  })
+  await syncRegularFile(sentinelPath, 'home lease sentinel')
+  await syncDirectory(path.dirname(sentinelPath))
+  await syncDirectory(path.dirname(path.dirname(sentinelPath)))
+}
+
+async function readBoundedRegularText(
+  filename: string,
+  cap: number,
+  label: string,
+): Promise<string | undefined> {
+  const flags = fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW
+  let handle
+  try {
+    handle = await open(filename, flags)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' }
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return undefined
+    if (code === 'ELOOP') throw new LeaseError('LEASE_UNKNOWN', `${label} must not be a symlink`)
     throw error
   }
-  if (identity.isSymbolicLink() || !identity.isFile()) return { kind: 'corrupt' }
-  return parseLeaseOwner(await readFile(ownerPath, 'utf8'))
+  try {
+    const identity = await handle.stat()
+    if (!identity.isFile() || !Number.isSafeInteger(identity.size) || identity.size > cap) {
+      throw new LeaseError('LEASE_UNKNOWN', `${label} must be a bounded regular file`)
+    }
+    const buffer = Buffer.alloc(identity.size + 1)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    if (bytesRead !== identity.size) {
+      throw new LeaseError('LEASE_UNKNOWN', `${label} changed while being read`)
+    }
+    return buffer.subarray(0, bytesRead).toString('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
+export async function readLeaseSentinel(sentinelPath: string): Promise<ReadSentinelResult> {
+  const raw = await readBoundedRegularText(sentinelPath, SENTINEL_READ_CAP, 'home lease sentinel')
+  if (raw === undefined) return { kind: 'missing' }
+  const sentinel = parseLeaseSentinel(raw)
+  return sentinel === undefined ? { kind: 'corrupt' } : { kind: 'ok', sentinel }
+}
+
+export async function readOwner(ownerPath: string): Promise<ReadOwnerResult> {
+  try {
+    const raw = await readBoundedRegularText(ownerPath, OWNER_READ_CAP, 'home lease owner')
+    if (raw === undefined) return { kind: 'missing' }
+    return parseLeaseOwner(raw)
+  } catch {
+    // A malformed, linked, non-regular, unreadable, or path-swapped owner
+    // is never evidence that a lease is absent. The caller follows its
+    // existing corrupt-owner refusal/recovery path under the native guard.
+    return { kind: 'corrupt' }
+  }
 }

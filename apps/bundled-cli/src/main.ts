@@ -105,12 +105,17 @@ export function startLeaseWatchdog(
 ): { stop(): void } {
   let failures = 0
   let stopped = false
+  let checking = false
   const timer = setInterval(() => {
     void (async () => {
+      if (stopped || checking) return
+      checking = true
       try {
         await lease.assertHeld()
+        if (stopped) return
         failures = 0
       } catch (error) {
+        if (stopped) return
         const code = (error as { code?: string }).code ?? 'unknown error'
         if (code === 'GUARD_BUSY' || code === 'HOME_BUSY') return
         failures += 1
@@ -121,13 +126,16 @@ export function startLeaseWatchdog(
           `dsh-native: home lease lost while the CLI was running (${code}): killing the child to preserve the single-writer guarantee\n`,
         )
         child.kill('SIGKILL')
+      } finally {
+        checking = false
       }
     })()
   }, intervalMs)
   timer.unref?.()
   return {
     stop() {
-      if (!stopped) clearInterval(timer)
+      stopped = true
+      clearInterval(timer)
     },
   }
 }

@@ -13,7 +13,7 @@ import { setTimeout as sleepTimer } from 'node:timers'
 import { fileURLToPath } from 'node:url'
 
 import {
-  drainWithRetries,
+  installTerminationHandlers,
   installFromDmg,
   runInstalledApp,
   runInstalledCli,
@@ -34,13 +34,7 @@ const PRODUCT_NAME = 'DeepSeek Harness Desktop'
 // processes, temp install trees, or DMG mounts on the user's machine. The
 // Node runtime pin already happened in the thin package.mjs entry, before
 // this module was imported.
-for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, () => {
-    // Retries run BEFORE the explicit exit — beforeExit never fires
-    // after process.exit, so the drain must complete here.
-    void drainWithRetries().finally(() => process.exit(130))
-  })
-}
+installTerminationHandlers()
 
 const results = []
 

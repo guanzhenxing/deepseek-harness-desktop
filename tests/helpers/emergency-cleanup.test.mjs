@@ -7,7 +7,13 @@ import { describe, expect, it } from 'vitest'
 
 import { setTimeout as sleepTimer } from 'node:timers'
 
-import { drainWithRetries, emergencyCleanup, registerEmergencyCleanup } from './installed-app.mjs'
+import {
+  drainWithRetries,
+  emergencyCleanup,
+  installTerminationHandlers,
+  installFromDmg,
+  registerEmergencyCleanup,
+} from './installed-app.mjs'
 
 describe('emergency cleanup registry', () => {
   it('retries a failed cleanup on the next drain and drops it after success', async () => {
@@ -77,15 +83,14 @@ describe('emergency cleanup registry', () => {
     const marker = path.join(markerRoot, 'flushed')
     try {
       const script = [
-        'import { drainWithRetries, registerEmergencyCleanup } from ',
+        'import { installTerminationHandlers, registerEmergencyCleanup } from ',
         JSON.stringify(new URL('./installed-app.mjs', import.meta.url).pathname),
         '; import { writeFile } from "node:fs/promises"; ',
         'let attempts = 0; ',
         'registerEmergencyCleanup(async () => { attempts += 1; ',
         `if (attempts < 2) throw new Error("busy mount"); `,
         `await writeFile(${JSON.stringify(marker)}, "ok"); }); `,
-        "for (const signal of ['SIGINT', 'SIGTERM']) {",
-        "process.on(signal, () => { void drainWithRetries().finally(() => process.exit(signal === 'SIGINT' ? 130 : 143)) }); }",
+        'installTerminationHandlers(); ',
         'process.stdout.write("watchdog-ready\\n"); ',
         'setInterval(() => {}, 60000)',
       ].join('')
@@ -110,6 +115,49 @@ describe('emergency cleanup registry', () => {
       expect(await readFile(marker, 'utf8')).toBe('ok')
     } finally {
       await rm(markerRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('installs distinct SIGINT and SIGTERM exit codes for real callers', () => {
+    expect(typeof installTerminationHandlers).toBe('function')
+  })
+
+  it('detaches a successful DMG attach when subsequent metadata is unusable', async () => {
+    const { access, chmod, mkdtemp, rm, writeFile } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const path = await import('node:path')
+    const binDirectory = await mkdtemp(path.join(tmpdir(), 'fake-hdiutil-'))
+    const state = path.join(binDirectory, 'mounted')
+    const fakeHdiutil = path.join(binDirectory, 'hdiutil')
+    await writeFile(
+      fakeHdiutil,
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "attach" ]; then',
+        '  touch "$DSH_TEST_MOUNT_STATE"',
+        '  printf "<plist><dict><key>system-entities</key><array/></dict></plist>"',
+        '  exit 0',
+        'fi',
+        'if [ "$1" = "detach" ]; then',
+        '  rm -f "$DSH_TEST_MOUNT_STATE"',
+        '  exit 0',
+        'fi',
+        'exit 1',
+      ].join('\n'),
+    )
+    await chmod(fakeHdiutil, 0o755)
+    const previousPath = process.env.PATH
+    const previousState = process.env.DSH_TEST_MOUNT_STATE
+    process.env.PATH = `${binDirectory}:/usr/bin:/bin`
+    process.env.DSH_TEST_MOUNT_STATE = state
+    try {
+      await expect(installFromDmg('/tmp/no-such.dmg', 'Missing App')).rejects.toThrow()
+      await expect(access(state)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      process.env.PATH = previousPath
+      if (previousState === undefined) delete process.env.DSH_TEST_MOUNT_STATE
+      else process.env.DSH_TEST_MOUNT_STATE = previousState
+      await rm(binDirectory, { recursive: true, force: true })
     }
   })
 

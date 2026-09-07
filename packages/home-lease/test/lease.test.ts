@@ -1,10 +1,22 @@
-import { lstat, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { acquireHomeLease } from '../src/lease.js'
 import { unlockHome } from '../src/doctor.js'
+import { writeSentinelWithDurability } from '../src/lease-fs.js'
 import type { ProcessIdentity } from '../src/owner.js'
 import type { ProcessProbe, ProcessScanResult, ProcessStatus } from '../src/process-probe.js'
 import { createInProcessGuardLock } from '../src/native-helper.js'
@@ -664,6 +676,86 @@ describe('home doctor (unlock)', () => {
     expect(
       await readFile(path.join(home, 'run', 'host.lock', '.dsh-writer-sentinel'), 'utf8'),
     ).toContain('boot-1')
+  })
+
+  it('refuses an unreadable sentinel instead of treating it as a legacy missing sentinel', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const lockDir = path.join(home, 'run', 'host.lock')
+    await rm(path.join(lockDir, 'owner.json'), { force: true })
+    await chmod(path.join(lockDir, '.dsh-writer-sentinel'), 0o000)
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'absent' })
+    other.scanResult = 'none'
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'refused', code: 'IDENTITY_UNKNOWN' })
+    expect((await lstat(lockDir)).isDirectory()).toBe(true)
+  })
+
+  it('refuses a FIFO sentinel without blocking the doctor', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    await acquireHomeLease(acquireInput(home, probe))
+    const lockDir = path.join(home, 'run', 'host.lock')
+    await rm(path.join(lockDir, 'owner.json'), { force: true })
+    const sentinel = path.join(lockDir, '.dsh-writer-sentinel')
+    await rm(sentinel, { force: true })
+    execFileSync('mkfifo', [sentinel])
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.scanResult = 'none'
+    const result = await Promise.race([
+      unlockHome(await unlockInput(home, other)),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error('doctor blocked on sentinel FIFO')), 500),
+      ),
+    ])
+    expect(result).toMatchObject({ status: 'refused', code: 'IDENTITY_UNKNOWN' })
+    expect((await lstat(lockDir)).isDirectory()).toBe(true)
+  })
+
+  it('atomically replaces a sentinel symlink without touching its target', async () => {
+    const home = await isolatedHome()
+    const lockDir = path.join(home, 'run', 'host.lock')
+    const sentinel = path.join(lockDir, '.dsh-writer-sentinel')
+    const target = path.join(home, 'sentinel-target')
+    await rm(lockDir, { recursive: true, force: true })
+    await mkdir(lockDir, { recursive: true })
+    await writeFile(target, 'must remain unchanged')
+    await symlink(target, sentinel)
+    await writeSentinelWithDurability(sentinel, {
+      schemaVersion: 1,
+      generation: 'test-generation',
+      supervisor: { pid: 4242, startIdentity: 'boot-1' },
+      host: null,
+      pendingSpawn: false,
+      entrypoint: 'desktop',
+      profile: 'default',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      appVersion: 'test',
+    })
+    expect(await readFile(target, 'utf8')).toBe('must remain unchanged')
+    expect((await lstat(sentinel)).isFile()).toBe(true)
+  })
+
+  it('refuses an ownerless lock while the sentinel-recorded Host is still alive', async () => {
+    const home = await isolatedHome()
+    const probe = new FakeProbe()
+    const lease = await acquireHomeLease(acquireInput(home, probe))
+    await lease.beforeSpawn('desktop')
+    probe.processes.set(5556, { startIdentity: 'host-1', status: 'same' })
+    await lease.attachHost({ pid: 5556, startIdentity: 'host-1' })
+    await rm(path.join(home, 'run', 'host.lock', 'owner.json'), { force: true })
+    const other = new FakeProbe()
+    other.currentIdentity = { pid: 5151, startIdentity: 'boot-9' }
+    other.processes.set(4242, { startIdentity: 'boot-1', status: 'absent' })
+    other.processes.set(5556, { startIdentity: 'host-1', status: 'same' })
+    other.scanResult = 'none'
+    const result = await unlockHome(await unlockInput(home, other))
+    expect(result).toMatchObject({ status: 'refused', code: 'ACTIVE_OWNER' })
+    expect((await lstat(path.join(home, 'run', 'host.lock'))).isDirectory()).toBe(true)
   })
 
   it('clears the sentinel on normal release', async () => {

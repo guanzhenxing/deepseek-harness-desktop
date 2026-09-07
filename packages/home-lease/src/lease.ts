@@ -27,6 +27,7 @@ import {
   readOwner,
   validateHome,
   writeOwnerWithDurability,
+  writeSentinelWithDurability,
 } from './lease-fs.js'
 import { inspectConfirmed } from './probe-confirm.js'
 
@@ -190,22 +191,16 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
       createdAt: new Date().toISOString(),
       appVersion: input.appVersion,
     })
-    await writeOwnerWithDurability(paths.ownerPath, owner)
     // The sentinel makes the lock directory non-empty on purpose: foreign
     // doctors (frozen older artifacts misreading the identity format) can
     // delete the owner file but their rmdir then hits ENOTEMPTY and they
     // refuse — the single-writer guarantee is enforced by the lock layout,
     // not by the goodwill of whoever holds the doctor binary.
-    const { writeFile } = await import('node:fs/promises')
-    // The sentinel carries the supervisor's full identity: a doctor finding
-    // owner-less lock (a foreign doctor already deleted owner.json) can
-    // then verify liveness against THIS identity instead of trusting a
-    // process scan whose needles are bound to one installation's paths.
-    await writeFile(
-      paths.sentinelPath,
-      `${identity.pid}\n${identity.startIdentity}\n${owner.generation}\n`,
-      { mode: 0o600 },
-    )
+    // Write the sentinel before owner.json. If this process crashes between
+    // the two writes, doctor conservatively sees a live writer rather than
+    // deleting a lock whose Host registration may have been in flight.
+    await writeSentinelWithDurability(paths.sentinelPath, owner)
+    await writeOwnerWithDurability(paths.ownerPath, owner)
   }).catch((error: unknown) => {
     if (error instanceof LeaseError && error.code === 'GUARD_BUSY') {
       throw new LeaseError(
@@ -278,10 +273,12 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
         if (owner.pendingSpawn || owner.host !== null) {
           throw new LeaseError('LEASE_STATE', 'host spawn registration already in progress')
         }
-        await writeOwnerWithDurability(paths.ownerPath, {
+        const nextOwner = {
           ...owner,
           pendingSpawn: true,
-        })
+        }
+        await writeSentinelWithDurability(paths.sentinelPath, nextOwner)
+        await writeOwnerWithDurability(paths.ownerPath, nextOwner)
       }),
     attachHost: (identity: ProcessIdentity) =>
       withGuard(async () => {
@@ -299,22 +296,26 @@ export async function acquireHomeLease(input: AcquireHomeLeaseInput): Promise<Ho
         if (!owner.pendingSpawn || owner.host !== null) {
           throw new LeaseError('LEASE_STATE', 'host identity arrived without a pending spawn')
         }
-        await writeOwnerWithDurability(paths.ownerPath, {
+        const nextOwner = {
           ...owner,
           host: identity,
           pendingSpawn: false,
-        })
+        }
+        await writeSentinelWithDurability(paths.sentinelPath, nextOwner)
+        await writeOwnerWithDurability(paths.ownerPath, nextOwner)
       }),
     confirmHostExited: () =>
       withGuard(async () => {
         if (released) throw new LeaseError('LEASE_NOT_HELD', 'home lease was already released')
         const owner = await readOurs()
         if (owner.host === null && !owner.pendingSpawn) return
-        await writeOwnerWithDurability(paths.ownerPath, {
+        const nextOwner = {
           ...owner,
           host: null,
           pendingSpawn: false,
-        })
+        }
+        await writeSentinelWithDurability(paths.sentinelPath, nextOwner)
+        await writeOwnerWithDurability(paths.ownerPath, nextOwner)
       }),
     switchProfile: (nextProfile: string) =>
       withGuard(async () => {

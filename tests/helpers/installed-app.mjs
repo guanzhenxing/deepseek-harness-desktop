@@ -67,6 +67,19 @@ export function drainWithRetries(maxTotalRounds = 3) {
   return drainInFlight
 }
 
+/** Install the real smoke/rehearsal cancellation behavior once per process. */
+export function installTerminationHandlers() {
+  let exiting = false
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+      if (exiting) return
+      exiting = true
+      const exitCode = signal === 'SIGINT' ? 130 : 143
+      void drainWithRetries().finally(() => process.exit(exitCode))
+    })
+  }
+}
+
 // Normal completion must also flush leftovers (e.g. a DMG mount whose
 // transient detach failed mid-run). Registered unconditionally; other
 // listeners on this event must not disable it.
@@ -95,19 +108,10 @@ export function registerEmergencyCleanup(cleanup) {
  * mount is always detached, including on failure paths.
  */
 export async function installFromDmg(dmgPath, productName) {
-  const output = execFileSync('hdiutil', ['attach', '-readonly', '-nobrowse', '-plist', dmgPath], {
-    encoding: 'utf8',
-  })
-  // The plist carries the mount point in a <string> element; a regex
-  // fallback keeps working even if the plist shape drifts. Registration
-  // happens the moment ANY mount path is visible — a parse error after a
-  // successful attach must not leak the mount.
-  const plistMatch = /<string>(\/Volumes\/[^<]+)<\/string>/.exec(output)
-  const fallbackMatch = /(^|\s)(\/Volumes\/\S+)/.exec(output)
-  const mountPoint = plistMatch?.[1] ?? fallbackMatch?.[2]
-  if (mountPoint === undefined || !mountPoint.startsWith('/')) {
-    throw new Error(`could not parse hdiutil mount point from: ${output}`)
-  }
+  // Choose the mount point before attaching. hdiutil's presentation output
+  // is deliberately not part of the cleanup protocol: even malformed plist
+  // output leaves us with a deterministic target to detach.
+  const mountPoint = await mkdtemp(path.join(tmpdir(), 'dsh-dmg-mount-'))
   // The mount must be reachable from the emergency registry BEFORE any
   // further await (mkdtemp included): a signal or failure in that window
   // would otherwise leave the DMG mounted. The registered cleanup must
@@ -115,12 +119,23 @@ export async function installFromDmg(dmgPath, productName) {
   // the detach as done and never retry it. The finally path uses the same
   // cleanup through a quiet probe and only unregisters on success; a failed
   // detach KEEPS the registration for a later drain.
-  const detachMount = () => {
+  const detachMount = async () => {
     execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+    await rm(mountPoint, { recursive: true, force: true })
   }
-  const unregisterMount = registerCleanup(detachMount)
+  let unregisterMount
+  let mounted = false
   let installDirectory
   try {
+    execFileSync(
+      'hdiutil',
+      ['attach', '-readonly', '-nobrowse', '-mountpoint', mountPoint, dmgPath],
+      {
+        stdio: 'ignore',
+      },
+    )
+    mounted = true
+    unregisterMount = registerCleanup(detachMount)
     installDirectory = await mkdtemp(path.join(tmpdir(), 'dsh-installed-app-'))
     const appBundle = path.join(mountPoint, `${productName}.app`)
     const identity = await lstat(appBundle)
@@ -137,13 +152,17 @@ export async function installFromDmg(dmgPath, productName) {
     throw error
   } finally {
     let detached = false
-    try {
-      detachMount()
-      detached = true
-    } catch {
-      /* busy or already gone — the registration stays for a later drain */
+    if (mounted) {
+      try {
+        await detachMount()
+        detached = true
+      } catch {
+        /* busy or already gone — the registration stays for a later drain */
+      }
+    } else {
+      await rm(mountPoint, { recursive: true, force: true })
     }
-    if (detached) unregisterMount()
+    if (detached) unregisterMount?.()
   }
   const appPath = path.join(installDirectory, `${productName}.app`)
   const resources = path.join(appPath, 'Contents', 'Resources')
