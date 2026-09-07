@@ -195,7 +195,7 @@ test('policy evidence verification accepts the committed policy', async () => {
     await readFile(new URL('../build/compatibility-policy.json', import.meta.url), 'utf8'),
   )
   await verifyPolicyEvidence(policy, {
-    upstreamCommit: 'dd6322d604e00eec1ba5e0c8541159906a21094a',
+    upstreamCommit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
     root: repositoryRoot,
   })
 })

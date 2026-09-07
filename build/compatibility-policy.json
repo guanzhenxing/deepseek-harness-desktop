@@ -66,15 +66,16 @@
     {
       "provider": "@deepseek-ai/dsh-session-projection-cache",
       "providerVersion": "0.1.2-rc.1",
-      "formatId": "dsh-session-projcache-4",
-      "readable": ["dsh-session-projcache-4"],
-      "writable": "dsh-session-projcache-4",
+      "formatId": "dsh-session-projcache-5",
+      "readable": ["dsh-session-projcache-4", "dsh-session-projcache-5"],
+      "writable": "dsh-session-projcache-5",
       "evidence": [
         "npm:@deepseek-ai/dsh-session-projection-cache@0.1.2-rc.1:lib/index.js",
         "fixture:tests/fixtures/home-formats/projcache-unit.json#de4b07ee998d8e17a2d9156767e7b5a4fcf81d6316dab9ed83c1516133a86f33",
+        "fixture:tests/fixtures/home-formats/projcache-unit-v5.json#ae3a3cd053ea11d18edf79c6107215e1e956cbe7f8b7a35be9f6b36be098a8a8",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "The session_projcache storage domain is declared at version 4 with the per-record layout in this baseline."
+      "$notes": "The session_projcache storage domain is declared at version 5 (per-record layout) by the rc.1 writer, which also declares versions 3 and 4 readable upstream; this policy reads the v4 records M4 wrote and writes v5, so a home may mix v4/v5 per-session records and the domain identity is the newest stamp present. The cache is derived data — the v5 bump does not raise the data epoch, and an M4 release (which reads only v4) still refuses a v5 cache."
     },
     {
       "provider": "@deepseek-ai/dsh",

@@ -66,7 +66,7 @@ describe.skipIf(!helperAvailable)('home compatibility chain (real lease)', () =>
     })
     expect(marker.formats).toMatchObject({
       credentials: 'dsh-credentials-file-1',
-      settings: 'dsh-settings-file-0.1.2-alpha.3',
+      settings: 'dsh-settings-file-0.1.2-rc.1',
       sessions: 'dsh-session-jsonl-0',
     })
     await lease.release()

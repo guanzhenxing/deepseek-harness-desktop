@@ -53,7 +53,17 @@ export function preflightHome(input: {
     for (const [slot, markerFormat] of Object.entries(marker.formats)) {
       const observedFormat = observed.formats[slot]
       if (observedFormat !== undefined && observedFormat !== markerFormat) {
-        return { kind: 'refuse', code: 'UNKNOWN_FORMAT' }
+        // Unequal marker/observed IDs are compatible only when ONE format
+        // rule of THIS release declares both readable — the projection cache
+        // advancing v4 → v5 inside one rule. IDs from different rules, or
+        // IDs this release does not read, still refuse conservatively.
+        const sameRule = release.formats.some(
+          (format) =>
+            format.readable.includes(markerFormat) && format.readable.includes(observedFormat),
+        )
+        if (!sameRule) {
+          return { kind: 'refuse', code: 'UNKNOWN_FORMAT' }
+        }
       }
     }
   }

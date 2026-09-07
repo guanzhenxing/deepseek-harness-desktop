@@ -16,18 +16,88 @@ import type { ReleaseManifest } from '../src/manifest.js'
 
 export const BASELINE_MANIFEST: ReleaseManifest = {
   schemaVersion: 2,
-  releaseId: 'm4-0.0.0-darwin-arm64-test000',
+  releaseId: 'rc1-0.0.0-darwin-arm64-test000',
   desktopVersion: '0.0.0',
   sourceCommit: 'a'.repeat(40),
   dsh: {
-    tag: 'dsh-v0.1.2-alpha.3',
-    commit: 'dd6322d604e00eec1ba5e0c8541159906a21094a',
-    npmVersion: '0.1.2-alpha.3',
+    tag: 'dsh-v0.1.2-rc.1',
+    commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
+    npmVersion: '0.1.2-rc.1',
   },
   platform: 'darwin',
   arch: 'arm64',
   hostControl: { major: 1, minor: 0 },
   profileSchemaVersion: 1,
+  pluginApi: {
+    strategy: 'verified-exact-baseline',
+    dshVersion: '0.1.2-rc.1',
+    singletonPackages: ['react', '@deepseek-ai/cordis', '@deepseek-ai/dsh'],
+  },
+  formats: [
+    {
+      provider: '@deepseek-ai/dsh-credentials-local',
+      providerVersion: '0.1.2-rc.1',
+      formatId: 'dsh-credentials-file-1',
+      readable: ['dsh-credentials-file-1'],
+      writable: 'dsh-credentials-file-1',
+      evidence: ['fixture:test'],
+    },
+    {
+      provider: '@deepseek-ai/dsh-settings-file',
+      providerVersion: '0.1.2-rc.1',
+      formatId: 'dsh-settings-file-0.1.2-rc.1',
+      readable: ['dsh-settings-file-0.1.2-rc.1'],
+      writable: 'dsh-settings-file-0.1.2-rc.1',
+      evidence: ['fixture:test'],
+    },
+    {
+      provider: '@deepseek-ai/dsh-session-persistence-jsonl',
+      providerVersion: '0.1.2-rc.1',
+      formatId: 'dsh-session-jsonl-0',
+      readable: ['dsh-session-jsonl-0'],
+      writable: 'dsh-session-jsonl-0',
+      evidence: ['fixture:test'],
+    },
+    {
+      provider: '@deepseek-ai/dsh-storage-json',
+      providerVersion: '0.1.2-rc.1',
+      formatId: 'dsh-storage-unit-0.1.2-rc.1',
+      readable: ['dsh-storage-unit-0.1.2-rc.1'],
+      writable: 'dsh-storage-unit-0.1.2-rc.1',
+      evidence: ['fixture:test'],
+    },
+    {
+      provider: '@deepseek-ai/dsh-session-projection-cache',
+      providerVersion: '0.1.2-rc.1',
+      formatId: 'dsh-session-projcache-5',
+      readable: ['dsh-session-projcache-4', 'dsh-session-projcache-5'],
+      writable: 'dsh-session-projcache-5',
+      evidence: ['fixture:test'],
+    },
+    {
+      provider: '@deepseek-ai/dsh',
+      providerVersion: '0.1.2-rc.1',
+      formatId: 'dsh-profile-manifest-0.1.2-rc.1',
+      readable: ['dsh-profile-manifest-0.1.2-rc.1'],
+      writable: 'dsh-profile-manifest-0.1.2-rc.1',
+      evidence: ['fixture:test'],
+    },
+  ],
+  dataEpoch: 1,
+  supportedDataEpochs: [1],
+  dependencyClosureSha256: 'c'.repeat(64),
+  patchManifestSha256: 'd'.repeat(64),
+}
+
+/** The accepted M4 release: alpha.3 facts, projection-cache v4 only. */
+export const M4_MANIFEST: ReleaseManifest = {
+  ...BASELINE_MANIFEST,
+  releaseId: 'm4-0.0.0-darwin-arm64-caa5c51',
+  dsh: {
+    tag: 'dsh-v0.1.2-alpha.3',
+    commit: 'dd6322d604e00eec1ba5e0c8541159906a21094a',
+    npmVersion: '0.1.2-alpha.3',
+  },
   pluginApi: {
     strategy: 'verified-exact-baseline',
     dshVersion: '0.1.2-alpha.3',
@@ -83,10 +153,6 @@ export const BASELINE_MANIFEST: ReleaseManifest = {
       evidence: ['fixture:test'],
     },
   ],
-  dataEpoch: 1,
-  supportedDataEpochs: [1],
-  dependencyClosureSha256: 'c'.repeat(64),
-  patchManifestSha256: 'd'.repeat(64),
 }
 
 function mkfifoSync(file: string): void {
@@ -123,7 +189,7 @@ describe('preflightHome', () => {
       fresh: false,
       formats: {
         credentials: 'dsh-credentials-file-1',
-        settings: 'dsh-settings-file-0.1.2-alpha.3',
+        settings: 'dsh-settings-file-0.1.2-rc.1',
       },
       unknownPaths: [],
     }
@@ -196,7 +262,7 @@ describe('preflightHome', () => {
           fresh: false,
           formats: {
             credentials: 'dsh-credentials-file-1',
-            settings: 'dsh-settings-file-0.1.2-alpha.3',
+            settings: 'dsh-settings-file-0.1.2-rc.1',
           },
           unknownPaths: [],
         },
@@ -292,10 +358,10 @@ describe('inspectHomeFormats', () => {
       expect(observed.unknownPaths).toEqual([])
       expect(observed.formats).toEqual({
         credentials: 'dsh-credentials-file-1',
-        settings: 'dsh-settings-file-0.1.2-alpha.3',
+        settings: 'dsh-settings-file-0.1.2-rc.1',
         sessions: 'dsh-session-jsonl-0',
-        profiles: 'dsh-profile-manifest-0.1.2-alpha.3',
-        storages: 'dsh-storage-unit-0.1.2-alpha.3',
+        profiles: 'dsh-profile-manifest-0.1.2-rc.1',
+        storages: 'dsh-storage-unit-0.1.2-rc.1',
       })
     } finally {
       await rm(home, { recursive: true, force: true })
@@ -313,7 +379,7 @@ describe('inspectHomeFormats', () => {
       )
       const observed = await inspectHomeFormats(home)
       expect(observed.unknownPaths).toEqual([])
-      expect(observed.formats.profiles).toBe('dsh-profile-manifest-0.1.2-alpha.3')
+      expect(observed.formats.profiles).toBe('dsh-profile-manifest-0.1.2-rc.1')
     } finally {
       await rm(home, { recursive: true, force: true })
     }
@@ -334,10 +400,108 @@ describe('inspectHomeFormats', () => {
       const observed = await inspectHomeFormats(home)
       expect(observed.unknownPaths).toEqual([])
       expect(observed.formats.projcache).toBe('dsh-session-projcache-4')
-      expect(observed.formats.storages).toBe('dsh-storage-unit-0.1.2-alpha.3')
+      expect(observed.formats.storages).toBe('dsh-storage-unit-0.1.2-rc.1')
     } finally {
       await rm(home, { recursive: true, force: true })
     }
+  })
+
+  it('classifies a v5 projcache domain and a v4/v5 mixture as the v5 cache', async () => {
+    const home = await tempHome()
+    try {
+      const domain = path.join(home, 'storages', 'session_projcache', 'sessions')
+      await mkdir(domain, { recursive: true })
+      await writeFile(path.join(domain, 'session-1.json'), '{"version":5,"record":{"watermark":9}}')
+      const observedV5 = await inspectHomeFormats(home)
+      expect(observedV5.unknownPaths).toEqual([])
+      expect(observedV5.formats.projcache).toBe('dsh-session-projcache-5')
+      expect(observedV5.formats.storages).toBe('dsh-storage-unit-0.1.2-rc.1')
+
+      // rc.1 reads v4 records in place; a migrated home mixes stamps and the
+      // domain identity is the newest stamp present.
+      await writeFile(path.join(domain, 'session-2.json'), '{"version":4,"record":{"watermark":3}}')
+      const observedMix = await inspectHomeFormats(home)
+      expect(observedMix.unknownPaths).toEqual([])
+      expect(observedMix.formats.projcache).toBe('dsh-session-projcache-5')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a v6 projcache record as data this release cannot read', async () => {
+    const home = await tempHome()
+    try {
+      const domain = path.join(home, 'storages', 'session_projcache', 'sessions')
+      await mkdir(domain, { recursive: true })
+      await writeFile(path.join(domain, 'session-future.json'), '{"version":6,"record":null}')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.formats.projcache).toBeUndefined()
+      expect(observed.unknownPaths).toContain(
+        'storages/session_projcache/sessions/session-future.json',
+      )
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('allows the rc1 release to read a home whose cache advanced to v5 under an M4 marker', () => {
+    expect(
+      preflightHome({
+        release: BASELINE_MANIFEST,
+        marker: {
+          schemaVersion: 1,
+          dataEpoch: 1,
+          lastWriterReleaseId: 'm4-0.0.0-darwin-arm64-caa5c51',
+          formats: { projcache: 'dsh-session-projcache-4' },
+        },
+        observed: {
+          fresh: false,
+          formats: {
+            projcache: 'dsh-session-projcache-5',
+            storages: 'dsh-storage-unit-0.1.2-rc.1',
+          },
+          unknownPaths: [],
+        },
+      }),
+    ).toMatchObject({ kind: 'allow', dataEpoch: 1 })
+  })
+
+  it('refuses a v5 cache when the release only reads v4 (downgrade refusal)', () => {
+    expect(
+      preflightHome({
+        release: M4_MANIFEST,
+        marker: {
+          schemaVersion: 1,
+          dataEpoch: 1,
+          lastWriterReleaseId: 'rc1-0.0.0-darwin-arm64-test000',
+          formats: { projcache: 'dsh-session-projcache-5' },
+        },
+        observed: {
+          fresh: false,
+          formats: { projcache: 'dsh-session-projcache-5' },
+          unknownPaths: [],
+        },
+      }),
+    ).toEqual({ kind: 'refuse', code: 'UNREADABLE_FORMAT' })
+  })
+
+  it('refuses marker/observed format IDs no single rule declares readable together', () => {
+    expect(
+      preflightHome({
+        release: BASELINE_MANIFEST,
+        marker: {
+          schemaVersion: 1,
+          dataEpoch: 1,
+          lastWriterReleaseId: 'rc1-0.0.0-darwin-arm64-test000',
+          formats: { projcache: 'dsh-credentials-file-1' },
+        },
+        observed: {
+          fresh: false,
+          formats: { projcache: 'dsh-session-projcache-4' },
+          unknownPaths: [],
+        },
+      }),
+    ).toEqual({ kind: 'refuse', code: 'UNKNOWN_FORMAT' })
   })
 
   it('classifies the Host-written records: credentials section as the baseline format', async () => {

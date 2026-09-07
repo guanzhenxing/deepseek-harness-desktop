@@ -11,11 +11,17 @@ export type HomeFormatState = Readonly<{
   unknownPaths: readonly string[]
 }>
 
-const SETTINGS_FORMAT_ID = 'dsh-settings-file-0.1.2-alpha.3'
+const SETTINGS_FORMAT_ID = 'dsh-settings-file-0.1.2-rc.1'
 const SESSION_JSONL_FORMAT_ID = 'dsh-session-jsonl-0'
-const STORAGE_UNIT_FORMAT_ID = 'dsh-storage-unit-0.1.2-alpha.3'
-const PROJCACHE_FORMAT_ID = 'dsh-session-projcache-4'
-const PROFILE_FORMAT_ID = 'dsh-profile-manifest-0.1.2-alpha.3'
+const STORAGE_UNIT_FORMAT_ID = 'dsh-storage-unit-0.1.2-rc.1'
+/** rc.1 writes projection-cache v5 and reads v4 records in place; the domain
+ * identity reported for a per-record mixture is the newest stamp present. */
+const PROJCACHE_FORMAT_IDS = { 4: 'dsh-session-projcache-4', 5: 'dsh-session-projcache-5' } as const
+const PROFILE_FORMAT_ID = 'dsh-profile-manifest-0.1.2-rc.1'
+
+function projcacheStampOf(stamp: number): 4 | 5 | 'foreign' {
+  return stamp === 4 || stamp === 5 ? stamp : 'foreign'
+}
 
 /** Bounds keep the read-only inspection linear and cheap on large homes. */
 const CREDENTIALS_READ_CAP = 1024 * 1024
@@ -146,7 +152,8 @@ export async function inspectHomeFormats(
     // data this release cannot read.
     if (storages.unknown.length === 0) formats.storages = storages.formatId
     else for (const relative of storages.unknown) unknownPaths.push(relative)
-    if (storages.projcache === 4) formats.projcache = PROJCACHE_FORMAT_ID
+    if (storages.projcache === 4) formats.projcache = PROJCACHE_FORMAT_IDS[4]
+    if (storages.projcache === 5) formats.projcache = PROJCACHE_FORMAT_IDS[5]
     if (storages.projcache === 'foreign') {
       flagUnknown(budget, unknownPaths, 'storages/session_projcache')
     }
@@ -704,7 +711,12 @@ async function storagesFormatId(
   | {
       state: 'absent'
     }
-  | { state: 'known'; formatId: string; unknown: string[]; projcache: 4 | 'foreign' | 'none' }
+  | {
+      state: 'known'
+      formatId: string
+      unknown: string[]
+      projcache: 4 | 5 | 'foreign' | 'none'
+    }
 > {
   const storagesDir = path.join(home, 'storages')
   const dirIdentity = await safeLstat(storagesDir)
@@ -719,9 +731,10 @@ async function storagesFormatId(
   }
   const unknown: string[] = []
   let sawAny = false
-  let projcache: 4 | 'foreign' | 'none' = 'none'
+  let projcache: 4 | 5 | 'foreign' | 'none' = 'none'
   let projcacheFromSingleFile: number | undefined
   let projcacheFromDirectory: number | undefined
+  let projcacheMaxInteriorStamp: number | undefined
   let projcacheInteriorFlagged = false
   const entriesAll = await boundedEntries(storagesDir, budget)
   if (entriesAll === 'unreadable' || entriesAll === 'overflow') {
@@ -787,34 +800,46 @@ async function storagesFormatId(
           if (entry === 'session_projcache') projcacheFromDirectory = stamp
         }
       }
+    } else if (entry === 'session_projcache') {
+      // The projection-cache domain is anchor-less: rc.1's domain spec
+      // declares no global slot, so its readable stamps (v4/v5) come from
+      // this release's policy — never from the records self-certifying — and
+      // a migrated home may mix v4 and v5 records legitimately.
+      unitVersion = undefined
     } else {
-      // Anchor-less domain: the baseline's only anchor-less per-record
-      // domain is session_projcache (pinned v4). Any OTHER domain without a
-      // global document has no trustworthy version source — the first
-      // record must never anchor itself (two consistent version:99
-      // documents would self-certify). Such a domain fails closed.
-      if (entry === 'session_projcache') {
-        unitVersion = 4
-        projcacheFromDirectory = await sampleRecordStamp(target, budget)
-      } else {
-        flagUnknown(budget, unknown, path.relative(home, target))
+      // Any OTHER domain without a global document has no trustworthy
+      // version source — the first record must never anchor itself (two
+      // consistent version:99 documents would self-certify). Such a domain
+      // fails closed.
+      flagUnknown(budget, unknown, path.relative(home, target))
+    }
+    const audit =
+      entry === 'session_projcache'
+        ? await auditUnitInterior(target, home, unitVersion, unknown, budget, new Set([4, 5]))
+        : await auditUnitInterior(target, home, unitVersion, unknown, budget)
+    if (entry === 'session_projcache') {
+      projcacheInteriorFlagged = audit.flagged
+      if (audit.maxStamp !== undefined) {
+        projcacheMaxInteriorStamp = Math.max(projcacheMaxInteriorStamp ?? 0, audit.maxStamp)
       }
     }
-    const interiorFlagged = await auditUnitInterior(target, home, unitVersion, unknown, budget)
-    if (entry === 'session_projcache' && interiorFlagged) projcacheInteriorFlagged = true
   }
   // The projection-cache domain's live layout wins: a migrated home keeps a
   // stale single-unit file from an older domain version next to the current
   // per-record directory, and that leftover must not flip the slot to
   // foreign. The single file decides only when no directory exists — but a
   // flagged interior (corrupt or foreign-version record) makes the domain
-  // foreign regardless of what its stamps sampled.
+  // foreign regardless of what its stamps sampled. The domain identity is
+  // the NEWEST readable stamp present (v5 once rc.1 has written any record),
+  // and a stamp outside {4,5} is data this release cannot read.
   if (projcacheInteriorFlagged) {
     projcache = 'foreign'
-  } else if (projcacheFromDirectory !== undefined) {
-    projcache = projcacheFromDirectory === 4 ? 4 : 'foreign'
+  } else if (projcacheFromDirectory !== undefined || projcacheMaxInteriorStamp !== undefined) {
+    projcache = projcacheStampOf(
+      Math.max(projcacheFromDirectory ?? 0, projcacheMaxInteriorStamp ?? 0),
+    )
   } else if (projcacheFromSingleFile !== undefined) {
-    projcache = projcacheFromSingleFile === 4 ? 4 : 'foreign'
+    projcache = projcacheStampOf(projcacheFromSingleFile)
   }
   if (!sawAny) return { state: 'absent' }
   return { state: 'known', formatId: STORAGE_UNIT_FORMAT_ID, unknown, projcache }
@@ -825,15 +850,18 @@ async function storagesFormatId(
  * every entry must be a real directory (a table) or a real regular file, and
  * every regular record is version-stamp-classified against the unit's own
  * version — a corrupt record is unknown data, and a record stamped
- * differently from its unit (or from the first-anchored version when the
- * unit has no global document) is data upstream's storage backend would
- * silently treat as absent. The domain-global document is the one regular
- * file allowed at unit level (classified by the caller). A symlink, FIFO,
- * or any other shape is surfaced as an unknown path: the runtime reads and
- * writes these exact paths, so a planted link must never ride through
- * admission hidden inside the unit envelope. Enumeration uses the shared
- * bounded listing and budget; overflow — or a budget breach, which stops
- * the record loop at its next iteration — flags the unit fail-closed.
+ * differently from its unit is data upstream's storage backend would
+ * silently treat as absent. When `allowedStamps` is provided (the
+ * projection-cache domain), a record is accepted for ANY stamp in that
+ * policy-declared set — a migrated home legitimately mixes v4 and v5 — and
+ * the walk reports the newest accepted stamp so the domain classifies as
+ * its newest member. The domain-global document is the one regular file
+ * allowed at unit level (classified by the caller). A symlink, FIFO, or any
+ * other shape is surfaced as an unknown path: the runtime reads and writes
+ * these exact paths, so a planted link must never ride through admission
+ * hidden inside the unit envelope. Enumeration uses the shared bounded
+ * listing and budget; overflow — or a budget breach, which stops the record
+ * loop at its next iteration — flags the unit fail-closed.
  */
 async function auditUnitInterior(
   unitDirectory: string,
@@ -841,18 +869,20 @@ async function auditUnitInterior(
   unitVersion: number | undefined,
   unknown: string[],
   budget: InspectionBudget,
-): Promise<boolean> {
+  allowedStamps?: ReadonlySet<number>,
+): Promise<{ flagged: boolean; maxStamp: number | undefined }> {
   const tables = await boundedEntries(unitDirectory, budget)
   if (tables === 'unreadable' || tables === 'overflow') {
     flagUnknown(budget, unknown, path.relative(home, unitDirectory))
-    return true
+    return { flagged: true, maxStamp: undefined }
   }
   let flagged = false
+  let maxStamp: number | undefined
   const anchoredVersion = unitVersion
   for (const table of tables) {
     if (budgetExhausted(budget)) {
       flagUnknown(budget, unknown, path.relative(home, unitDirectory))
-      return true
+      return { flagged: true, maxStamp: undefined }
     }
     const tableDir = path.join(unitDirectory, table)
     const tableIdentity = await safeLstat(tableDir)
@@ -883,7 +913,7 @@ async function auditUnitInterior(
       // spent and collapse to one unit-level unknown.
       if (budgetExhausted(budget)) {
         flagUnknown(budget, unknown, path.relative(home, unitDirectory))
-        return true
+        return { flagged: true, maxStamp: undefined }
       }
       const recordPath = path.join(tableDir, record)
       const recordIdentity = await safeLstat(recordPath)
@@ -896,17 +926,21 @@ async function auditUnitInterior(
       // Content classification: every record document must carry a valid
       // version stamp (`{version, record}` per dsh-storage-json
       // serializeRecord()); unparseable or unstamped content is unknown, and
-      // a stamp that disagrees with the unit's version (or with the first
-      // record seen in an anchor-less unit) is data upstream would silently
-      // drop.
+      // a stamp that disagrees with the unit's version (or falls outside the
+      // policy-declared readable set) is data upstream would silently drop.
       const stamp = await readRecordStamp(recordPath, budget)
-      if (stamp === undefined || stamp !== anchoredVersion) {
+      const accepted =
+        stamp !== undefined &&
+        (allowedStamps !== undefined ? allowedStamps.has(stamp) : stamp === anchoredVersion)
+      if (!accepted) {
         flagUnknown(budget, unknown, path.relative(home, recordPath))
         flagged = true
+      } else if (allowedStamps !== undefined) {
+        maxStamp = Math.max(maxStamp ?? 0, stamp)
       }
     }
   }
-  return flagged
+  return { flagged, maxStamp }
 }
 
 /**
@@ -934,33 +968,6 @@ async function readUnitHeader(
   } catch {
     return undefined
   }
-}
-
-/**
- * Sample the first record document of a per-record unit's first table to read
- * its version stamp. Bounded to one level and a handful of files.
- */
-async function sampleRecordStamp(
-  unitDirectory: string,
-  budget: InspectionBudget,
-): Promise<number | undefined> {
-  const names = await boundedEntries(unitDirectory, budget)
-  if (names === 'unreadable' || names === 'overflow') return undefined
-  const tableDirs: string[] = []
-  for (const name of names.slice(0, 4)) {
-    const identity = await safeLstat(path.join(unitDirectory, name))
-    if (identity !== undefined && identity.isDirectory()) tableDirs.push(name)
-  }
-  for (const table of tableDirs) {
-    const tableDir = path.join(unitDirectory, table)
-    const recordNames = await boundedEntries(tableDir, budget)
-    if (recordNames === 'unreadable' || recordNames === 'overflow') continue
-    for (const name of recordNames.filter((entry) => entry.endsWith('.json')).slice(0, 2)) {
-      const stamp = await readRecordStamp(path.join(tableDir, name), budget)
-      if (stamp !== undefined) return stamp
-    }
-  }
-  return undefined
 }
 
 /**

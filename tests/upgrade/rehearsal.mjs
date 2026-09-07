@@ -42,7 +42,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const PREVIOUS_APP_NAME = 'DeepSeek Harness Desktop'
 const CANDIDATE_APP_NAME = 'DeepSeek Harness'
 const UPSTREAM_REPO = 'https://github.com/deepseek-ai/deepseek-harness.git'
-const CURRENT_BASELINE = { tag: 'dsh-v0.1.2-alpha.3', npmVersion: '0.1.2-alpha.3' }
+const CURRENT_BASELINE = { tag: 'dsh-v0.1.2-rc.1', npmVersion: '0.1.2-rc.1' }
 
 function fail(step, message) {
   throw new Error(`rehearsal step "${step}" failed: ${message}`)
