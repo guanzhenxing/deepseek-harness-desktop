@@ -3,6 +3,7 @@
 // directory digests, canonical JSON, and the CycloneDX projection. Pure
 // build-time derivation — this module is never a second compatibility or
 // artifact authority (those stay in the policy/lockfile/artifact index).
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'

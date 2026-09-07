@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -266,12 +267,24 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
     },
   })
 
-  // The happy path verifies.
+  // The happy path: the report is ASSEMBLED by createReleaseEvidence from
+  // the same facts, then verifies.
   const sha256 = (value) => createHash('sha256').update(value).digest('hex')
   const ok = baseInput()
-  ok.report.evidence.sbom.sha256 = sha256(ok.sbom)
-  ok.report.evidence.licenses.sha256 = sha256(ok.licenses)
-  ok.report.evidence.packageSmoke.sha256 = sha256(canonicalJson(ok.packageSmoke).trim())
+  ok.report = createReleaseEvidence({
+    releaseId: ok.report.releaseId,
+    sourceCommit: ok.report.sourceCommit,
+    artifact: ok.report.artifact,
+    compatibilityManifestSha256: ok.report.compatibilityManifestSha256,
+    runtimes: ok.report.runtimes,
+    sbomSha256: sha256(ok.sbom),
+    licensesSha256: sha256(ok.licenses),
+    packageSmoke: {
+      sha256: sha256(canonicalJson(ok.packageSmoke).trimEnd()),
+      passed: true,
+      scenarioCount: 2,
+    },
+  })
   assert.deepEqual(verifyReleaseEvidence(ok), { ok: true })
 
   const staleSmoke = baseInput()

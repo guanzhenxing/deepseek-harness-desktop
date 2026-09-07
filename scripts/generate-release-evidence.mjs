@@ -6,9 +6,8 @@
 // authority. Repeat runs are byte-identical (canonical JSON, no timestamps,
 // no absolute paths).
 import { createRequire } from 'node:module'
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import {
   canonicalJson,
