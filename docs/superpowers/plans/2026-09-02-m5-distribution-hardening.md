@@ -1,5 +1,7 @@
 # M5 Distribution Engineering Follow-up Plan
 
+> **Status:** Superseded by the approved [M5 release-evidence plan](2026-09-07-m5-release-evidence.md) and [post-M4 delivery roadmap](2026-09-07-post-m4-delivery-roadmap.md). This document remains as historical scope input.
+
 > **For agentic workers:** M1–M4 全部验收后才进入本阶段。实施时使用 superpowers:writing-plans 根据 M4 验收提交细化各任务，再用 superpowers:executing-plans 顺序执行；本文件不触发当前阶段开发。
 
 **Goal:** 在 M4 已交付的本机可用版本上，吸收 dsh-forge 的发行工程经验，增强证据自动汇总、故障验证和插件引入流程。

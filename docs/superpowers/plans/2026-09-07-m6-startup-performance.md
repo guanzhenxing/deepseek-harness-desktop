@@ -1,5 +1,7 @@
 # M6 Startup Performance and Observability Plan
 
+> **Status:** Superseded by [M6 startup performance V2](2026-09-07-m6-startup-performance-v2.md) and the [post-M4 delivery roadmap](2026-09-07-post-m4-delivery-roadmap.md). Its `8997ef3` baseline is historical; the accepted M4 artifact is `caa5c51` unless a later qualified candidate replaces it.
+
 > **For agentic workers:** M6 starts from an accepted M4 candidate, not from a user's live home or application data. Before implementing a selected optimisation, use `superpowers:writing-plans` to create a focused implementation plan and `superpowers:executing-plans` to execute it task-by-task.
 
 **Goal:** Make daily macOS startup measurably faster while preserving M1–M4 home admission, lease, recovery, navigation and packaged-artifact guarantees.
@@ -63,12 +65,12 @@ Acceptance: the report lets a reviewer distinguish initialization, warm total ti
 - [ ] Record a baseline on the M6 execution machine with the exact DMG SHA and the three warm timelines. Add the result to `docs/validation/m6-acceptance.md`; do not reuse a number from a different candidate or from a manually launched app.
 - [ ] Select exactly one dominant stage using warm P95. Use the following decision table; if no stage dominates or measurements are unstable, stop after documenting the result rather than changing launch behavior.
 
-| Measured dominant stage | Permitted optimisation direction | Non-negotiable constraint |
-| --- | --- | --- |
-| `home-admitted` | Reduce redundant metadata reads or bounded-reader overhead, then benchmark against homes of different session counts. | Unknown, unreadable, symlink, FIFO, oversized or unsupported data remains fail-closed; do not skip format inspection. |
-| `host-spawned` → `host-ready` | Verify compile-cache hit/miss behavior, avoid duplicate runtime imports, or defer work that is not needed before the Host-control ready contract. | Keep the independent utility process, bootstrap capability, profile reconciliation, lease ownership and Safe Mode boundary intact. |
-| `surface-loaded` → `official-ui-ready` | Profile the official surface's renderer work and remove launcher-owned blocking work from the critical path. | Do not put renderer/DSH business logic in Electron Main or weaken loopback/authenticated navigation checks. |
-| `launcher-ready` → `loading-visible` | Reduce Electron-main synchronous startup work or resource lookup before window creation. | The loading page must remain bundled, exact-URL guarded and visibly replaceable by the surface. |
+| Measured dominant stage                | Permitted optimisation direction                                                                                                                  | Non-negotiable constraint                                                                                                          |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `home-admitted`                        | Reduce redundant metadata reads or bounded-reader overhead, then benchmark against homes of different session counts.                             | Unknown, unreadable, symlink, FIFO, oversized or unsupported data remains fail-closed; do not skip format inspection.              |
+| `host-spawned` → `host-ready`          | Verify compile-cache hit/miss behavior, avoid duplicate runtime imports, or defer work that is not needed before the Host-control ready contract. | Keep the independent utility process, bootstrap capability, profile reconciliation, lease ownership and Safe Mode boundary intact. |
+| `surface-loaded` → `official-ui-ready` | Profile the official surface's renderer work and remove launcher-owned blocking work from the critical path.                                      | Do not put renderer/DSH business logic in Electron Main or weaken loopback/authenticated navigation checks.                        |
+| `launcher-ready` → `loading-visible`   | Reduce Electron-main synchronous startup work or resource lookup before window creation.                                                          | The loading page must remain bundled, exact-URL guarded and visibly replaceable by the surface.                                    |
 
 - [ ] Create a short, separate implementation plan for the selected row before changing production behavior. The plan must state the measured baseline, a target improvement for that stage, the exact tests and the affected M1–M4 invariants.
 
