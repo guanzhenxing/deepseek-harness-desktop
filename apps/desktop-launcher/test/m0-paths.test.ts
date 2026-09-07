@@ -21,6 +21,10 @@ describe('M0 smoke userData override', () => {
     try {
       expect(await resolveSmokeUserData('ui', root)).toBe(root)
       expect(await resolveSmokeUserData('loading', root)).toBe(root)
+      expect(await resolveSmokeUserData('startup-perf', root)).toBe(root)
+      await expect(resolveSmokeUserData('startup-perf', '/Users/shared')).rejects.toThrow(
+        /temporary/u,
+      )
       await symlink(root, linked, 'dir')
       await expect(resolveSmokeUserData('ui', linked)).rejects.toThrow(/symlink/u)
     } finally {
