@@ -8,6 +8,7 @@ import {
   canonicalJson,
   collectClosureComponents,
   createCycloneDx,
+  createLicenseInventory,
   directoryDigestHex,
   npmPurl,
 } from './release-evidence-lib.mjs'
@@ -167,4 +168,46 @@ test('createCycloneDx emits a deterministic minimal CycloneDX 1.6 document', () 
   assert.deepEqual(bom.components[0].hashes, [
     { alg: 'SHA-512', content: Buffer.from('aaaaaaaa', 'base64').toString('hex') },
   ])
+})
+
+test('createLicenseInventory records declared licenses, files, and digests', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-evidence-'))
+  try {
+    const dirA = await packageDir(root, 'a', { name: 'a', version: '1.0.0', license: 'MIT' })
+    await writeFile(path.join(dirA, 'LICENSE'), 'MIT license text\n')
+    await packageDir(root, 'b', { name: 'b', version: '1.0.0' })
+    const components = await collectClosureComponents(
+      [root],
+      new Map([
+        [npmPurl('a', '1.0.0'), 'sha512-a'],
+        [npmPurl('b', '1.0.0'), 'sha512-b'],
+      ]),
+    )
+    const inventory = await createLicenseInventory(components, [root])
+    const byPurl = Object.fromEntries(inventory.components.map((entry) => [entry.purl, entry]))
+    assert.equal(byPurl['pkg:npm/a@1.0.0'].declared, 'MIT')
+    assert.equal(byPurl['pkg:npm/b@1.0.0'].declared, 'NOASSERTION')
+    assert.deepEqual(byPurl['pkg:npm/a@1.0.0'].files, ['LICENSE'])
+    assert.match(byPurl['pkg:npm/a@1.0.0'].sha256.LICENSE, /^[0-9a-f]{64}$/u)
+    assert.deepEqual(byPurl['pkg:npm/b@1.0.0'].files, [])
+    assert.equal(inventory.schemaVersion, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('createLicenseInventory rejects a symlinked license file', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-evidence-'))
+  try {
+    const dir = await packageDir(root, 'a', { name: 'a', version: '1.0.0', license: 'MIT' })
+    await writeFile(path.join(root, 'outside-license'), 'pretend\n')
+    await symlink('../outside-license', path.join(dir, 'LICENSE'))
+    const components = await collectClosureComponents(
+      [root],
+      new Map([[npmPurl('a', '1.0.0'), 'sha512-a']]),
+    )
+    await assert.rejects(createLicenseInventory(components, [root]), /symlink/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

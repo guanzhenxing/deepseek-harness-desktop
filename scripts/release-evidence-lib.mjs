@@ -194,7 +194,7 @@ export async function collectClosureComponents(closureRoots, integrityByPurl) {
       component.integrity = `sha256-${await directoryDigestHex(component.manifestDirectory)}`
     }
   }
-  return components.map(({ manifestDirectory, ...component }) => component)
+  return components
 }
 
 /**
@@ -232,4 +232,55 @@ function hashOf(integrity) {
     return { alg: 'SHA-256', content: digest }
   }
   throw new Error(`release-evidence: unsupported integrity algorithm: ${algorithm}`)
+}
+
+const LICENSE_FILE_PATTERN =
+  /^(licen[cs]e|copying(?:\.[^.]+)?|notice(?:\.[^.]+)?|unlicense(?:\.[^.]+)?)$/iu
+
+/**
+ * Reviewable license inventory for the collected closure components: purl,
+ * declared SPDX expression (or NOASSERTION), the sorted in-package license
+ * filenames, and each file's SHA-256. Full license text is never embedded
+ * and no license is ever inferred from a package name — an undeclared
+ * license is NOASSERTION, full stop. A license entry that is a symlink (or
+ * anything but a regular file) is refused: the digest must be of bytes that
+ * actually shipped inside the package.
+ */
+export async function createLicenseInventory(components, closureRoots) {
+  const realRoots = await Promise.all(closureRoots.map((root) => realpath(root)))
+  const insideAnyRoot = (resolved) =>
+    realRoots.some((root) => resolved === root || resolved.startsWith(`${root}${path.sep}`))
+
+  const entries = []
+  for (const component of components) {
+    const files = []
+    const digests = {}
+    const names = (await readdir(component.manifestDirectory).catch(() => [])).sort(byCodepoints)
+    for (const name of names) {
+      if (!LICENSE_FILE_PATTERN.test(name)) continue
+      const target = path.join(component.manifestDirectory, name)
+      const identity = await lstat(target)
+      if (!identity.isFile()) {
+        throw new Error(
+          `release-evidence: license entry is a symlink: ${name} in ${component.purl}`,
+        )
+      }
+      const resolved = await realpath(target)
+      if (!insideAnyRoot(resolved)) {
+        throw new Error(`release-evidence: license path escapes the closure roots: ${name}`)
+      }
+      files.push(name)
+      digests[name] = createHash('sha256')
+        .update(await readFile(target))
+        .digest('hex')
+    }
+    entries.push({
+      purl: component.purl,
+      declared: component.license,
+      files,
+      sha256: digests,
+    })
+  }
+  entries.sort((left, right) => byCodepoints(left.purl, right.purl))
+  return { schemaVersion: 1, components: entries }
 }
