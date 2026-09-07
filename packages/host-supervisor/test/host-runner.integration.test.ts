@@ -392,4 +392,54 @@ describe('real DSH Host runner', () => {
     await vi.waitFor(() => expect(child?.exitCode).toBe(0))
     await lease.release()
   }, 60_000)
+
+  it('boots the rc.1 Host with the narrow loopback ready contract', async () => {
+    const home = await testHome()
+    await reconcileDesktopProfile(
+      createProfileRef(home, 'desktop'),
+      createIsolatedHomeAuthority(home, path.dirname(home)),
+    )
+    const probe = createNativeProcessProbe({
+      helperPath: resolveLeaseHelperPath(process.env),
+      entryExecutables: [],
+    })
+    const lease = await acquireHomeLease({
+      home,
+      entrypoint: 'desktop',
+      profile: 'desktop',
+      appVersion: '0.0.0',
+      probe,
+    })
+    let child: ChildProcess | undefined
+    const supervisor = new HostSupervisor({
+      stabilityMs: 0,
+      startupTimeoutMs: 30_000,
+      factory: {
+        async spawnWaiting(): Promise<ManagedHostProcess> {
+          const startIdentity = randomUUID()
+          child = fork(fileURLToPath(new URL('./fixtures/node-host.mjs', import.meta.url)), [], {
+            cwd: fileURLToPath(new URL('../../../apps/desktop-launcher', import.meta.url)),
+            stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+          })
+          return new NodeManagedHostProcess(child, startIdentity)
+        },
+      },
+    })
+
+    const ready = await supervisor.start({
+      home,
+      profileName: 'desktop',
+      mode: 'normal',
+      lease,
+      probe,
+    })
+    expect(ready.surface.url).toMatch(/^http:\/\/127\.0\.0\.1:/u)
+    expect(ready.surface.kind).toBe('loopback')
+    expect(ready.origin).toMatch(/^http:\/\/127\.0\.0\.1:/u)
+    expect(ready.pid).toBeGreaterThan(0)
+
+    await supervisor.stop('quit', 5_000)
+    await vi.waitFor(() => expect(child?.exitCode).toBe(0))
+    await lease.release()
+  }, 60_000)
 })
