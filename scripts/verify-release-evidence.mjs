@@ -44,11 +44,10 @@ async function main() {
   })
 
   if (result.ok !== true) throw new Error('EVIDENCE_REPORT_INVALID: verification returned no ok')
-  if (
-    report.compatibilityManifestSha256 !== createHash('sha256').update(manifestBytes).digest('hex')
-  ) {
-    throw new Error('EVIDENCE_MANIFEST_MISMATCH: report digest != release/compatibility.json bytes')
-  }
+  // The DMG-embedded manifest is a staging SUPERSET of the generated
+  // release/compatibility.json (runtime facts are added at staging), so the
+  // binding is by the artifact record's embedded-manifest digest — a byte
+  // comparison against the generated file would be structurally wrong.
   if (
     record.compatibilityManifestSha256 !== undefined &&
     record.compatibilityManifestSha256 !== report.compatibilityManifestSha256

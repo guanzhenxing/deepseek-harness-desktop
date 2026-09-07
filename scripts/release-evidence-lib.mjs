@@ -441,7 +441,12 @@ export function verifyReleaseEvidence(input) {
     )
   }
 
-  const smoke = input.packageSmoke
+  // The smoke report arrives parsed (unit tests) or as raw file bytes (the
+  // CLI): identity checks read the parsed form, the digest covers exactly
+  // the bytes that ship.
+  const smoke = Buffer.isBuffer(input.packageSmoke)
+    ? JSON.parse(input.packageSmoke.toString('utf8'))
+    : input.packageSmoke
   if (smoke.candidate.releaseId !== report.releaseId) {
     failEvidence(
       'SMOKE_RELEASE_MISMATCH',
@@ -459,7 +464,9 @@ export function verifyReleaseEvidence(input) {
   }
 
   const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
-  const smokeBytes = Buffer.isBuffer(smoke) ? smoke : Buffer.from(canonicalJson(smoke).trimEnd())
+  const smokeBytes = Buffer.isBuffer(input.packageSmoke)
+    ? input.packageSmoke
+    : Buffer.from(canonicalJson(smoke).trimEnd())
   for (const [name, bytes] of [
     ['sbom', input.sbom],
     ['licenses', input.licenses],
