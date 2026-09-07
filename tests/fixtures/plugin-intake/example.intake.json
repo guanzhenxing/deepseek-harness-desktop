@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "package": "@fixture/m5-example-bundle",
+  "version": "1.0.0",
+  "source": {
+    "kind": "repository",
+    "commit": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "integrity": "sha256-IqUh9R7FGtquSrgjRVCsF5aI-x-laDL8HO8yeolK0b0",
+  "license": "MIT",
+  "capabilities": [],
+  "validatedPlatforms": ["darwin-arm64"]
+}

@@ -22,6 +22,7 @@
     "verify:dsh-closure": "node scripts/verify-dsh-closure.mjs",
     "verify:patches": "node scripts/verify-patches.mjs",
     "verify:release-evidence": "node scripts/verify-release-evidence.mjs",
+    "verify:plugin-intake": "node tests/smoke/plugin-intake.mjs",
     "format:check": "prettier --check eslint.config.js vitest.config.ts vitest.integration.config.ts docs/compatibility.json scripts/*.mjs tests/smoke/*.mjs tests/helpers/*.mjs tests/fixtures/*.mjs \"{apps,packages}/**/*.{ts,json}\" --ignore-unknown --no-error-on-unmatched-pattern",
     "lint": "eslint . && pnpm run check:boundaries",
     "stage:runtime": "node scripts/stage-runtime.mjs",
