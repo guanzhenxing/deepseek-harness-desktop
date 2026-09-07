@@ -284,3 +284,247 @@ export async function createLicenseInventory(components, closureRoots) {
   entries.sort((left, right) => byCodepoints(left.purl, right.purl))
   return { schemaVersion: 1, components: entries }
 }
+
+const REPORT_KEYS = [
+  'schemaVersion',
+  'releaseId',
+  'sourceCommit',
+  'artifact',
+  'compatibilityManifestSha256',
+  'runtimes',
+  'evidence',
+]
+const HEX64 = /^[0-9a-f]{64}$/u
+const HEX40 = /^[0-9a-f]{40}$/u
+
+function failEvidence(code, detail) {
+  throw new Error(`EVIDENCE_${code}: ${detail}`)
+}
+
+function assertExactKeys(value, keys, where) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    failEvidence('REPORT_INVALID', `${where} must be an object`)
+  }
+  const actual = Object.keys(value).sort()
+  const expected = [...keys].sort()
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    failEvidence(
+      'REPORT_INVALID',
+      `${where} fields ${JSON.stringify(actual)} != ${JSON.stringify(expected)}`,
+    )
+  }
+}
+
+function scanForAbsolutePaths(value, where) {
+  if (typeof value === 'string') {
+    if (value.startsWith('/')) {
+      failEvidence('REPORT_INVALID', `absolute path in ${where}: ${value}`)
+    }
+    return
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => scanForAbsolutePaths(entry, `${where}[${index}]`))
+    return
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) scanForAbsolutePaths(entry, `${where}.${key}`)
+  }
+}
+
+/** Assemble the unified release-evidence report. The shape is closed: this
+ * constructor is the only producer, and verifyReleaseEvidence rejects any
+ * field it does not know. */
+export function createReleaseEvidence(input) {
+  return {
+    schemaVersion: 1,
+    releaseId: input.releaseId,
+    sourceCommit: input.sourceCommit,
+    artifact: {
+      sha256: input.artifact.sha256,
+      platform: input.artifact.platform,
+      arch: input.artifact.arch,
+    },
+    compatibilityManifestSha256: input.compatibilityManifestSha256,
+    runtimes: {
+      node: input.runtimes.node,
+      electron: input.runtimes.electron,
+      dsh: input.runtimes.dsh,
+    },
+    evidence: {
+      sbom: { file: 'sbom.cdx.json', sha256: input.sbomSha256 },
+      licenses: { file: 'licenses.json', sha256: input.licensesSha256 },
+      packageSmoke: {
+        file: '../package-smoke.json',
+        sha256: input.packageSmoke.sha256,
+        passed: input.packageSmoke.passed,
+        scenarioCount: input.packageSmoke.scenarioCount,
+      },
+    },
+  }
+}
+
+/**
+ * Verify that one release-evidence report and its referenced inputs all
+ * describe the SAME candidate: release id, source commit, DMG digest,
+ * platform/architecture, embedded compatibility manifest, runtime versions,
+ * smoke result, and the digests of every evidence file. Any disagreement
+ * throws with a specific EVIDENCE_* code; a clean pass returns {ok: true}.
+ */
+export function verifyReleaseEvidence(input) {
+  const report = input.report
+  assertExactKeys(report, REPORT_KEYS, 'report')
+  if (report.schemaVersion !== 1) {
+    failEvidence('REPORT_INVALID', `schemaVersion ${report.schemaVersion} != 1`)
+  }
+  scanForAbsolutePaths(report, 'report')
+  assertExactKeys(report.artifact, ['sha256', 'platform', 'arch'], 'artifact')
+  assertExactKeys(report.runtimes, ['node', 'electron', 'dsh'], 'runtimes')
+  assertExactKeys(report.evidence, ['sbom', 'licenses', 'packageSmoke'], 'evidence')
+  assertExactKeys(report.evidence.sbom, ['file', 'sha256'], 'evidence.sbom')
+  assertExactKeys(report.evidence.licenses, ['file', 'sha256'], 'evidence.licenses')
+  assertExactKeys(
+    report.evidence.packageSmoke,
+    ['file', 'sha256', 'passed', 'scenarioCount'],
+    'evidence.packageSmoke',
+  )
+  for (const digest of [
+    report.artifact.sha256,
+    report.compatibilityManifestSha256,
+    report.evidence.sbom.sha256,
+    report.evidence.licenses.sha256,
+    report.evidence.packageSmoke.sha256,
+  ]) {
+    if (!HEX64.test(digest)) failEvidence('REPORT_INVALID', `digest is not sha256 hex: ${digest}`)
+  }
+  if (!HEX40.test(report.sourceCommit)) {
+    failEvidence('REPORT_INVALID', `sourceCommit is not a 40-hex commit: ${report.sourceCommit}`)
+  }
+  if (!report.releaseId.endsWith(`-${report.sourceCommit.slice(0, 7)}`)) {
+    failEvidence(
+      'REPORT_INVALID',
+      `releaseId ${report.releaseId} does not bind sourceCommit ${report.sourceCommit}`,
+    )
+  }
+
+  const manifest = input.embeddedManifest
+  if (manifest.releaseId !== report.releaseId) {
+    failEvidence(
+      'REPORT_INVALID',
+      `embedded manifest releaseId ${manifest.releaseId} != ${report.releaseId}`,
+    )
+  }
+  if (manifest.sourceCommit !== report.sourceCommit) {
+    failEvidence('REPORT_INVALID', `embedded manifest sourceCommit != report sourceCommit`)
+  }
+  if (report.runtimes.dsh !== manifest.dsh.npmVersion) {
+    failEvidence(
+      'REPORT_INVALID',
+      `runtimes.dsh ${report.runtimes.dsh} != manifest ${manifest.dsh.npmVersion}`,
+    )
+  }
+
+  const record = input.artifactRecords.find((entry) => entry.releaseId === report.releaseId)
+  if (record === undefined) {
+    failEvidence('REPORT_INVALID', `artifact index has no record for ${report.releaseId}`)
+  }
+  if (record.arch !== report.artifact.arch || record.platform !== report.artifact.platform) {
+    failEvidence(
+      'ARCH_MISMATCH',
+      `report ${report.artifact.platform}/${report.artifact.arch} vs artifact ${record.platform}/${record.arch}`,
+    )
+  }
+  if (record.sha256 !== report.artifact.sha256 || input.dmgDigest !== record.sha256) {
+    failEvidence(
+      'ARTIFACT_DIGEST_MISMATCH',
+      `DMG digest does not match the record for ${report.releaseId}`,
+    )
+  }
+
+  const smoke = input.packageSmoke
+  if (smoke.candidate.releaseId !== report.releaseId) {
+    failEvidence(
+      'SMOKE_RELEASE_MISMATCH',
+      `smoke report binds ${smoke.candidate.releaseId}, evidence binds ${report.releaseId}`,
+    )
+  }
+  if (!report.evidence.packageSmoke.passed || smoke.results.some((entry) => entry.ok !== true)) {
+    failEvidence('SMOKE_FAILED', 'the packaged smoke report holds a failed scenario')
+  }
+  if (report.evidence.packageSmoke.scenarioCount !== smoke.results.length) {
+    failEvidence(
+      'REPORT_INVALID',
+      `scenarioCount ${report.evidence.packageSmoke.scenarioCount} != ${smoke.results.length}`,
+    )
+  }
+
+  const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
+  const smokeBytes = Buffer.isBuffer(smoke) ? smoke : Buffer.from(canonicalJson(smoke).trimEnd())
+  for (const [name, bytes] of [
+    ['sbom', input.sbom],
+    ['licenses', input.licenses],
+    ['packageSmoke', smokeBytes],
+  ]) {
+    if (bytes === undefined) {
+      failEvidence('COMPONENT_MISSING', `evidence component absent: ${name}`)
+    }
+    if (sha256(bytes) !== report.evidence[name].sha256) {
+      failEvidence('COMPONENT_DIGEST_MISMATCH', `evidence component digest mismatch: ${name}`)
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * Gather the identity inputs for the unified report from the repository's
+ * authoritative facts: the artifact index record for this machine's arch,
+ * the generated compatibility manifest, the launcher's pinned Electron, the
+ * bundled Node binary, and the packaged smoke report. Pure derivation — no
+ * fact is invented here.
+ */
+export async function gatherEvidenceIdentity(input) {
+  const { repositoryRoot, evidenceDirectory } = input
+  const { readFile } = await import('node:fs/promises')
+  const { execFileSync } = await import('node:child_process')
+  const readJson = async (file) => JSON.parse(await readFile(file, 'utf8'))
+
+  const artifacts = await readJson(path.join(repositoryRoot, 'release', 'artifacts.json'))
+  const record = artifacts.find((entry) => entry.arch === process.arch)
+  if (record === undefined) {
+    throw new Error(
+      `release-evidence: no ${process.arch} artifact record in release/artifacts.json`,
+    )
+  }
+  const manifest = await readJson(path.join(repositoryRoot, 'release', 'compatibility.json'))
+  const launcher = await readJson(
+    path.join(repositoryRoot, 'apps', 'desktop-launcher', 'package.json'),
+  )
+  const nodeVersion = execFileSync(
+    path.join(repositoryRoot, 'release', 'staging', 'runtime-cli', 'node', 'bin', 'node'),
+    ['--version'],
+  )
+    .toString()
+    .trim()
+
+  const smokeBytes = await readFile(path.join(repositoryRoot, 'release', 'package-smoke.json'))
+  const smoke = JSON.parse(smokeBytes)
+  const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
+
+  return {
+    releaseId: record.releaseId,
+    sourceCommit: manifest.sourceCommit,
+    artifact: { sha256: record.sha256, platform: record.platform, arch: record.arch },
+    compatibilityManifestSha256: record.compatibilityManifestSha256,
+    runtimes: {
+      node: nodeVersion.replace(/^v/u, ''),
+      electron: launcher.devDependencies.electron,
+      dsh: manifest.dsh.npmVersion,
+    },
+    sbomSha256: sha256(await readFile(path.join(evidenceDirectory, 'sbom.cdx.json'))),
+    licensesSha256: sha256(await readFile(path.join(evidenceDirectory, 'licenses.json'))),
+    packageSmoke: {
+      sha256: sha256(smokeBytes),
+      passed: smoke.results.every((entry) => entry.ok === true),
+      scenarioCount: smoke.results.length,
+    },
+  }
+}

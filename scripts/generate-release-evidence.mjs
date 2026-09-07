@@ -15,6 +15,8 @@ import {
   collectClosureComponents,
   createCycloneDx,
   createLicenseInventory,
+  createReleaseEvidence,
+  gatherEvidenceIdentity,
   npmPurl,
 } from './release-evidence-lib.mjs'
 import { closureRecordsFromLockfile, repositoryRoot } from './generate-compatibility.mjs'
@@ -79,8 +81,12 @@ async function main() {
   const inventory = await createLicenseInventory(components, roots)
   await writeAtomic(path.join(evidenceDirectory, 'licenses.json'), canonicalJson(inventory))
   const declared = inventory.components.filter((entry) => entry.declared !== 'NOASSERTION').length
+
+  const evidence = await gatherEvidenceIdentity({ repositoryRoot, evidenceDirectory })
+  const report = createReleaseEvidence(evidence)
+  await writeAtomic(path.join(evidenceDirectory, 'release-evidence.json'), canonicalJson(report))
   console.log(
-    `generate-release-evidence: wrote release/evidence/sbom.cdx.json (${components.length} components), licenses.json (${declared} declared, ${components.length - declared} NOASSERTION)`,
+    `generate-release-evidence: wrote release/evidence/sbom.cdx.json (${components.length} components), licenses.json (${declared} declared, ${components.length - declared} NOASSERTION), release-evidence.json (${report.releaseId})`,
   )
 }
 

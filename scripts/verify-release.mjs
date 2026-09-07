@@ -45,6 +45,10 @@ const steps = [
   { name: 'package:dmg', command: ['run', 'package:dmg'] },
   { name: 'verify:artifacts', command: ['run', 'verify:artifacts'] },
   { name: 'smoke:package', command: ['run', 'smoke:package'] },
+  // Evidence binds the just-smoked candidate: generate and verify sit between
+  // the smoke and the archive so the rehearsal consumes a proven candidate.
+  { name: 'generate:release-evidence', command: ['run', 'generate:release-evidence'] },
+  { name: 'verify:release-evidence', command: ['run', 'verify:release-evidence'] },
   {
     name: 'archive candidate + rehearse:upgrade',
     run() {

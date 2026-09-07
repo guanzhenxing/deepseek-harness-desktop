@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -9,8 +10,10 @@ import {
   collectClosureComponents,
   createCycloneDx,
   createLicenseInventory,
+  createReleaseEvidence,
   directoryDigestHex,
   npmPurl,
+  verifyReleaseEvidence,
 } from './release-evidence-lib.mjs'
 
 async function packageDir(root, name, fields) {
@@ -210,4 +213,101 @@ test('createLicenseInventory rejects a symlinked license file', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('verifyReleaseEvidence rejects the four identity mutations with specific codes', async () => {
+  const baseInput = () => ({
+    report: {
+      schemaVersion: 1,
+      releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+      sourceCommit: 'a'.repeat(40),
+      artifact: { sha256: 'b'.repeat(64), platform: 'darwin', arch: 'arm64' },
+      compatibilityManifestSha256: 'c'.repeat(64),
+      runtimes: { node: '24.11.1', electron: '44.1.0', dsh: '0.1.2-rc.1' },
+      evidence: {
+        sbom: { file: 'sbom.cdx.json', sha256: 'd'.repeat(64) },
+        licenses: { file: 'licenses.json', sha256: 'e'.repeat(64) },
+        packageSmoke: {
+          file: '../package-smoke.json',
+          sha256: 'f'.repeat(64),
+          passed: true,
+          scenarioCount: 2,
+        },
+      },
+    },
+    sbom: Buffer.from('sbom'),
+    licenses: Buffer.from('licenses'),
+    packageSmoke: {
+      candidate: {
+        releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+        sha256: 'b'.repeat(64),
+        platform: 'darwin',
+        arch: 'arm64',
+      },
+      results: [
+        { name: 'one', ok: true },
+        { name: 'two', ok: true },
+      ],
+    },
+    artifactRecords: [
+      {
+        releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+        sha256: 'b'.repeat(64),
+        platform: 'darwin',
+        arch: 'arm64',
+        file: 'release/dist/x.dmg',
+      },
+    ],
+    dmgDigest: 'b'.repeat(64),
+    embeddedManifest: {
+      releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+      sourceCommit: 'a'.repeat(40),
+      dsh: { tag: 'dsh-v0.1.2-rc.1', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
+    },
+  })
+
+  // The happy path verifies.
+  const sha256 = (value) => createHash('sha256').update(value).digest('hex')
+  const ok = baseInput()
+  ok.report.evidence.sbom.sha256 = sha256(ok.sbom)
+  ok.report.evidence.licenses.sha256 = sha256(ok.licenses)
+  ok.report.evidence.packageSmoke.sha256 = sha256(canonicalJson(ok.packageSmoke).trim())
+  assert.deepEqual(verifyReleaseEvidence(ok), { ok: true })
+
+  const staleSmoke = baseInput()
+  staleSmoke.report.evidence.sbom.sha256 = sha256(staleSmoke.sbom)
+  staleSmoke.report.evidence.licenses.sha256 = sha256(staleSmoke.licenses)
+  staleSmoke.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(staleSmoke.packageSmoke).trim(),
+  )
+  staleSmoke.packageSmoke.candidate.releaseId = 'm3-0.0.0-darwin-arm64-old000'
+  assert.throws(() => verifyReleaseEvidence(staleSmoke), /EVIDENCE_SMOKE_RELEASE_MISMATCH/u)
+
+  const wrongArch = baseInput()
+  wrongArch.report.evidence.sbom.sha256 = sha256(wrongArch.sbom)
+  wrongArch.report.evidence.licenses.sha256 = sha256(wrongArch.licenses)
+  wrongArch.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(wrongArch.packageSmoke).trim(),
+  )
+  wrongArch.report.artifact.arch = 'x64'
+  assert.throws(() => verifyReleaseEvidence(wrongArch), /EVIDENCE_ARCH_MISMATCH/u)
+
+  const replacedDmg = baseInput()
+  replacedDmg.report.evidence.sbom.sha256 = sha256(replacedDmg.sbom)
+  replacedDmg.report.evidence.licenses.sha256 = sha256(replacedDmg.licenses)
+  replacedDmg.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(replacedDmg.packageSmoke).trim(),
+  )
+  replacedDmg.dmgDigest = 'f'.repeat(64)
+  assert.throws(() => verifyReleaseEvidence(replacedDmg), /EVIDENCE_ARTIFACT_DIGEST_MISMATCH/u)
+
+  const missingSbom = baseInput()
+  missingSbom.evidence = undefined
+  missingSbom.report.evidence.sbom.sha256 = sha256(missingSbom.sbom)
+  missingSbom.report.evidence.licenses.sha256 = sha256(missingSbom.licenses)
+  missingSbom.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(missingSbom.packageSmoke).trim(),
+  )
+  delete missingSbom.sbom
+  assert.throws(() => verifyReleaseEvidence(missingSbom), /EVIDENCE_COMPONENT_MISSING/u)
 })
