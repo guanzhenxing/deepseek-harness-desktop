@@ -25,6 +25,8 @@ import { HostSupervisor, type HostFatalDetail, type HostReady } from '@dsh-deskt
 import { PRODUCT } from '@dsh-desktop/product-config'
 import { SAFE_PROFILE_NAME } from '@dsh-desktop/profile-manager'
 import { loadReleaseManifest, runHomeCompatibilityChain } from '@dsh-desktop/release-compatibility'
+
+import { createStartupTimeline } from './startup-timeline.js'
 import {
   closeWindowAction,
   createDesktopProfileRecovery,
@@ -81,7 +83,13 @@ const hostEntryPath =
   installedRuntime?.hostEntry ?? fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
 const isLoadingSmoke = smokeMode === 'loading'
+const isStartupPerfSmoke = smokeMode === 'startup-perf'
 const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
+// Smoke-only startup timeline: normal launches create the disabled
+// collector and emit nothing.
+const startupTimeline = createStartupTimeline(isStartupPerfSmoke, (event) => {
+  smokeReport(event)
+})
 
 if (userDataOverride !== undefined) {
   app.setPath('userData', path.resolve(userDataOverride))
@@ -539,13 +547,17 @@ async function startApplication(): Promise<void> {
     openExternal,
     // Automated sequences assert against the official surface's load events;
     // manual launches get the loading page instead of a dead dock icon.
-    ...((smokeMode === undefined || isLoadingSmoke) && installedRuntime !== undefined
+    ...((smokeMode === undefined || isLoadingSmoke || isStartupPerfSmoke) &&
+    installedRuntime !== undefined
       ? { loadingHtml: installedRuntime.loadingHtml }
       : {}),
   })
   windowPort = port
-  if (smokeMode === undefined || isLoadingSmoke) {
+  if (smokeMode === undefined || isLoadingSmoke || isStartupPerfSmoke) {
     const visible = await port.showLoading()
+    if (isStartupPerfSmoke && visible && port.window.isVisible()) {
+      startupTimeline.mark('loading-visible')
+    }
     if (isLoadingSmoke) {
       smokeReport({
         kind: 'loading-view-visible',
@@ -658,7 +670,12 @@ async function startApplication(): Promise<void> {
           ? { resourcesDir: process.resourcesPath }
           : { repositoryRoot: path.resolve(import.meta.dirname, '..', '..', '..') }),
       })
-      return runHomeCompatibilityChain({ home, lease, release, reserve: true })
+      return runHomeCompatibilityChain({ home, lease, release, reserve: true }).then(
+        (verdict) => {
+          startupTimeline.mark('home-admitted')
+          return verdict
+        },
+      )
     },
     readRecoveryMarker: () => marker.read(),
     writeRecoveryMarker: (entry) => marker.write(entry),
@@ -678,6 +695,9 @@ async function startApplication(): Promise<void> {
         }),
         stabilityMs: smokeMode === undefined ? 1_000 : 100,
         onEvent: (event) => {
+          if (event.kind === 'starting') {
+            startupTimeline.mark('host-spawned')
+          }
           if (event.kind === 'failed') {
             if (event.fatal !== undefined) lastFatal = event.fatal
             smokeReport({
@@ -714,6 +734,7 @@ async function startApplication(): Promise<void> {
               probe,
             })
             readyHost = ready
+            startupTimeline.mark('host-ready')
             return ready
           } catch (error) {
             const fatal = lastFatal
@@ -734,6 +755,7 @@ async function startApplication(): Promise<void> {
     },
     loadSurface: async (ready) => {
       await port.loadSurface(ready.surface, ready.origin)
+      startupTimeline.mark('surface-loaded')
     },
     onHealthy: async () => {
       nativeUi?.setStatus('running')
@@ -781,6 +803,9 @@ async function startApplication(): Promise<void> {
 
   if (smokeMode !== undefined && smokeMode !== 'recovery') {
     await waitForOfficialUi(port.window)
+    if (isStartupPerfSmoke) {
+      startupTimeline.mark('official-ui-ready')
+    }
     if (isLoadingSmoke) {
       smokeReport({ kind: 'loading-view-replaced', url: port.window.webContents.getURL() })
     }
@@ -850,7 +875,10 @@ else {
   app.on('window-all-closed', () => app.quit())
   void app
     .whenReady()
-    .then(startApplication)
+    .then(() => {
+      startupTimeline.mark('launcher-ready')
+      return startApplication()
+    })
     .catch((error: unknown) => {
       if (error instanceof LeaseError) reportLeaseFailure(error)
       else console.error('startup failed:', error instanceof Error ? error.message : error)

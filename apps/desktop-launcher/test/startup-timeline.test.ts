@@ -82,3 +82,48 @@ describe('startup timeline contract', () => {
     }
   })
 })
+
+describe('startup timeline sequencing against the launcher seam order', () => {
+  function deferred() {
+    let resolve!: () => void
+    const promise = new Promise<void>((resolution) => {
+      resolve = resolution
+    })
+    return { promise, resolve }
+  }
+
+  it('emits no stage beyond the seam that has not resolved', async () => {
+    const { events, emit } = collector()
+    const timeline = createStartupTimeline(true, emit)
+    const homeAdmitted = deferred()
+    const hostReady = deferred()
+    const surfaceLoaded = deferred()
+    const officialUi = deferred()
+
+    // The exact call order main.ts uses: launcher-ready → loading-visible →
+    // (home admission resolves) → host-spawned → host-ready → surface-loaded
+    // → official-ui-ready.
+    timeline.mark('launcher-ready')
+    timeline.mark('loading-visible')
+    expect(events).toHaveLength(2)
+    const admission = homeAdmitted.promise.then(() => timeline.mark('home-admitted'))
+    expect(events).toHaveLength(2) // admission has not resolved yet
+    homeAdmitted.resolve()
+    await admission
+    expect(events).toHaveLength(3)
+    timeline.mark('host-spawned')
+    const host = hostReady.promise.then(() => timeline.mark('host-ready'))
+    expect(events).toHaveLength(4)
+    hostReady.resolve()
+    await host
+    const surface = surfaceLoaded.promise.then(() => timeline.mark('surface-loaded'))
+    expect(events).toHaveLength(5)
+    surfaceLoaded.resolve()
+    await surface
+    const official = officialUi.promise.then(() => timeline.mark('official-ui-ready'))
+    expect(events).toHaveLength(6)
+    officialUi.resolve()
+    await official
+    expect(events.map((event) => event.stage)).toEqual([...STARTUP_STAGES])
+  })
+})
