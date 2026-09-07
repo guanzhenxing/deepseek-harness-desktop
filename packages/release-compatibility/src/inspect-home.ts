@@ -290,6 +290,13 @@ async function credentialsFormatId(file: string, budget: InspectionBudget): Prom
  * open(): both are refused before open, only real regular files are ever
  * opened.
  */
+/** Little-endian frame content size; 8-byte values beyond the safe range saturate. */
+function readFrameContentSize(header: Buffer, at: number, length: number): number {
+  if (length !== 8) return header.readUIntLE(at, length)
+  const value = header.readBigUInt64LE(at)
+  return value > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(value)
+}
+
 async function readBoundedText(
   file: string,
   capBytes: number,
@@ -473,13 +480,16 @@ async function isKnownSessionHeader(file: string, budget: InspectionBudget): Pro
 
 /**
  * A compressed session is accepted only when it opens with a real zstd frame
- * header (RFC 8878): the standard frame magic 0xFD2FB528 — or a skippable
- * frame magic 0x184D2A50–0x184D2A5F, which multi-frame writers may prepend,
+ * (RFC 8878): the standard frame magic 0xFD2FB528 — or a skippable frame
+ * magic 0x184D2A50–0x184D2A5F, which multi-frame writers may prepend,
  * carrying a 4-byte frame size — followed by a well-formed frame-header
- * descriptor (reserved bit clear) and the window/dictionary/content-size
- * fields its descriptor declares. Magic alone proves a type, not a frame; a
- * truncated or malformed header is unknown data. Decompression stays out of
- * scope (read-only header-only inspection).
+ * descriptor (reserved bit clear), the window/dictionary/content-size fields
+ * its descriptor declares, and complete blocks: every block header's
+ * declared size within Block_Maximum_Size = min(Window_Size, 128 KiB), an
+ * RLE block's single content byte charged as one byte, and the file ending
+ * exactly at the frame's last block (plus its optional checksum). Magic, a
+ * bare header, or a stream the real decoder would refuse is unknown data.
+ * Decompression stays out of scope (read-only header-only inspection).
  */
 async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promise<boolean> {
   const handle = await openFile(file)
@@ -531,15 +541,48 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
       // The file must COVER the complete header — a 5-byte file with a
       // 6-byte-header descriptor is truncated, whatever was read so far.
       if (stat.size < offset + headerLength) return false
+      let headerBytes = buffer.subarray(0, bytesRead)
       if (headerLength > 8) {
         const extendedLength = Math.min(headerLength, budget.bytes + 1)
         if (extendedLength < headerLength) return false
         const extended = await handle.read(Buffer.alloc(extendedLength), 0, extendedLength, offset)
         if (!takeBytes(budget, extended.bytesRead)) return false
         if (extended.bytesRead < headerLength) return false
+        headerBytes = extended.buffer.subarray(0, extended.bytesRead)
       }
+      // RFC 8878 grammar the block walk must agree with: every block's
+      // declared size is bounded by Block_Maximum_Size = min(Window_Size,
+      // 128 KiB) — the window comes from the window-descriptor byte, or from
+      // the frame content size in single-segment frames — and a frame that
+      // declares a content size must have its raw and RLE blocks regenerate
+      // exactly that total (compressed blocks hide their share and stay
+      // unverifiable without decompression).
+      let windowSize: number
+      let fcsKnown = false
+      let fcsValue = 0
+      if (singleSegment === 1) {
+        const fcsOffset = 5 + dictLength
+        if (fcsOffset + fcsLength > headerBytes.length) return false
+        fcsValue = readFrameContentSize(headerBytes, fcsOffset, fcsLength)
+        fcsKnown = true
+        windowSize = fcsValue
+      } else {
+        const windowDescriptor = headerBytes[5]
+        if (windowDescriptor === undefined) return false
+        const windowLog = 10 + (windowDescriptor >> 3)
+        windowSize = 2 ** windowLog + (windowDescriptor & 0b111) * 2 ** (windowLog - 3)
+        if (fcsLength > 0) {
+          const fcsOffset = 5 + 1 + dictLength
+          if (fcsOffset + fcsLength > headerBytes.length) return false
+          fcsValue = readFrameContentSize(headerBytes, fcsOffset, fcsLength)
+          fcsKnown = true
+        }
+      }
+      const blockMax = Math.min(windowSize, 128 * 1024)
       let blockOffset = offset + headerLength
       let completed = false
+      let hasCompressedBlock = false
+      let regenerated = 0
       for (let block = 0; block < 65_536; block += 1) {
         const header = await handle.read(Buffer.alloc(3), 0, 3, blockOffset)
         if (!takeBytes(budget, header.bytesRead) || header.bytesRead !== 3) return false
@@ -548,13 +591,22 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
         const blockType = (blockHeader >> 1) & 0b11
         const blockSize = blockHeader >>> 3
         if (blockType === 0b11) return false
-        const payloadSize = blockType === 0b01 && blockSize > 0 ? 1 : blockSize
+        if (blockSize > blockMax) return false
+        // An RLE block always carries exactly one content byte, whatever
+        // size it regenerates; raw and compressed blocks carry blockSize.
+        const payloadSize = blockType === 0b01 ? 1 : blockSize
         const blockEnd = blockOffset + 3 + payloadSize
         if (!Number.isSafeInteger(blockEnd) || stat.size < blockEnd) return false
         // We only inspect headers, but the shared budget must still bound a
         // claimed frame's declared payload before skipping over it.
         if (!takeBytes(budget, payloadSize)) return false
         blockOffset = blockEnd
+        if (blockType === 0b10) {
+          hasCompressedBlock = true
+        } else if (fcsKnown) {
+          regenerated += blockSize
+          if (regenerated > fcsValue) return false
+        }
         if (!lastBlock) continue
         if ((descriptor & 0b0000_0100) !== 0) {
           const checksumEnd = blockOffset + 4
@@ -567,6 +619,7 @@ async function hasZstdFrameHeader(file: string, budget: InspectionBudget): Promi
         break
       }
       if (!completed) return false
+      if (fcsKnown && !hasCompressedBlock && regenerated !== fcsValue) return false
       if (blockOffset === stat.size) return true
       offset = blockOffset
     }

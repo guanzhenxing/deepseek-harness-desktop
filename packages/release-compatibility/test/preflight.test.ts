@@ -97,6 +97,12 @@ async function tempHome(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'dsh-preflight-'))
 }
 
+/** Three little-endian RFC 8878 block-header bytes for crafted frames. */
+function blockHeader(input: { last: boolean; type: 0b00 | 0b01 | 0b10 | 0b11; size: number }) {
+  const value = (input.last ? 1 : 0) | (input.type << 1) | (input.size << 3)
+  return Buffer.from([value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff])
+}
+
 describe('preflightHome', () => {
   it('allows a fresh home with no marker', () => {
     expect(
@@ -643,6 +649,179 @@ describe('inspectHomeFormats', () => {
       )
       const observed = await inspectHomeFormats(home)
       expect(observed.unknownPaths).toContain('sessions/--p--/header-only/session.jsonl.zstd')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses an RLE-block stream that a real zstd decoder also rejects', async () => {
+    const { zstdDecompressSync } = await import('node:zlib')
+    // Frame header (FHD 0x00, 6 bytes) + an RLE block with size 0 (not last)
+    // + its mandatory single content byte + a RESERVED-type block header +
+    // padding. A walk that skips the RLE content byte misparses the payload
+    // byte as the start of a "last raw block of 192" that lands exactly at
+    // EOF — a stream the real decoder refuses must not be admitted.
+    const crafted = Buffer.concat([
+      Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00]),
+      blockHeader({ last: false, type: 0b01, size: 0 }),
+      Buffer.from([0x01]),
+      blockHeader({ last: false, type: 0b11, size: 0 }),
+      Buffer.alloc(191, 0x61),
+    ])
+    expect(() => zstdDecompressSync(crafted)).toThrow()
+    const home = await tempHome()
+    try {
+      const sessionDir = path.join(home, 'sessions', '--p--', 'rle-zero')
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), crafted)
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--p--/rle-zero/session.jsonl.zstd')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts a real compressed stream that contains RLE blocks', async () => {
+    const { zstdCompressSync } = await import('node:zlib')
+    // A megabyte run of one byte compresses to RLE blocks; the walk must
+    // keep charging exactly one payload byte per RLE block and accept it.
+    const real = zstdCompressSync(Buffer.alloc(1 << 20, 0x61))
+    const home = await tempHome()
+    try {
+      const sessionDir = path.join(home, 'sessions', '--p--', 'rle-real')
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), real)
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.sessions).toBe('dsh-session-jsonl-0')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses blocks larger than the RFC block maximum', async () => {
+    const { zstdDecompressSync } = await import('node:zlib')
+    // Window descriptor 0x00 (1 KiB window); a last raw block declaring
+    // 200_000 bytes is above Block_Maximum_Size in any frame — the real
+    // decoder refuses it, so admission must too.
+    const oversized = Buffer.concat([
+      Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00]),
+      blockHeader({ last: true, type: 0b00, size: 200_000 }),
+      Buffer.alloc(200_000, 0x61),
+    ])
+    expect(() => zstdDecompressSync(oversized)).toThrow()
+    const home = await tempHome()
+    try {
+      const sessionDir = path.join(home, 'sessions', '--p--', 'block-over-max')
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), oversized)
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--p--/block-over-max/session.jsonl.zstd')
+      expect(observed.formats.sessions).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses blocks larger than the declared window but accepts in-window ones', async () => {
+    const { zstdDecompressSync } = await import('node:zlib')
+    const frameWithWindow = (wd: number) =>
+      Buffer.concat([
+        Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, wd]),
+        blockHeader({ last: true, type: 0b00, size: 2_000 }),
+        Buffer.alloc(2_000, 0x61),
+      ])
+    // Window descriptor 0x00 → 1 KiB: 2_000 is out of window and refused;
+    // 0x10 → 4 KiB: the same block is inside the window and accepted.
+    expect(() => zstdDecompressSync(frameWithWindow(0x00))).toThrow()
+    expect(() => zstdDecompressSync(frameWithWindow(0x10))).not.toThrow()
+    const home = await tempHome()
+    try {
+      const outOfWindow = path.join(home, 'sessions', '--p--', 'over-window')
+      const inWindow = path.join(home, 'sessions', '--p--', 'in-window')
+      await mkdir(outOfWindow, { recursive: true })
+      await mkdir(inWindow, { recursive: true })
+      await writeFile(path.join(outOfWindow, 'session.jsonl.zstd'), frameWithWindow(0x00))
+      await writeFile(path.join(inWindow, 'session.jsonl.zstd'), frameWithWindow(0x10))
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--p--/over-window/session.jsonl.zstd')
+      // The same block inside the declared window stays classified: it is
+      // absent from unknownPaths (the slot itself keeps refusing while the
+      // over-window sibling is flagged).
+      expect(observed.unknownPaths).not.toContain('sessions/--p--/in-window/session.jsonl.zstd')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('treats the single-segment content size as the block-size bound', async () => {
+    const { zstdDecompressSync } = await import('node:zlib')
+    // FHD 0x20: single-segment, one content-size byte. A frame declaring 16
+    // bytes of content accepts a 16-byte RLE block plus an empty raw block,
+    // but a 500-byte block is above its window and refused by the decoder.
+    const legal = Buffer.concat([
+      Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x10]),
+      blockHeader({ last: false, type: 0b01, size: 16 }),
+      Buffer.from([0x41]),
+      blockHeader({ last: true, type: 0b00, size: 0 }),
+    ])
+    const illegal = Buffer.concat([
+      Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x10]),
+      blockHeader({ last: true, type: 0b00, size: 500 }),
+      Buffer.alloc(500, 0x61),
+    ])
+    expect(() => zstdDecompressSync(legal)).not.toThrow()
+    expect(() => zstdDecompressSync(illegal)).toThrow()
+    const home = await tempHome()
+    try {
+      const ok = path.join(home, 'sessions', '--p--', 'fcs-fit')
+      const bad = path.join(home, 'sessions', '--p--', 'fcs-over')
+      await mkdir(ok, { recursive: true })
+      await mkdir(bad, { recursive: true })
+      await writeFile(path.join(ok, 'session.jsonl.zstd'), legal)
+      await writeFile(path.join(bad, 'session.jsonl.zstd'), illegal)
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--p--/fcs-over/session.jsonl.zstd')
+      expect(observed.unknownPaths).not.toContain('sessions/--p--/fcs-fit/session.jsonl.zstd')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses raw frames whose blocks do not sum to the declared content size', async () => {
+    const { zstdDecompressSync } = await import('node:zlib')
+    // Single-segment FCS 16: ten plus ten regenerates twenty (over) and six
+    // alone regenerates six (under) — the real decoder refuses both and
+    // accepts only the exact sum.
+    const fcs16Frame = (blocks: Buffer[]) =>
+      Buffer.concat([Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x10]), ...blocks])
+    const over = fcs16Frame([
+      blockHeader({ last: false, type: 0b00, size: 10 }),
+      Buffer.alloc(10, 0x61),
+      blockHeader({ last: true, type: 0b00, size: 10 }),
+      Buffer.alloc(10, 0x61),
+    ])
+    const under = fcs16Frame([
+      blockHeader({ last: true, type: 0b00, size: 6 }),
+      Buffer.alloc(6, 0x61),
+    ])
+    expect(() => zstdDecompressSync(over)).toThrow()
+    expect(() => zstdDecompressSync(under)).toThrow()
+    const home = await tempHome()
+    try {
+      for (const [name, stream] of [
+        ['fcs-over-sum', over],
+        ['fcs-under-sum', under],
+      ] as const) {
+        const sessionDir = path.join(home, 'sessions', '--p--', name)
+        await mkdir(sessionDir, { recursive: true })
+        await writeFile(path.join(sessionDir, 'session.jsonl.zstd'), stream)
+      }
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain('sessions/--p--/fcs-over-sum/session.jsonl.zstd')
+      expect(observed.unknownPaths).toContain('sessions/--p--/fcs-under-sum/session.jsonl.zstd')
       expect(observed.formats.sessions).toBeUndefined()
     } finally {
       await rm(home, { recursive: true, force: true })
