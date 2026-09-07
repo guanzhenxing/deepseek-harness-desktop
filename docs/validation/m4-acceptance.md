@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.20 启动性能轮：zstd 全帧走查改前向分块缓冲读（真实 home admission 4726ms → 195ms，消除随会话历史线性增长的启动回归）+ 主窗口主题背景色消除白色闪屏——制品 HEAD `0f8275e` 于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察（在 0f8275e 制品上重新起算，见 §5.20 事故记录），见 §8）**
+- **状态：candidate-verified（§5.21 将加载页显示与 Host surface 替换串行化，并在隔离的真实打包制品中端到端验证；制品 HEAD `8997ef3` 于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 16/16；`current` 状态仍等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -257,7 +257,7 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 ## 6. 门禁结果
 
-**最终轮（§5.20 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `0f8275e`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**385 Vitest 单测**，32 文件 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（92 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `0f8275e`。本轮首次运行因 dist 下旧制品正被运行（见 §5.20 事故记录）在 `package:dir` 止于 ENOTEMPTY；制品释放后从头重跑的本轮为 13/13。
+**最终轮（§5.21 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `8997ef3`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**386 Vitest 单测**，32 文件 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（92 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**16/16 场景**，新增加载页端到端场景）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `8997ef3`。此前 §5.20 的 0f8275e 轮为历史记录；本轮未在 dist 制品运行时打包。
 
 ## 5.20 启动性能与首帧体验轮（2026-09-07，jesen 试用反馈驱动，基线 `2e56dfa`）
 
@@ -280,18 +280,30 @@ jesen 首日观察反馈"打开后白屏一段才显示、启动偏久"。实测
 
 链语义：任一步失败即中止；`package:dir` 必须先于 `verify:compatibility`/`package:dmg`（staging 在当前 HEAD 重建后才可比对/封装，否则会把陈旧 staging 打进 DMG——该排序缺陷由链自身首跑暴露并修复，见 §5.6）。
 
+## 5.21 加载页端到端验证与竞态处置（2026-09-07，基线 `f7acfd7`）
+
+§5.20 的加载页实现以 `void port.showLoading()` 与 Host 的 `loadSurface()` 并发执行；在 Host 特别快时，较晚完成的 `loadFile()` 可以覆盖已加载的 surface。处置：启动链改为先 `await port.showLoading()`，再启动 Host。加载页仅在普通启动和新 `DSH_DESKTOP_SMOKE=loading` 隔离模式启用；后者沿用既有临时 userData/home 白名单，不改变普通用户的数据目录选择。
+
+| 证据 | 结果 |
+| --- | --- |
+| 红灯 | 旧 `f7acfd7` DMG 在 `loading` 模式被 smoke userData 白名单拒绝，不能产生加载页事件；新增断言因此失败。 |
+| 绿灯 | 新单测允许 `loading` 这一受限模式（3/3）；完整 `check` 为 386 单测通过。 |
+| 真实打包制品 | `8997ef3` DMG 的新增 `installed-loading-page` 场景确认窗口先显示 bundled `file:…/recovery/loading-view.html`（且可见），随后在官方 UI 就绪后其真实 `webContents` URL 变为 `http://127.0.0.1:…` Host surface；事件顺序受断言保护。`smoke:package` 16/16 通过。 |
+
+一次尝试用临时 `HOME` 或 Chromium `--user-data-dir` 进行人工启动时，Electron 仍打开真实 Application Support 路径；启动被立即经正常退出链停止，不把该方法作为隔离验证。加载页本身在该制品窗口中已可见，但没有把未完成的人工 surface 替换当作验收证据。临时目录已移入废纸篓；真实数据目录没有被主动回滚或删除。今后的人工日用观察应使用上表已验证的候选，而不是再以环境变量伪造隔离。
+
 ## 7. 制品记录（最终 verify:release 轮）
 
 | 项                             | 值                                                                                                                                                                                                                               |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-0f8275e`，DMG SHA `33b27a8cfbec7271e5ba2dbcdf117f24a781fc066de4827f364e672fe4427963`，兼容清单 SHA `8df3cb94cef412ae14997ae3a5fdcac6cad1c01968adb05040c8272b143aa9b4`（绑定 §5.20 代码提交，docs 提交前） |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-8997ef3`，DMG SHA `3f3bd18d3ccc593ded14cac1f9746a048092dc9f02979f98c7644d5343940419`，兼容清单 SHA `99fd59f8067b956b5e8dfa81aa78b8a53650f5e26644997a9defe60b1a2de782`（绑定 §5.21 代码提交，docs 提交前） |
 | previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`                                                                                       |
 | 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                                                                                                        |
 | 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                                                                                                          |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.20 轮全部处置后于制品 HEAD `0f8275e` 重验通过，2026-09-07）。
+- 自动测试完成 → **`candidate-verified`**（§5.21 轮全部处置后于制品 HEAD `8997ef3` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
