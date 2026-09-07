@@ -178,6 +178,10 @@ class ElectronWindowPort {
       minHeight: minimum.height,
       show: false,
       title: PRODUCT.name,
+      // The upstream web surface is client-rendered and paints a beat after
+      // loadURL resolves; match the product dark theme (same value as the
+      // recovery view) so that gap is not a white flash.
+      backgroundColor: '#1e1e20',
       webPreferences: DESKTOP_WEB_PREFERENCES,
     })
     if (restored.maximized) this.window.maximize()
