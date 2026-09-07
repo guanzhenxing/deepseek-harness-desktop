@@ -18,3 +18,4 @@ test-results/
 *.tsbuildinfo
 *.zip
 packages/home-lease/native/.build/
+.v2c/
