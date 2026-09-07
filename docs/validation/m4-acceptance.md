@@ -1,6 +1,6 @@
 # M4 验收记录：发行兼容性、依赖闭包与升级演练
 
-- **状态：candidate-verified（§5.18 修复 ownerless 哨兵、zstd 截断帧、watchdog 停止竞态、DMG 挂载失败清理与预算收束——制品 HEAD `5e7ac8c` 于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
+- **状态：candidate-verified（§5.19 zcode 复核轮修复 zstd 走查与真实解码器的三处分歧（RLE-0 错位、block 上限、FCS 记账）并对称加固勘察/lease 的 open 路径——制品 HEAD `7cf5cde` 于 2026-09-07 全链重验通过，13/13 步 + 演练 17/17 + 冒烟 15/15；`current` 状态等待 jesen 至少一个正常工作日的人工使用观察，见 §8）**
 - 日期：2026-09-05
 - 基线：`main` @ `98af342`（M3 合并后）
 - 结果分支：`codex/m4-release-compatibility`
@@ -229,19 +229,37 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 本轮未采纳“只修测试或仅记录限制”的结论；以下问题均已复现、修复并加入回归。
 
-| # | 级别 | 问题 | 处置 |
-| --- | --- | --- | --- |
-| 1 | P1 | owner 缺失时，doctor 将不可读/链接/FIFO 哨兵视为旧布局缺失，FIFO 还能阻塞清理 | 哨兵改为有界 `O_NOFOLLOW|O_NONBLOCK` 普通文件读取；异常一律 `IDENTITY_UNKNOWN` 拒删。新增 FIFO 不阻塞、不可读拒删和链接替换回归。`owner.json` 的读取与 fsync 同步同样改为无跟随普通文件路径。 |
-| 2 | P1 | 哨兵只含 supervisor，supervisor 退出但已获授权 Host 仍写入时，owner 被删后 doctor 可拆锁 | 哨兵以原子 JSON 镜像 generation、supervisor、Host、`pendingSpawn`；Host/supervisor 任一存活或不可识别，或 spawn 尚待确认，doctor 均拒删。 |
-| 3 | P1 | `.zstd` 完整帧头但没有 block payload 仍被格式勘察接受 | 解析标准帧的 block 头、块类型、声明负载和可选 checksum，并要求完整终止 block；6 字节 header-only 负例拒绝，真实 `zstdCompressSync` 正例接受。 |
-| 4 | P2 | CLI watchdog 可并发积累检查；停止后旧检查失败仍可杀子进程 | 单飞检查 + stopped 前后复核；停止后完成的失败不再计数或终止进程，`GUARD_BUSY` 仍不视为丢锁。 |
-| 5 | P2 | `hdiutil attach` 成功、输出处理失败的窗口没有清理登记 | 改为预建确定 mountpoint，attach 成功后立刻登记 detach；异常路径也卸载并删除临时 mountpoint。 |
-| 6 | P2 | 根槽位与 foreign projcache 的 unknown 记录可绕过共享预算 | 所有根槽位走 `flagUnknown`，预算耗尽时清除全部格式声明（包括 projcache）并仅附加固定 `home` 标记，输出上界保持 `unknowns + 1`。 |
-| 7 | P2 | 真正的 SIGTERM 退出仍沿用了 SIGINT 的 130 | smoke、rehearsal 共用信号安装器，SIGINT=130、SIGTERM=143；行为测试在真实 handler 上断言清理重试后退出。 |
+| #   | 级别 | 问题                                                                                     | 处置                                                                                                                                          |
+| --- | ---- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P1   | owner 缺失时，doctor 将不可读/链接/FIFO 哨兵视为旧布局缺失，FIFO 还能阻塞清理            | 哨兵改为有界 `O_NOFOLLOW                                                                                                                      | O_NONBLOCK`普通文件读取；异常一律`IDENTITY_UNKNOWN` 拒删。新增 FIFO 不阻塞、不可读拒删和链接替换回归。`owner.json` 的读取与 fsync 同步同样改为无跟随普通文件路径。 |
+| 2   | P1   | 哨兵只含 supervisor，supervisor 退出但已获授权 Host 仍写入时，owner 被删后 doctor 可拆锁 | 哨兵以原子 JSON 镜像 generation、supervisor、Host、`pendingSpawn`；Host/supervisor 任一存活或不可识别，或 spawn 尚待确认，doctor 均拒删。     |
+| 3   | P1   | `.zstd` 完整帧头但没有 block payload 仍被格式勘察接受                                    | 解析标准帧的 block 头、块类型、声明负载和可选 checksum，并要求完整终止 block；6 字节 header-only 负例拒绝，真实 `zstdCompressSync` 正例接受。 |
+| 4   | P2   | CLI watchdog 可并发积累检查；停止后旧检查失败仍可杀子进程                                | 单飞检查 + stopped 前后复核；停止后完成的失败不再计数或终止进程，`GUARD_BUSY` 仍不视为丢锁。                                                  |
+| 5   | P2   | `hdiutil attach` 成功、输出处理失败的窗口没有清理登记                                    | 改为预建确定 mountpoint，attach 成功后立刻登记 detach；异常路径也卸载并删除临时 mountpoint。                                                  |
+| 6   | P2   | 根槽位与 foreign projcache 的 unknown 记录可绕过共享预算                                 | 所有根槽位走 `flagUnknown`，预算耗尽时清除全部格式声明（包括 projcache）并仅附加固定 `home` 标记，输出上界保持 `unknowns + 1`。               |
+| 7   | P2   | 真正的 SIGTERM 退出仍沿用了 SIGINT 的 130                                                | smoke、rehearsal 共用信号安装器，SIGINT=130、SIGTERM=143；行为测试在真实 handler 上断言清理重试后退出。                                       |
+
+## 5.19 zcode 复核轮（2026-09-07，基线 `5e7ac8c`）
+
+对 §5.18 七项修复的独立复核结论：**全部成立**（崩溃窗口逐点推演、guard native 路径 openat+fstat、预算不变量、115 项受影响测试复跑）。以 reproduce-first 攻击 §5.18 新写的 zstd block 走查，发现并修复以下问题；参考行为全部用 Node zlib（libzstd）`zstdDecompressSync`/`zstdCompressSync` 实证探针钉死后才动手。
+
+| #   | 级别 | 问题                                                                                                                                                                                                                  | 处置                                                                                                                                                                             |
+| --- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P2   | RLE block 的 `blockSize=0` 时 payload 按 0 字节跳过（RFC 8878：RLE 恒占 1 字节内容）→ 走查错位 1 字节：构造流（合法帧头 + RLE-0 非末块 + 保留类型真块头 + 移位后的“末 raw 块”恰好吞到 EOF）被勘察接受而真实解码器拒绝 | RLE 一律按 1 字节负载跳过；攻击构造转回归（测试内以 `zstdDecompressSync` 拒绝为 oracle），真实 RLE 流（`'a'`×1MiB）正例保持接受                                                  |
+| 2   | P2   | block 声明大小无上限：200 KB raw 块与 2 KB 块 > 1 KB window 的流真实解码器拒绝而勘察接受                                                                                                                              | 强制 `Block_Maximum_Size=min(Window_Size,128KiB)`；window 取 WD 公式（含 mantissa 分量，经 1152/1920 窗探针对照）或 single-segment 帧的帧内容大小（0 即零窗）；同构负例/正例入库 |
+| 3   | P2   | 帧声明内容大小时 raw/RLE 块再生成总量不核验：过（10+10>16）与欠（6<16）均被真实解码器拒绝                                                                                                                             | 帧内 raw/RLE 再生成总量必须与 FCS 精确相等；compressed 块份额无法纯头部核验——**已记录的有界缺口**（损坏压缩正文同理，有界条件下不做解压）                                        |
+| 4   | P3   | 勘察 `openFile` 裸 `open('r')`：lstat→open 之间路径被换成 symlink/FIFO 的竞态仍可挂起或触及 referent                                                                                                                  | `O_NOFOLLOW                                                                                                                                                                      | O_NONBLOCK` 打开 + fd 级 regular 校验；拒绝降级为与外形检查一致的 'unreadable' |
+| 5   | P3   | lease `syncDirectory` 裸 open 无 `O_NOFOLLOW`（fsync 目标可能不是 guard 校验过的目录本体）                                                                                                                            | `O_NOFOLLOW                                                                                                                                                                      | O_DIRECTORY` 打开；与本轮 lease-fs 读路径的加固对称                            |
+
+提交：`b544577`（zstd 走查与协议文档）、`7cf5cde`（勘察/lease 的 open 加固）。
+
+**本轮自查（同法攻击新鲜修复）**：退化块语义全部实证（compressed-0/raw-0 接受、RLE-0 消耗 1 字节——以“0 字节假设下应被接受的攻击流实际被拒”反证；8 字节 FCS=0 按 0 强制；真实空流编码 `28b52ffd2000010000` 过闸）；预算无新增读取；真实 `~/.dsh` 预检复跑 6 槽位全已知、`unknownPaths` 空——多个真实 zstd 会话全部通过收紧后的走查，无误拒。教训：解析器对“规范说恒定”的字段不要写条件化例外（RLE payload 恒 1 字节被写成条件）；“自研走查 vs 真实解码器”双盲对照是廉价反证，纳入常规自攻击手段。
 
 ## 6. 门禁结果
 
-**最终轮（§5.18 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `5e7ac8c`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（378 Vitest 单测 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（85 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `5e7ac8c`。首次 `package:dir` 曾因 Electron 下载 TLS 连接中断而停止，未生成候选制品；缓存下载完成后从头重跑的本轮才是本段记录的 13/13 结果。
+**最终轮（§5.19 全部处置后，2026-09-07）**：`pnpm verify:release` 聚合链于**制品 HEAD `7cf5cde`** 实跑（`set -o pipefail` 下退出码 0），**13 步全部通过**（含收尾 `git diff --check`）：check（**384 Vitest 单测**，32 文件 + 36 文档校验）→ generate:compatibility → verify:dsh-closure（921 条）→ verify:patches → test:integration（91 测试，9 文件）→ test:shared-home（4 测试，真实原生 helper 身份链）→ package:dir → verify:compatibility（fresh staging 字节一致）→ package:dmg → verify:artifacts → smoke:package（**15/15 场景**）→ candidate 归档 + `rehearse:upgrade`（**17/17 步**）→ git diff --check。全链日志中 `probe: different` 与留锁零出现。本文件随后的 docs 提交不改代码与制品，制品绑定 `7cf5cde`。本轮前两次运行在 `package:dir` 步因 electron-builder 下载时 TLS 连接中断而停止（缓存内 Electron zip 完好、单步复跑成功，属 §5.18 已记录的同类网络抖动）；从头重跑的第三次为本段记录的 13/13 结果。
+
+§5.18 轮（2026-09-07，制品 HEAD `5e7ac8c`）：13/13（378 单测、85 集成、烟雾 15/15、演练 17/17），candidate `m4-0.0.0-darwin-arm64-5e7ac8c`。已被 §5.19 轮取代，记录保留于 git 历史。
 
 前几轮（2026-09-06）：`fd9a23a` 13/13+16/16；`b595907` 轮 smoke 14/15 → 触发根因排查；`ead506d` 13/13+16/16+15/15；`5ae6db2`…`6fe04f5`/`31c9d84` 均 13/13。均被 §5.17 轮取代，记录保留于 git 历史。
 
@@ -249,16 +267,16 @@ codex 九审 4 项 P1 + 6 项 P2（unknown 预算两轴同命），逐条核实*
 
 ## 7. 制品记录（最终 verify:release 轮）
 
-| 项                             | 值                                                                                                                                                    |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| candidate releaseId            | `m4-0.0.0-darwin-arm64-5e7ac8c`，DMG SHA `29b59d69a6b4967704a749291253f03e1da783ad7c988ab31aa216d48ff00334`，兼容清单 SHA `1d03ddc1d5ed1b73d063a93f865723edc81cc3ea1266dae144c49a23bd6a21d2`（绑定 §5.18 代码提交，docs 提交前） |
-| previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`            |
-| 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                             |
-| 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                               |
+| 项                             | 值                                                                                                                                                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| candidate releaseId            | `m4-0.0.0-darwin-arm64-7cf5cde`，DMG SHA `a8e79f999d3f62b915951ed9e5619645a19b2db090cc0f2d749da2057267662d`，兼容清单 SHA `5a98cc16ee6ea9f275a6fab69891df7163b8d8e54b8fd472c1f6d8fd32d59714`（绑定 §5.19 代码提交，docs 提交前） |
+| previous（保留的上一健康制品） | M3 `m3-0.0.0-darwin-arm64-f972354`，DMG SHA `f93873b0ef95b9b0c1c36218d40213fbd3a3dda5bd40f88247dc7dd929618ff9`，归档于 `release/previous/`                                                                                       |
+| 本地补丁                       | 零（`patches/manifest.json` 显式空账本；运行时闭包为纯官方上游 npm 制品）                                                                                                                                                        |
+| 架构                           | darwin-arm64（唯一实际构建并运行的架构；darwin-x64 未构建不进支持矩阵）                                                                                                                                                          |
 
 ## 8. 交付状态与剩余条件
 
-- 自动测试完成 → **`candidate-verified`**（§5.18 轮全部处置后于制品 HEAD `5e7ac8c` 重验通过，2026-09-07）。
+- 自动测试完成 → **`candidate-verified`**（§5.19 轮全部处置后于制品 HEAD `7cf5cde` 重验通过，2026-09-07）。
 - **`current`（日用版）的最后放行条件：jesen 至少完成一个正常工作日的人工使用观察**（启动、退出、会话继续、托盘/恢复体验）。观察完成前不标记 current，不伪造。
 - 未验证项/剩余风险：
   - 真实跨上游版本的升级演练未执行（上游 alpha.4+/rc.1 已发布；须独立 `codex/upgrade-dsh-<tag>` 分支）。
