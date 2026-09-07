@@ -8,6 +8,7 @@ const SMOKE_MODES = [
   'shared-home',
   'conversation',
   'auth',
+  'loading',
   'navigation',
   'lifecycle',
   'recovery',

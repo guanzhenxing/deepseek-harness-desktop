@@ -20,6 +20,7 @@ describe('M0 smoke userData override', () => {
     const linked = `${root}-link`
     try {
       expect(await resolveSmokeUserData('ui', root)).toBe(root)
+      expect(await resolveSmokeUserData('loading', root)).toBe(root)
       await symlink(root, linked, 'dir')
       await expect(resolveSmokeUserData('ui', linked)).rejects.toThrow(/symlink/u)
     } finally {

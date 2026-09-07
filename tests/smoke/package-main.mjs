@@ -159,6 +159,39 @@ function dshUiScenario(install) {
   }
 }
 
+function loadingPageScenario(install) {
+  return async () => {
+    const fixture = await makeControllerHome('loading')
+    try {
+      const reports = await runInstalledApp({
+        executable: install.executable,
+        mode: 'loading',
+        userData: fixture.userData,
+        cwd: fixture.userData,
+      })
+      const shown = reports.find((report) => report.kind === 'loading-view-visible')
+      if (
+        typeof shown?.url !== 'string' ||
+        !shown.url.endsWith('/recovery/loading-view.html') ||
+        shown.visible !== true
+      ) {
+        throw new Error(`loading view was not visibly loaded: ${JSON.stringify(shown)}`)
+      }
+      const replaced = reports.find((report) => report.kind === 'loading-view-replaced')
+      if (typeof replaced?.url !== 'string' || !replaced.url.startsWith('http://127.0.0.1:')) {
+        throw new Error(
+          `Host surface did not replace the loading view: ${JSON.stringify(replaced)}`,
+        )
+      }
+      if (reports.indexOf(shown) >= reports.indexOf(replaced)) {
+        throw new Error('Host surface replaced the loading view before it was visibly loaded')
+      }
+    } finally {
+      await fixture.dispose()
+    }
+  }
+}
+
 function hostCrashScenario(install) {
   return async () => {
     const fixture = await makeControllerHome('host-crash')
@@ -700,6 +733,7 @@ console.log(`PKG-SMOKE installed to ${install.installDirectory}`)
 
 try {
   await record('installed-dsh-ui', dshUiScenario(install))
+  await record('installed-loading-page', loadingPageScenario(install))
   await record('installed-host-crash', hostCrashScenario(install))
   await record('installed-navigation', navigationScenario(install))
   await record('installed-lifecycle', lifecycleScenario(install))

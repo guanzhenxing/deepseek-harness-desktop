@@ -80,6 +80,7 @@ const installedRuntime: InstalledRuntimePaths | undefined = app.isPackaged
 const hostEntryPath =
   installedRuntime?.hostEntry ?? fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
+const isLoadingSmoke = smokeMode === 'loading'
 const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
 
 if (userDataOverride !== undefined) app.setPath('userData', path.resolve(userDataOverride))
@@ -251,16 +252,18 @@ class ElectronWindowPort {
    * surface is ready. The surface load replaces the page; failures hand the
    * screen to the recovery window (which hides this one).
    */
-  async showLoading(): Promise<void> {
-    if (this.#loadingHtml === undefined || this.window.isDestroyed()) return
+  async showLoading(): Promise<boolean> {
+    if (this.#loadingHtml === undefined || this.window.isDestroyed()) return false
     try {
       await this.window.loadFile(this.#loadingHtml)
-      if (this.window.isDestroyed()) return
+      if (this.window.isDestroyed()) return false
       // The user has now seen this window; dock/tray reveal may target it.
       this.#revealed = true
       this.window.show()
+      return true
     } catch {
       /* the surface or the recovery view owns every failure */
+      return false
     }
   }
 
@@ -526,12 +529,21 @@ async function startApplication(): Promise<void> {
     openExternal,
     // Automated sequences assert against the official surface's load events;
     // manual launches get the loading page instead of a dead dock icon.
-    ...(smokeMode === undefined && installedRuntime !== undefined
+    ...((smokeMode === undefined || isLoadingSmoke) && installedRuntime !== undefined
       ? { loadingHtml: installedRuntime.loadingHtml }
       : {}),
   })
   windowPort = port
-  if (smokeMode === undefined) void port.showLoading()
+  if (smokeMode === undefined || isLoadingSmoke) {
+    const visible = await port.showLoading()
+    if (isLoadingSmoke) {
+      smokeReport({
+        kind: 'loading-view-visible',
+        url: port.window.webContents.getURL(),
+        visible: visible && port.window.isVisible(),
+      })
+    }
+  }
   const showMainWindow = (): void => {
     const port = windowPort
     if (port === undefined) return
@@ -759,6 +771,9 @@ async function startApplication(): Promise<void> {
 
   if (smokeMode !== undefined && smokeMode !== 'recovery') {
     await waitForOfficialUi(port.window)
+    if (isLoadingSmoke) {
+      smokeReport({ kind: 'loading-view-replaced', url: port.window.webContents.getURL() })
+    }
   }
   if (smokeMode !== undefined) {
     const driverOwnedModes = ['shared-home', 'conversation', 'auth', 'navigation', 'lifecycle']
