@@ -31,6 +31,7 @@
     "smoke:profile-recovery": "node tests/smoke/profile-recovery.mjs",
     "smoke:safe-mode": "node tests/smoke/safe-mode.mjs",
     "smoke:shared-home": "node tests/smoke/shared-home.mjs",
+    "smoke:startup-performance": "node tests/smoke/startup-performance.mjs",
     "smoke:conversation": "node tests/smoke/conversation.mjs",
     "smoke:auth": "node tests/smoke/auth.mjs",
     "smoke:navigation": "node tests/smoke/navigation.mjs",

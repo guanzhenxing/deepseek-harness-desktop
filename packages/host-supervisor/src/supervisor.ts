@@ -149,7 +149,11 @@ export class HostSupervisor {
 
   constructor(options: HostSupervisorOptions) {
     this.#options = {
-      stabilityMs: options.stabilityMs ?? 1_000,
+      // The stability window holds Host readiness after the ready message to
+      // attribute an immediately-crashing Host to boot failure. 100ms is the
+      // value every packaged smoke has exercised (including host-crash); the
+      // watchdog and the M2 crash-recovery chain own later failures.
+      stabilityMs: options.stabilityMs ?? 100,
       startupTimeoutMs: options.startupTimeoutMs ?? 30_000,
       terminateGraceMs: options.terminateGraceMs ?? 2_000,
       watchdogIntervalMs: options.watchdogIntervalMs ?? 2_000,

@@ -115,7 +115,7 @@ const fakeProbe: ProcessProbe = {
   },
 }
 
-function fixture(options: { stabilityMs?: number; startupTimeoutMs?: number } = {}) {
+function fixture(options: { stabilityMs?: number | null; startupTimeoutMs?: number } = {}) {
   const process = new FakeProcess()
   const lease = new RecordingLease()
   const events: string[] = []
@@ -132,7 +132,7 @@ function fixture(options: { stabilityMs?: number; startupTimeoutMs?: number } = 
         return process
       },
     },
-    stabilityMs: options.stabilityMs ?? 0,
+    ...(options.stabilityMs === null ? {} : { stabilityMs: options.stabilityMs ?? 0 }),
     startupTimeoutMs: options.startupTimeoutMs ?? 10_000,
     terminateGraceMs: 100,
     onEvent: (event) => {
@@ -266,6 +266,35 @@ describe('HostSupervisor', () => {
       expect(setup.process.terminateCount).toBe(1)
       await vi.advanceTimersByTimeAsync(100)
       expect(setup.process.killCount).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the default stability window is the uniform packaged value (100ms)', async () => {
+    vi.useFakeTimers()
+    try {
+      const setup = fixture({ stabilityMs: null })
+      const { hostWriter, started } = await startAndHello(setup)
+      setup.process.emitMessage(hostWriter.next({ kind: 'phase', phase: 'booting' }))
+      setup.process.emitMessage(hostWriter.next({ kind: 'phase', phase: 'surface-waiting' }))
+      setup.process.emitMessage(
+        hostWriter.next({
+          kind: 'surface',
+          surfaceId: 'surface-1',
+          purpose: 'normal',
+          surface: { kind: 'loopback', url: 'http://127.0.0.1:43123/?token=secret' },
+        }),
+      )
+      setup.process.emitMessage(hostWriter.next({ kind: 'ready', surfaceId: 'surface-1' }))
+      let resolved = false
+      void started.then(() => {
+        resolved = true
+      })
+      await vi.advanceTimersByTimeAsync(99)
+      expect(resolved).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(started).resolves.toMatchObject({ pid: 4321 })
     } finally {
       vi.useRealTimers()
     }

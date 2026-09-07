@@ -670,12 +670,10 @@ async function startApplication(): Promise<void> {
           ? { resourcesDir: process.resourcesPath }
           : { repositoryRoot: path.resolve(import.meta.dirname, '..', '..', '..') }),
       })
-      return runHomeCompatibilityChain({ home, lease, release, reserve: true }).then(
-        (verdict) => {
-          startupTimeline.mark('home-admitted')
-          return verdict
-        },
-      )
+      return runHomeCompatibilityChain({ home, lease, release, reserve: true }).then((verdict) => {
+        startupTimeline.mark('home-admitted')
+        return verdict
+      })
     },
     readRecoveryMarker: () => marker.read(),
     writeRecoveryMarker: (entry) => marker.write(entry),
@@ -693,7 +691,7 @@ async function startApplication(): Promise<void> {
             cacheDirectory: path.join(app.getPath('userData'), 'node-compile-cache'),
           },
         }),
-        stabilityMs: smokeMode === undefined ? 1_000 : 100,
+        stabilityMs: 100,
         onEvent: (event) => {
           if (event.kind === 'starting') {
             startupTimeline.mark('host-spawned')

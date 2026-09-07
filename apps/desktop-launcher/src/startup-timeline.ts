@@ -43,7 +43,9 @@ export function createStartupTimeline(
     mark(stage) {
       const expected = STARTUP_STAGES[next]
       if (expected === undefined) {
-        throw new Error(`startup timeline: no stage may repeat after ${STARTUP_STAGES[STARTUP_STAGES.length - 1]}`)
+        throw new Error(
+          `startup timeline: no stage may repeat after ${STARTUP_STAGES[STARTUP_STAGES.length - 1]}`,
+        )
       }
       if (stage !== expected) {
         throw new Error(
