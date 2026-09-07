@@ -599,11 +599,15 @@ function recoveryScenario(install) {
 function cliVersionScenario(install) {
   return async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), 'dsh-cli-cwd-'))
+    // An isolated empty home: the passthrough admission must never resolve —
+    // and therefore never read — the user's real ~/.dsh (an unset DSH_HOME
+    // makes the bundled CLI fall back to it).
+    const home = await mkdtemp(path.join(tmpdir(), 'dsh-cli-home-'))
     try {
       const compatibility = JSON.parse(
         await readFile(path.join(repositoryRoot, 'docs', 'compatibility.json'), 'utf8'),
       )
-      const version = await runInstalledCli(install.cliEntry, ['--version'], { cwd })
+      const version = await runInstalledCli(install.cliEntry, ['--version'], { cwd, home })
       if (version.code !== 0) throw new Error(`--version exited ${version.code}`)
       if (!version.output.includes(compatibility.dsh.npmVersion)) {
         throw new Error(
@@ -612,6 +616,7 @@ function cliVersionScenario(install) {
       }
     } finally {
       await rm(cwd, { recursive: true, force: true })
+      await rm(home, { recursive: true, force: true })
     }
   }
 }

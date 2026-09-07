@@ -20,20 +20,20 @@
         "fixture:tests/fixtures/home-formats/credentials.yaml#3834614b05eff66d5abded116f263c068483dc5175f4ea46a39ecba980091907",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "<home>/.credentials.yaml carries an upstream-defined `version: 1` header; this baseline writes two known sections \u2014 `refs:` (API-key references, dsh-credentials-local) and `records:` (connection grants written by the desktop Host). The pre-release flat layout is refused by the provider itself."
+      "$notes": "<home>/.credentials.yaml carries an upstream-defined `version: 1` header; this baseline writes two known sections — `refs:` (API-key references, dsh-credentials-local) and `records:` (connection grants written by the desktop Host). The pre-release flat layout is refused by the provider itself."
     },
     {
       "provider": "@deepseek-ai/dsh-settings-file",
       "providerVersion": "0.1.2-rc.1",
       "formatId": "dsh-settings-file-0.1.2-rc.1",
-      "readable": ["dsh-settings-file-0.1.2-rc.1"],
+      "readable": ["dsh-settings-file-0.1.2-alpha.3", "dsh-settings-file-0.1.2-rc.1"],
       "writable": "dsh-settings-file-0.1.2-rc.1",
       "evidence": [
         "npm:@deepseek-ai/dsh-settings-file@0.1.2-rc.1:lib/index.js",
         "fixture:tests/fixtures/home-formats/settings.yaml#db74b2ddfc5f2e203738be3ccac319a727369c716aa8b2374654dab5f2059be7",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "<home>/settings.yaml (or .json) is a schemastery-validated document with NO upstream numeric schema version; the provider build itself is the format identity. No schema version is fabricated."
+      "$notes": "<home>/settings.yaml (or .json) is a schemastery-validated document with NO upstream numeric schema version; the provider build itself is the format identity. No schema version is fabricated. The rule reads the predecessor-build ID as well: these documents carry no upstream numeric schema, so an M4-written home (marker recording the alpha.3 build) crosses this release inside one rule instead of being refused."
     },
     {
       "provider": "@deepseek-ai/dsh-session-persistence-jsonl",
@@ -53,7 +53,7 @@
       "provider": "@deepseek-ai/dsh-storage-json",
       "providerVersion": "0.1.2-rc.1",
       "formatId": "dsh-storage-unit-0.1.2-rc.1",
-      "readable": ["dsh-storage-unit-0.1.2-rc.1"],
+      "readable": ["dsh-storage-unit-0.1.2-alpha.3", "dsh-storage-unit-0.1.2-rc.1"],
       "writable": "dsh-storage-unit-0.1.2-rc.1",
       "evidence": [
         "npm:@deepseek-ai/dsh-storage-json@0.1.2-rc.1:lib/index.js",
@@ -61,7 +61,7 @@
         "fixture:tests/fixtures/home-formats/storage-unit-single.json#77f214e92930f98e6ed4ada6cd48f87ac4d41f85709d84575401cb1c5717a82b",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "Single-layout units are one document with a nested {unit:{name,version}} header; per-record units are directories of {version,record} documents (global.json carries the unit version stamp) plus the domain identity from the directory name. Per-domain versions are declared by the owning package and checked with version-mismatch refusal."
+      "$notes": "Single-layout units are one document with a nested {unit:{name,version}} header; per-record units are directories of {version,record} documents (global.json carries the unit version stamp) plus the domain identity from the directory name. Per-domain versions are declared by the owning package and checked with version-mismatch refusal. The rule reads the predecessor-build ID as well: these documents carry no upstream numeric schema, so an M4-written home (marker recording the alpha.3 build) crosses this release inside one rule instead of being refused."
     },
     {
       "provider": "@deepseek-ai/dsh-session-projection-cache",
@@ -81,14 +81,14 @@
       "provider": "@deepseek-ai/dsh",
       "providerVersion": "0.1.2-rc.1",
       "formatId": "dsh-profile-manifest-0.1.2-rc.1",
-      "readable": ["dsh-profile-manifest-0.1.2-rc.1"],
+      "readable": ["dsh-profile-manifest-0.1.2-alpha.3", "dsh-profile-manifest-0.1.2-rc.1"],
       "writable": "dsh-profile-manifest-0.1.2-rc.1",
       "evidence": [
         "repo:packages/profile-manager/src/reconcile-templates.ts",
         "fixture:tests/fixtures/home-formats/profile-package.json#d193ec18a8a948d68b31cd4bc0217cf1659e198cbd591e8d8c0c177621710a9c",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "A profile directory is a package.json manifest (dsh.profile.bundles) plus cordis.patch.yml plus pnpm-workspace.yaml. The manifest template is app-owned (profile-manager) and pinned to this baseline; the patch layer is the user's."
+      "$notes": "A profile directory is a package.json manifest (dsh.profile.bundles) plus cordis.patch.yml plus pnpm-workspace.yaml. The manifest template is app-owned (profile-manager) and pinned to this baseline; the patch layer is the user's. The rule reads the predecessor-build ID as well: these documents carry no upstream numeric schema, so an M4-written home (marker recording the alpha.3 build) crosses this release inside one rule instead of being refused."
     }
   ]
 }

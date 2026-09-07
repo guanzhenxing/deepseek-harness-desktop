@@ -46,7 +46,7 @@ export const BASELINE_MANIFEST: ReleaseManifest = {
       provider: '@deepseek-ai/dsh-settings-file',
       providerVersion: '0.1.2-rc.1',
       formatId: 'dsh-settings-file-0.1.2-rc.1',
-      readable: ['dsh-settings-file-0.1.2-rc.1'],
+      readable: ['dsh-settings-file-0.1.2-alpha.3', 'dsh-settings-file-0.1.2-rc.1'],
       writable: 'dsh-settings-file-0.1.2-rc.1',
       evidence: ['fixture:test'],
     },
@@ -62,7 +62,7 @@ export const BASELINE_MANIFEST: ReleaseManifest = {
       provider: '@deepseek-ai/dsh-storage-json',
       providerVersion: '0.1.2-rc.1',
       formatId: 'dsh-storage-unit-0.1.2-rc.1',
-      readable: ['dsh-storage-unit-0.1.2-rc.1'],
+      readable: ['dsh-storage-unit-0.1.2-alpha.3', 'dsh-storage-unit-0.1.2-rc.1'],
       writable: 'dsh-storage-unit-0.1.2-rc.1',
       evidence: ['fixture:test'],
     },
@@ -78,7 +78,7 @@ export const BASELINE_MANIFEST: ReleaseManifest = {
       provider: '@deepseek-ai/dsh',
       providerVersion: '0.1.2-rc.1',
       formatId: 'dsh-profile-manifest-0.1.2-rc.1',
-      readable: ['dsh-profile-manifest-0.1.2-rc.1'],
+      readable: ['dsh-profile-manifest-0.1.2-alpha.3', 'dsh-profile-manifest-0.1.2-rc.1'],
       writable: 'dsh-profile-manifest-0.1.2-rc.1',
       evidence: ['fixture:test'],
     },
@@ -502,6 +502,37 @@ describe('inspectHomeFormats', () => {
         },
       }),
     ).toEqual({ kind: 'refuse', code: 'UNKNOWN_FORMAT' })
+  })
+
+  it('allows an M4-marked home whose provider-build slots advanced with the runtime', () => {
+    // settings/storage/profile have no upstream numeric schema: their IDs
+    // embed the provider build. An M4 marker records the alpha.3 IDs while
+    // this release observes its own rc.1 IDs — the same rule must declare
+    // both readable or every upgraded home would be refused.
+    expect(
+      preflightHome({
+        release: BASELINE_MANIFEST,
+        marker: {
+          schemaVersion: 1,
+          dataEpoch: 1,
+          lastWriterReleaseId: 'm4-0.0.0-darwin-arm64-caa5c51',
+          formats: {
+            settings: 'dsh-settings-file-0.1.2-alpha.3',
+            storages: 'dsh-storage-unit-0.1.2-alpha.3',
+            profiles: 'dsh-profile-manifest-0.1.2-alpha.3',
+          },
+        },
+        observed: {
+          fresh: false,
+          formats: {
+            settings: 'dsh-settings-file-0.1.2-rc.1',
+            storages: 'dsh-storage-unit-0.1.2-rc.1',
+            profiles: 'dsh-profile-manifest-0.1.2-rc.1',
+          },
+          unknownPaths: [],
+        },
+      }),
+    ).toMatchObject({ kind: 'allow', dataEpoch: 1 })
   })
 
   it('classifies the Host-written records: credentials section as the baseline format', async () => {
