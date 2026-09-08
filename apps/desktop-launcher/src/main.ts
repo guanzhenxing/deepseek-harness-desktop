@@ -321,9 +321,9 @@ class ElectronWindowPort {
   }
 
   /** Persist the normal bounds + maximized flag through an atomic write. */
-  persistWindowStateNow(): void {
-    if (this.window.isDestroyed()) return
-    void writeWindowState(this.#stateFile, {
+  persistWindowStateNow(): Promise<void> {
+    if (this.window.isDestroyed()) return Promise.resolve()
+    return writeWindowState(this.#stateFile, {
       bounds: this.window.getNormalBounds(),
       maximized: this.window.isMaximized(),
     }).catch((error: unknown) => {
@@ -336,7 +336,7 @@ class ElectronWindowPort {
 
   #scheduleStateSave(): void {
     if (this.#saveTimer !== undefined) clearTimeout(this.#saveTimer)
-    this.#saveTimer = setTimeout(() => this.persistWindowStateNow(), 500)
+    this.#saveTimer = setTimeout(() => void this.persistWindowStateNow(), 500)
     // The timer must never keep the quit sequence alive.
     this.#saveTimer.unref?.()
   }
@@ -663,11 +663,11 @@ async function startApplication(): Promise<void> {
       acquireHomeLease({
         home,
         entrypoint: 'desktop',
-        profile: profileName,
+        profile: bootProfileName,
         appVersion: app.getVersion(),
         probe,
       }),
-    profile: createDesktopProfileRecovery({ home, profileName }),
+    profile: createDesktopProfileRecovery({ home, profileName: bootProfileName }),
     // Home compatibility chain (M4): after the lease, before any
     // profile/cache/Host write, on every session (normal and Safe Mode both
     // flow through this gate). Marker parse → read-only inspection →
@@ -823,6 +823,9 @@ async function startApplication(): Promise<void> {
       kind: 'ui-ready',
       launcherPid: process.pid,
       hostPid: readyHost?.pid,
+      // The booted profile is part of the report so packaged acceptance can
+      // attribute the ready surface to the profile it asked for.
+      profile: bootProfileName,
       ...(driverOwnedModes.includes(smokeMode) ? { surfaceUrl: readyHost?.surface.url } : {}),
     })
     if (smokeMode === 'host-crash' && readyHost !== undefined) {
@@ -863,11 +866,15 @@ else {
   app.on('before-quit', (event) => {
     if (shutdownComplete) return
     event.preventDefault()
-    windowPort?.persistWindowStateNow()
+    // The final bounds write must land before app.exit(0) tears the process
+    // down; the rest of the quit chain (Host stop, lease release) waits for it.
+    const persisted = windowPort?.persistWindowStateNow() ?? Promise.resolve()
     nativeUi?.beginQuit()
     if (shutdownStarted) return
     shutdownStarted = true
-    void (shell?.act('quit') ?? Promise.resolve())
+    void persisted
+      .catch(() => undefined)
+      .then(() => shell?.act('quit') ?? Promise.resolve())
       .catch(() => undefined)
       .finally(() => {
         nativeUi?.destroy()
@@ -888,12 +895,31 @@ else {
     })
     .catch((error: unknown) => {
       if (error instanceof LeaseError) reportLeaseFailure(error)
-      else console.error('startup failed:', error instanceof Error ? error.message : error)
+      else {
+        console.error('startup failed:', error instanceof Error ? error.message : error)
+        // A normal launch that dies before any window exists would otherwise
+        // sit invisible with no window-all-closed to end it; surface the
+        // failure and exit like the lease refusal does.
+        if (smokeMode === undefined) {
+          dialog.showErrorBox(
+            'DeepSeek Harness 启动失败',
+            `启动过程中发生错误，应用即将退出。\n\n${error instanceof Error ? error.message : String(error)}`,
+          )
+          app.exit(1)
+        }
+      }
       smokeReport({ kind: 'failed', stage: 'startup' })
       if (smokeMode === 'recovery') {
         // The recovery chain already surfaced its view (start() rejects by
         // design once the session settles in recovery); the scripted
         // sequence takes over from here instead of tearing the view down.
+        if (windowPort === undefined) {
+          // The failure predates the window: nothing to drive a sequence on.
+          console.error('startup failed before the window existed; exiting')
+          shutdownStarted = true
+          app.exit(1)
+          return
+        }
         void runRecoverySequence(sequenceContext()).catch((sequenceError: unknown) => {
           console.error(
             'recovery sequence failed:',
