@@ -24,6 +24,29 @@ function reject(code, detail) {
   throw new Error(`PLUGIN_INTAKE_${code}: ${detail}`)
 }
 
+/** Schema 1 is a CLOSED field set (ADR-0010): an unknown top-level or source
+ * field is a schema this version does not know, not data to ignore. */
+const RECORD_KEYS = [
+  'capabilities',
+  'integrity',
+  'license',
+  'package',
+  'schemaVersion',
+  'source',
+  'validatedPlatforms',
+  'version',
+]
+
+function assertClosedKeys(value, keys, where) {
+  const actual = Object.keys(value).sort()
+  if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index])) {
+    reject(
+      'RECORD_INVALID',
+      `${where} fields ${JSON.stringify(actual)} != the closed schema-1 set ${JSON.stringify(keys)}`,
+    )
+  }
+}
+
 /** Deterministic bundle digest: regular files in sorted relative-path order
  * (rejecting symlinks and special files), feeding the hasher each relative
  * path, one NUL byte, the file's lowercase hexadecimal SHA-256, and one LF
@@ -79,6 +102,7 @@ export async function validatePluginIntake(record, bundleRoot, releaseManifest) 
   if (typeof record !== 'object' || record === null || Array.isArray(record)) {
     reject('RECORD_INVALID', 'record must be an object')
   }
+  assertClosedKeys(record, RECORD_KEYS, 'record')
   if (record.schemaVersion !== 1) {
     reject('RECORD_INVALID', `schemaVersion ${JSON.stringify(record.schemaVersion)} != 1`)
   }
@@ -100,10 +124,13 @@ export async function validatePluginIntake(record, bundleRoot, releaseManifest) 
   if (
     typeof record.source !== 'object' ||
     record.source === null ||
+    Array.isArray(record.source) ||
     record.source.kind !== 'repository' ||
     !HEX40.test(record.source.commit ?? '')
   ) {
     reject('UNKNOWN_SOURCE', 'source must be a repository with a 40-hex commit')
+  } else {
+    assertClosedKeys(record.source, ['commit', 'kind'], 'source')
   }
 
   const manifestBytes = await readFile(path.join(bundleRoot, 'package.json'), 'utf8')

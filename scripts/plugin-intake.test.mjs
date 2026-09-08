@@ -129,3 +129,26 @@ test('a record without packaged evidence for this platform is refused', async ()
     /NO_PACKAGED_EVIDENCE/u,
   )
 })
+
+test('unknown top-level or source fields are refused (schema 1 is closed)', async () => {
+  const extraTop = await baseRecord()
+  extraTop.extra = 'ignored by no one'
+  await assert.rejects(
+    validatePluginIntake(extraTop, fixtureBundle, MANIFEST),
+    /RECORD_INVALID.*closed schema-1/u,
+  )
+
+  const extraSource = await baseRecord()
+  extraSource.source.trust = 'self-declared'
+  await assert.rejects(
+    validatePluginIntake(extraSource, fixtureBundle, MANIFEST),
+    /RECORD_INVALID.*closed schema-1/u,
+  )
+
+  const missingField = await baseRecord()
+  delete missingField.capabilities
+  await assert.rejects(
+    validatePluginIntake(missingField, fixtureBundle, MANIFEST),
+    /RECORD_INVALID.*closed schema-1/u,
+  )
+})

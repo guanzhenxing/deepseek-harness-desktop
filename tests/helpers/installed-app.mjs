@@ -332,11 +332,15 @@ export async function runInstalledApp(input) {
 
 /**
  * Run the installed CLI shim with the same scrubbed environment semantics.
- * argv forwards verbatim; resolve/PATH never touch the repository.
+ * argv forwards verbatim; resolve/PATH never touch the repository. The shim
+ * runs as its own process GROUP: a timeout (or an interrupted driver) kills
+ * the whole group — the shim's spawned CLI child must not survive as an
+ * orphan holding the smoke home's lease.
  */
 export async function runInstalledCli(cliEntry, argv, options = {}) {
   const child = spawn(cliEntry, argv, {
     cwd: options.cwd,
+    detached: true,
     env: {
       PATH: '/usr/bin:/bin',
       HOME: process.env.HOME,
@@ -346,6 +350,15 @@ export async function runInstalledCli(cliEntry, argv, options = {}) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  const killGroup = () => {
+    try {
+      process.kill(-child.pid, 'SIGKILL')
+    } catch {
+      /* already gone */
+    }
+    return Promise.resolve()
+  }
+  const unregister = registerEmergencyCleanup(killGroup)
   const output = []
   for (const stream of [child.stdout, child.stderr]) {
     stream.setEncoding('utf8')
@@ -353,11 +366,7 @@ export async function runInstalledCli(cliEntry, argv, options = {}) {
   }
   const exit = await new Promise((resolve, reject) => {
     const timer = sleepTimer(() => {
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        /* already gone */
-      }
+      killGroup()
       reject(
         new Error(`installed cli ${argv[0]} timed out after ${options.timeoutMs ?? 240_000}ms`),
       )
@@ -370,6 +379,6 @@ export async function runInstalledCli(cliEntry, argv, options = {}) {
       cancelTimer(timer)
       resolve({ code, signal })
     })
-  })
+  }).finally(unregister)
   return { ...exit, output: output.join('') }
 }
