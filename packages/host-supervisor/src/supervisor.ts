@@ -199,7 +199,7 @@ export class HostSupervisor {
         if (this.#exited) return
         this.#process?.terminate()
         this.#killTimer = setTimeout(() => {
-          if (!this.#exited) this.#process?.kill()
+          if (!this.#exited && this.#process !== undefined) this.#killProcessNow(this.#process)
         }, this.#options.terminateGraceMs)
       }, deadlineMs)
     })()
@@ -265,6 +265,12 @@ export class HostSupervisor {
     const exitedPromise = new Promise<void>((resolve) => {
       process.onExit(() => {
         exited = true
+        // The supervisor-level exit listener is attached only after a
+        // successful boot handoff; on this failure path this listener is the
+        // ONLY observer, so the death must be recorded here — stop() and the
+        // failure timers consult #exited and would otherwise wait forever on
+        // a child that can never report again.
+        this.#exited = true
         resolve()
       })
     })
@@ -278,11 +284,7 @@ export class HostSupervisor {
       new Promise<void>((resolve) => setTimeout(resolve, this.#options.terminateGraceMs)),
     ])
     if (!exited) {
-      try {
-        process.kill()
-      } catch {
-        /* already gone */
-      }
+      this.#killProcessNow(process)
       await Promise.race([exitedPromise, new Promise<void>((r) => setTimeout(r, 500))])
     }
     if (!exited) {
@@ -430,12 +432,27 @@ export class HostSupervisor {
     try {
       this.#process.terminate()
     } catch {
-      this.#process.kill()
+      this.#killProcessNow(this.#process)
       return
     }
     this.#killTimer = setTimeout(() => {
-      if (!this.#exited) this.#process?.kill()
+      if (!this.#exited && this.#process !== undefined) this.#killProcessNow(this.#process)
     }, this.#options.terminateGraceMs)
+  }
+
+  /**
+   * Kill the child, tolerating only ESRCH: the child died before this
+   * supervisor observed the exit (it never attached the exit listener), so
+   * the signal cannot be delivered — record the death instead of letting the
+   * error escape into a timer callback.
+   */
+  #killProcessNow(process: ManagedHostProcess): void {
+    try {
+      process.kill()
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ESRCH') throw error
+      this.#exited = true
+    }
   }
 
   #startWatchdog(): void {

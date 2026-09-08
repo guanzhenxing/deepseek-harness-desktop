@@ -18,6 +18,8 @@ class FakeProcess implements ManagedHostProcess {
   unkillable = false
   /** Simulates a process that dies on signals; disabled by default. */
   killable = false
+  /** Simulates the real process.kill ESRCH throw on an already-dead pid. */
+  esrchOnKill = false
   bootstrap: HostBootstrap | undefined
   #messageListeners = new Set<(message: unknown) => void>()
   #exitListeners = new Set<(exit: { code: number | null; signal: string | null }) => void>()
@@ -47,6 +49,11 @@ class FakeProcess implements ManagedHostProcess {
 
   kill(): void {
     this.killCount += 1
+    if (this.esrchOnKill) {
+      throw Object.assign(new Error(`kill(${this.pid}, SIGKILL): no such process`), {
+        code: 'ESRCH',
+      })
+    }
     if (this.killable) queueMicrotask(() => this.emitExit(null, 'SIGKILL'))
   }
 
@@ -221,6 +228,39 @@ describe('HostSupervisor lease ordering', () => {
     expect(setup.process.bootstrap).toBeUndefined()
     expect(setup.process.terminateCount).toBeGreaterThanOrEqual(1)
     expect(setup.lease.calls).toContain('confirmHostExited')
+  })
+
+  it('resolves stop() after an attach failure already reaped the child', async () => {
+    // Regression: the child died between spawn and the supervisor's exit
+    // listener being attached, so only the reap listener observed the death —
+    // stop() must not drain forever on a child that can never report again.
+    const setup = fixture()
+    setup.process.killable = true
+    setup.lease.refuseAt = 'attachHost'
+    await expect(setup.supervisor.start(startRequest(setup.lease))).rejects.toMatchObject({
+      code: 'BOOT_FAILED',
+    })
+    const settled = await Promise.race([
+      setup.supervisor.stop('quit', 1_000).then(() => 'settled' as const),
+      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2_000)),
+    ])
+    expect(settled).toBe('settled')
+    expect(setup.events).toContain('stopped')
+  })
+
+  it('treats an ESRCH kill of the already-dead child as observed exit', async () => {
+    const setup = fixture()
+    setup.process.esrchOnKill = true
+    setup.lease.refuseAt = 'attachHost'
+    await expect(setup.supervisor.start(startRequest(setup.lease))).rejects.toMatchObject({
+      code: 'BOOT_FAILED',
+    })
+    const settled = await Promise.race([
+      setup.supervisor.stop('quit', 1_000).then(() => 'settled' as const),
+      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2_000)),
+    ])
+    expect(settled).toBe('settled')
+    expect(setup.events).toContain('stopped')
   })
 
   it('waits for a late child when stop races the spawn', async () => {
