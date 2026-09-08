@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { PRODUCT } from '../packages/product-config/lib/index.js'
 import { verifyReleaseEvidence } from './release-evidence-lib.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -34,9 +35,8 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
  * removed, including on failure paths. */
 async function extractEmbeddedManifest(dmgPath) {
   const mountPoint = await mkdtemp(path.join(tmpdir(), 'dsh-evidence-mount-'))
-  let mounted = false
-  let embeddedBytes
   let detachError
+  let embeddedBytes
   try {
     execFileSync(
       'hdiutil',
@@ -45,30 +45,43 @@ async function extractEmbeddedManifest(dmgPath) {
         stdio: 'ignore',
       },
     )
-    mounted = true
-    const app = (await readdir(mountPoint)).find((name) => name.endsWith('.app'))
-    if (app === undefined)
-      throw new Error('EVIDENCE_REPORT_INVALID: the DMG carries no .app bundle')
+    // Pin the product-named bundle and refuse decoys: a first-match .app
+    // would let a pristine decoy vouch for a tampered product bundle.
+    const apps = (await readdir(mountPoint)).filter((name) => name.endsWith('.app'))
+    const expectedApp = `${PRODUCT.name}.app`
+    if (apps.length !== 1 || apps[0] !== expectedApp) {
+      throw new Error(
+        `EVIDENCE_REPORT_INVALID: the DMG root must carry exactly ${JSON.stringify(expectedApp)} ` +
+          `(found: ${apps.length === 0 ? 'no .app' : apps.join(', ')})`,
+      )
+    }
     embeddedBytes = await readFile(
-      path.join(mountPoint, app, 'Contents', 'Resources', 'compatibility.json'),
+      path.join(mountPoint, expectedApp, 'Contents', 'Resources', 'compatibility.json'),
     )
   } finally {
-    // Detach FIRST; only a detached mount point may be deleted. hdiutil can
-    // transiently refuse while Finder has the volume open, so retry a few
-    // times before surfacing the failure. Never remove an active mountpoint.
-    let detached = !mounted
-    if (mounted) {
-      for (let attempt = 0; attempt < 3 && !detached; attempt += 1) {
-        try {
-          execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
-          detached = true
-        } catch (error) {
-          detachError = error
-        }
+    // Always attempt the detach by mount point — an attach that errored may
+    // still have mounted before failing. Only a detached (or provably never
+    // mounted, i.e. empty) mount point may be deleted; never rm through an
+    // active mount. hdiutil can transiently refuse while Finder has the
+    // volume open, so retry a few times before surfacing the failure.
+    let detached = false
+    for (let attempt = 0; attempt < 3 && !detached; attempt += 1) {
+      try {
+        execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+        detached = true
+        detachError = undefined
+      } catch (error) {
+        detachError = error
       }
     }
     if (detached) {
       await rm(mountPoint, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    } else {
+      const leftovers = await readdir(mountPoint).catch(() => undefined)
+      if (leftovers !== undefined && leftovers.length === 0) {
+        // Nothing ever mounted here; the scratch directory is safe to remove.
+        await rm(mountPoint, { recursive: true, force: true })
+      }
     }
   }
   if (detachError !== undefined) throw detachError

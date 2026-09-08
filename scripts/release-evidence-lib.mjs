@@ -13,6 +13,13 @@ import path from 'node:path'
  * deployed files instead. */
 const WORKSPACE_SCOPE = '@dsh-desktop/'
 
+/** The packaged smoke roster size this evidence framework certifies. A
+ * results list shorter than the roster (empty after a truncating write, or
+ * filtered to nothing by a harness regression) must never mint or verify as
+ * a green candidate — 0/0 scenarios is not a pass. Raising the roster only
+ * raises this floor; shrinking it is a deliberate evidence-scope change. */
+export const MINIMUM_PACKAGE_SMOKE_SCENARIOS = 16
+
 /** Codepoint order, not locale order: '%40' must sort before letters. */
 function byCodepoints(left, right) {
   return left < right ? -1 : left > right ? 1 : 0
@@ -557,6 +564,13 @@ export function verifyReleaseEvidence(input) {
       `scenarioCount ${report.evidence.packageSmoke.scenarioCount} != ${smoke.results.length}`,
     )
   }
+  if (smoke.results.length < MINIMUM_PACKAGE_SMOKE_SCENARIOS) {
+    failEvidence(
+      'SMOKE_FAILED',
+      `scenarioCount ${smoke.results.length} < ${MINIMUM_PACKAGE_SMOKE_SCENARIOS}: the packaged ` +
+        'smoke roster must be complete — an empty or truncated results list never verifies green',
+    )
+  }
 
   const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
   const smokeBytes = Buffer.isBuffer(input.packageSmoke)
@@ -610,6 +624,15 @@ export async function gatherEvidenceIdentity(input) {
 
   const smokeBytes = await readFile(path.join(repositoryRoot, 'release', 'package-smoke.json'))
   const smoke = JSON.parse(smokeBytes)
+  // Refuse to MINT evidence from an incomplete roster, not only to verify
+  // it: 0/0 scenarios (truncated report, filtered-out harness regression)
+  // would otherwise certify a candidate that was never functionally tested.
+  if (!Array.isArray(smoke.results) || smoke.results.length < MINIMUM_PACKAGE_SMOKE_SCENARIOS) {
+    throw new Error(
+      `release-evidence: package-smoke holds ${Array.isArray(smoke.results) ? smoke.results.length : 'no'} ` +
+        `results (minimum roster ${MINIMUM_PACKAGE_SMOKE_SCENARIOS}); re-run smoke:package`,
+    )
+  }
   const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
   return {

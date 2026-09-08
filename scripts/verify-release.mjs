@@ -27,7 +27,29 @@ assertAcceptanceRuntime('verify:release')
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 
+function requireCleanTree(stage) {
+  const status = spawnSync('git', ['status', '--porcelain'], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+  })
+  if (status.status !== 0) {
+    throw new Error(`git status exited with ${status.status}`)
+  }
+  if (status.stdout.trim() !== '') {
+    throw new Error(
+      `working tree is dirty at ${stage}:\n${status.stdout.trimEnd()}\n` +
+        'The chain must build committed bytes only: evidence binds sourceCommit to them, and a dirty tree ships unreviewed changes under a clean provenance claim.',
+    )
+  }
+}
+
 const steps = [
+  {
+    name: 'clean working tree (committed bytes only)',
+    run() {
+      requireCleanTree('chain start')
+    },
+  },
   { name: 'check (format/lint/types/unit/docs)', command: ['run', 'check'] },
   { name: 'generate:compatibility', command: ['run', 'generate:compatibility'] },
   { name: 'verify:dsh-closure', command: ['run', 'verify:dsh-closure'] },
@@ -136,10 +158,13 @@ function spawnPnpm(args) {
 
 // The plan's gate list closes with a whitespace/conflict-marker sweep over
 // the working tree — appended as a final inline step rather than a pnpm
-// script because it checks git state, not a build.
+// script because it checks git state, not a build. The tree must ALSO be
+// clean again here: stage-runtime temporarily mutates pnpm-lock.yaml and
+// restores it, and a failed restore must surface as a dirty tree, not pass.
 steps.push({
-  name: 'git diff --check',
+  name: 'git status clean + git diff --check',
   run() {
+    requireCleanTree('chain end')
     const result = spawnSync('git', ['diff', '--check'], { cwd: repositoryRoot })
     if (result.status !== 0) {
       throw new Error(`git diff --check exited with ${result.status}`)

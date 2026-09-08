@@ -57,7 +57,16 @@ export const REQUIRED_STAGING_FILES = [
 const SINGLETON_PACKAGES = ['react', '@deepseek-ai/cordis', '@deepseek-ai/dsh']
 
 async function walk(directory, visit) {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+  // Only ENOENT may read as "absent" (a concurrent removal): any other
+  // failure (EACCES on a chmod-000 subtree, EMFILE, ...) must fail the gate
+  // — swallowing it would silently scan a smaller tree and pass.
+  let entries
+  try {
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    return
+  }
   for (const entry of entries) {
     const target = path.join(directory, entry.name)
     await visit(target, entry)

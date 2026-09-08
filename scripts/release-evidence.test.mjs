@@ -283,7 +283,7 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
           file: '../package-smoke.json',
           sha256: 'f'.repeat(64),
           passed: true,
-          scenarioCount: 2,
+          scenarioCount: 16,
         },
       },
     },
@@ -297,10 +297,7 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
         arch: 'arm64',
         compatibilityManifestSha256: 'c'.repeat(64),
       },
-      results: [
-        { name: 'one', ok: true },
-        { name: 'two', ok: true },
-      ],
+      results: Array.from({ length: 16 }, (_, index) => ({ name: `scenario-${index}`, ok: true })),
     },
     artifactRecords: [
       {
@@ -339,10 +336,31 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
     packageSmoke: {
       sha256: sha256(canonicalJson(ok.packageSmoke).trimEnd()),
       passed: true,
-      scenarioCount: 2,
+      scenarioCount: 16,
     },
   })
   assert.deepEqual(verifyReleaseEvidence(ok), { ok: true })
+
+  // A truncated-to-empty results list must never verify green, even when the
+  // report is otherwise perfectly self-consistent (digests recomputed).
+  const emptyRoster = baseInput()
+  emptyRoster.packageSmoke.results = []
+  emptyRoster.report = createReleaseEvidence({
+    releaseId: emptyRoster.report.releaseId,
+    sourceCommit: emptyRoster.report.sourceCommit,
+    artifact: emptyRoster.report.artifact,
+    compatibilityManifestSha256: emptyRoster.report.compatibilityManifestSha256,
+    runtimes: emptyRoster.report.runtimes,
+    sbomSha256: sha256(emptyRoster.sbom),
+    licensesSha256: sha256(emptyRoster.licenses),
+    packageSmoke: {
+      sha256: sha256(canonicalJson(emptyRoster.packageSmoke).trimEnd()),
+      passed: true,
+      scenarioCount: 0,
+    },
+  })
+  assert.throws(() => verifyReleaseEvidence(emptyRoster), /SMOKE_FAILED/u)
+  assert.throws(() => verifyReleaseEvidence(emptyRoster), /roster/u)
 
   const staleSmoke = baseInput()
   staleSmoke.report.evidence.sbom.sha256 = sha256(staleSmoke.sbom)
@@ -436,7 +454,7 @@ test('verifyReleaseEvidence pins the evidence file names against traversal', () 
           file: '../package-smoke.json',
           sha256: sha256('{}'),
           passed: true,
-          scenarioCount: 1,
+          scenarioCount: 16,
         },
       },
     },
@@ -450,7 +468,7 @@ test('verifyReleaseEvidence pins the evidence file names against traversal', () 
         arch: 'arm64',
         compatibilityManifestSha256: 'c'.repeat(64),
       },
-      results: [{ name: 'one', ok: true }],
+      results: Array.from({ length: 16 }, (_, index) => ({ name: `scenario-${index}`, ok: true })),
     },
     artifactRecords: [
       {
@@ -491,7 +509,7 @@ test('verifyReleaseEvidence cross-checks the reported and embedded runtime versi
             file: '../package-smoke.json',
             sha256: sha256('{}'),
             passed: true,
-            scenarioCount: 1,
+            scenarioCount: 16,
           },
         },
       },
@@ -505,7 +523,10 @@ test('verifyReleaseEvidence cross-checks the reported and embedded runtime versi
           arch: 'arm64',
           compatibilityManifestSha256: 'c'.repeat(64),
         },
-        results: [{ name: 'one', ok: true }],
+        results: Array.from({ length: 16 }, (_, index) => ({
+          name: `scenario-${index}`,
+          ok: true,
+        })),
       },
       artifactRecords: [
         {

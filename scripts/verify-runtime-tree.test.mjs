@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -48,6 +48,28 @@ test('findEscapingSymlinks flags links that leave the tree', async () => {
       const labels = escapes.map((escape) => path.basename(escape.link)).sort()
       assert.deepEqual(labels, ['broken-link', 'escape-link'])
     } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  } finally {
+    await rm(tree, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable subtree fails the walk instead of scanning less', async () => {
+  // A chmod-000 directory hiding an escaping symlink must throw: swallowing
+  // the readdir error would pass the gate over a smaller tree.
+  if (process.platform === 'win32') return
+  const tree = await makeTree()
+  try {
+    const outside = await makeTree()
+    try {
+      const locked = path.join(tree, 'locked')
+      await mkdir(locked, { recursive: true })
+      await symlink(outside, path.join(locked, 'hidden-escape'))
+      await chmod(locked, 0o000)
+      await assert.rejects(findEscapingSymlinks(tree), /EACCES/u)
+    } finally {
+      await chmod(path.join(tree, 'locked'), 0o755).catch(() => undefined)
       await rm(outside, { recursive: true, force: true })
     }
   } finally {

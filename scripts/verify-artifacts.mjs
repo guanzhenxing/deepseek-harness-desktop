@@ -13,6 +13,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { PRODUCT } from '../packages/product-config/lib/index.js'
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 function sha256(bytes) {
@@ -71,11 +73,22 @@ export async function verifyArtifacts(artifactsFile) {
       const finder = spawnSync('find', [mountPoint, '-maxdepth', '1', '-name', '*.app'], {
         encoding: 'utf8',
       })
-      const appBundle = finder.stdout.trim().split('\n')[0]
-      if (appBundle === undefined || appBundle === '') {
-        errors.push(`${record.file}: no .app bundle found in the DMG`)
+      // Pin the product-named bundle and refuse decoys: a first-match .app
+      // would let a pristine decoy vouch for a tampered product bundle.
+      const found = finder.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line !== '')
+      const expectedApp = path.join(mountPoint, `${PRODUCT.name}.app`)
+      if (found.length !== 1 || found[0] !== expectedApp) {
+        errors.push(
+          `${record.file}: the DMG root must carry exactly ${PRODUCT.name}.app (found: ${
+            found.length === 0 ? 'none' : found.map((line) => path.basename(line)).join(', ')
+          })`,
+        )
         continue
       }
+      const appBundle = found[0]
       const embedded = await readFile(
         path.join(appBundle, 'Contents', 'Resources', 'compatibility.json'),
         'utf8',
