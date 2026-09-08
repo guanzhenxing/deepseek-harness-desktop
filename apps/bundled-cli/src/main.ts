@@ -355,15 +355,18 @@ export async function runBundledCli(
   const home = resolveDesktopHome({ env, osHome, cwd })
 
   const plan = planCliInvocation(argv)
+  // Resolved before every branch: doctor needs the SAME packaged layout the
+  // lease paths use, or its stale-lock scan cannot see the installed app.
+  const runtime = options.runtime ?? resolveCliRuntime(env)
   if (plan.kind === 'doctor-unlock') {
     return runDoctorUnlock({
       home,
+      runtime,
       ...(options.probe === undefined ? {} : { probe: options.probe }),
       ...(options.guard === undefined ? {} : { guard: options.guard }),
       stderr,
     })
   }
-  const runtime = options.runtime ?? resolveCliRuntime(env)
   const probe =
     options.probe ??
     createNativeProcessProbe({

@@ -5,21 +5,30 @@ import {
   type ProcessProbe,
 } from '@dsh-desktop/home-lease'
 
-import { resolveCliRuntime, resolveReleaseFactsLine } from './runtime-paths.js'
+import {
+  resolveCliRuntime,
+  resolveReleaseFactsLine,
+  type CliRuntimePaths,
+} from './runtime-paths.js'
 
 export type RunDoctorUnlockInput = Readonly<{
   home: string
+  runtime?: CliRuntimePaths
   probe?: ProcessProbe
   guard?: GuardLock
   stderr?: NodeJS.WritableStream
 }>
 
-function doctorProbe(): ProcessProbe {
-  const runtime = resolveCliRuntime(process.env)
+function doctorProbe(runtime: CliRuntimePaths | undefined): ProcessProbe {
+  // Without the caller's runtime (packaged installs inject it) the env-based
+  // resolver would describe the DEV layout: its scan needles cannot see the
+  // installed desktop app, and doctor's degraded scan path could then delete
+  // a lock held by the live app.
+  const resolved = runtime ?? resolveCliRuntime(process.env)
   return createNativeProcessProbe({
-    helperPath: runtime.leaseHelper,
-    entryExecutables: runtime.desktopEntryExecutables,
-    scanArgvNeedles: runtime.scanArgvNeedles,
+    helperPath: resolved.leaseHelper,
+    entryExecutables: resolved.desktopEntryExecutables,
+    scanArgvNeedles: resolved.scanArgvNeedles,
     excludePids: [process.pid],
   })
 }
@@ -32,7 +41,7 @@ export async function runDoctorUnlock(input: RunDoctorUnlockInput): Promise<numb
   const stderr = input.stderr ?? process.stderr
   const result = await unlockHome({
     home: input.home,
-    probe: input.probe ?? doctorProbe(),
+    probe: input.probe ?? doctorProbe(input.runtime),
     ...(input.guard === undefined ? {} : { guard: input.guard }),
   })
   if (result.status === 'refused') {
