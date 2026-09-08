@@ -71,9 +71,20 @@ export async function runNavigationSequence(context: SmokeSequenceContext): Prom
     })()`,
   )
   await sleep(400)
+  // SECURITY: the current URL is authenticated — strip the query before it
+  // reaches stdout; the assertions only need origin and path.
+  const current = context.window.webContents.getURL()
+  const sanitized = (() => {
+    try {
+      const parsed = new URL(current)
+      return `${parsed.origin}${parsed.pathname}`
+    } catch {
+      return 'unreadable-url'
+    }
+  })()
   context.report({
     kind: 'navigation-probe-done',
-    currentUrl: context.window.webContents.getURL(),
+    currentUrl: sanitized,
   })
 }
 

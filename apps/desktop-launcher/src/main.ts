@@ -1,5 +1,6 @@
 import os from 'node:os'
 import { existsSync, readFileSync } from 'node:fs'
+import { writeFile as writeFilePromise } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -637,8 +638,29 @@ async function startApplication(): Promise<void> {
       })
     ) {
       smokeReport({ kind: 'renderer-reloaded', reason: details.reason })
-      void port.reloadSurface().catch((error: unknown) => {
-        console.error('renderer reload failed:', error instanceof Error ? error.message : error)
+      void port.reloadSurface().catch((reloadError: unknown) => {
+        console.error(
+          'renderer reload failed:',
+          reloadError instanceof Error ? reloadError.message : reloadError,
+        )
+        // The one reload the budget granted is gone and no further
+        // render-process-gone is guaranteed to arrive: route to the recovery
+        // flow now instead of leaving a blank surface forever.
+        if (shell === undefined) return
+        void shell
+          .rendererCrashed({
+            stage: 'renderer',
+            code: 'RENDERER_RELOAD_FAILED',
+            category: 'renderer',
+            summary: `界面重载失败（${details.reason}）`,
+            retryable: true,
+          })
+          .catch((crashError: unknown) => {
+            console.error(
+              'renderer crash handling failed:',
+              crashError instanceof Error ? crashError.message : crashError,
+            )
+          })
       })
       return
     }
@@ -814,11 +836,40 @@ async function startApplication(): Promise<void> {
       startupTimeline.mark('official-ui-ready')
     }
     if (isLoadingSmoke) {
-      smokeReport({ kind: 'loading-view-replaced', url: port.window.webContents.getURL() })
+      // SECURITY: the surface URL is authenticated — report the origin only;
+      // the token never reaches stdout (captured logs).
+      const replaced = port.window.webContents.getURL()
+      smokeReport({
+        kind: 'loading-view-replaced',
+        url: (() => {
+          try {
+            return new URL(replaced).origin
+          } catch {
+            return 'unreadable-url'
+          }
+        })(),
+      })
     }
   }
   if (smokeMode !== undefined) {
     const driverOwnedModes = ['shared-home', 'conversation', 'auth', 'navigation', 'lifecycle']
+    // SECURITY: the authenticated surface URL (token included) never goes to
+    // stdout — drivers receive it through a 0600 file in the smoke userData
+    // directory, which the acceptance fixtures delete with themselves.
+    let surfaceOrigin: string | undefined
+    if (driverOwnedModes.includes(smokeMode) && readyHost !== undefined) {
+      surfaceOrigin = new URL(readyHost.surface.url).origin
+      await writeFilePromise(
+        path.join(app.getPath('userData'), 'surface-url'),
+        `${readyHost.surface.url}\n`,
+        { mode: 0o600 },
+      ).catch((error: unknown) => {
+        console.error(
+          'surface URL file could not be written:',
+          error instanceof Error ? error.message : error,
+        )
+      })
+    }
     smokeReport({
       kind: 'ui-ready',
       launcherPid: process.pid,
@@ -826,7 +877,7 @@ async function startApplication(): Promise<void> {
       // The booted profile is part of the report so packaged acceptance can
       // attribute the ready surface to the profile it asked for.
       profile: bootProfileName,
-      ...(driverOwnedModes.includes(smokeMode) ? { surfaceUrl: readyHost?.surface.url } : {}),
+      ...(surfaceOrigin === undefined ? {} : { surfaceOrigin, surfaceUrlFile: 'surface-url' }),
     })
     if (smokeMode === 'host-crash' && readyHost !== undefined) {
       process.kill(readyHost.pid, 'SIGKILL')

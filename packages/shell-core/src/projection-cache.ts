@@ -235,6 +235,10 @@ export async function quarantineProjectionCache(
   }
 
   const id = randomUUID()
+  // The size scan above can run long; the lease observed live at entry may
+  // have been released and re-acquired by another entrypoint since. Prove it
+  // is still ours immediately before any durable move happens.
+  await input.lease.assertHeld()
   const backupRelativePath = path.join(input.home, 'storages', `${QUARANTINE_PREFIX}${id}`)
   const backupRelativeForJournal = `storages/${QUARANTINE_PREFIX}${id}`
 

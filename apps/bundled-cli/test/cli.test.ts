@@ -134,6 +134,40 @@ describe('planCliInvocation', () => {
     })
     expect(planCliInvocation(['--profile'])).toEqual({ kind: 'passthrough', profile: undefined })
   })
+
+  it('still takes the lease when --patch precedes --profile', () => {
+    // Regression: --patch's value was mistaken for the first positional, so
+    // the scan stopped early and a write-mode invocation rode the lease-less
+    // branch while upstream parsed --profile normally.
+    expect(planCliInvocation(['--patch', 'overlay.yml', '--profile', 'headless', 'task'])).toEqual({
+      kind: 'passthrough',
+      profile: 'headless',
+    })
+    expect(planCliInvocation(['--patch=a.yml', '--profile=b', 'inner'])).toEqual({
+      kind: 'passthrough',
+      profile: 'b',
+    })
+    // Value-less trailing flags are upstream's error; never a lease we
+    // cannot attribute.
+    expect(planCliInvocation(['--profile', 'tui', '--patch'])).toEqual({
+      kind: 'passthrough',
+      profile: 'tui',
+    })
+    // After the first positional or --, launcher flags belong to the inner
+    // app/pnpm and must not change our lease attribution.
+    expect(planCliInvocation(['run', '--profile', 'x'])).toEqual({
+      kind: 'passthrough',
+      profile: undefined,
+    })
+    expect(planCliInvocation(['--', '--profile', 'x'])).toEqual({
+      kind: 'passthrough',
+      profile: undefined,
+    })
+    expect(planCliInvocation(['plugin', 'add', '--profile', 'x'])).toEqual({
+      kind: 'passthrough',
+      profile: undefined,
+    })
+  })
 })
 
 describe('startLeaseWatchdog', () => {

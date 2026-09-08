@@ -208,6 +208,15 @@ export class HostSupervisor {
 
   async #spawn(request: HostStartRequest): Promise<void> {
     try {
+      // The lease authorizes writes to ITS home; a mismatched request.home
+      // would hand the Host write authorization for a different home —
+      // refuse before anything is registered or spawned.
+      if (request.home !== request.lease.home) {
+        throw new HostControlError(
+          'BOOT_FAILED',
+          `lease covers home ${JSON.stringify(request.lease.home)}, not ${JSON.stringify(request.home)}`,
+        )
+      }
       await request.lease.beforeSpawn(request.profileName)
       this.#leaseTouched = true
       const process = await this.#options.factory.spawnWaiting()

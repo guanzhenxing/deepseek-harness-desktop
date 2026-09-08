@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { lstat, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { clearTimeout as cancelTimer, setTimeout as sleepTimer } from 'node:timers'
@@ -13,6 +13,29 @@ import { waitUntilDead } from './shared-home-driver.mjs'
  * installed-app processes, temp install directories, or DMG mounts behind on
  * the user's machine.
  */
+/**
+ * The authenticated surface URL never travels over stdout (captured logs);
+ * the app writes it to <userData>/surface-url and the ui-ready report points
+ * here. Attach it to the matched report in memory for the driver's own use —
+ * drivers may hold it, logs may not.
+ */
+async function attachSurfaceUrl(report, userData) {
+  if (report?.kind !== 'ui-ready' || report.surfaceUrlFile !== 'surface-url') return report
+  const deadline = Date.now() + 10_000
+  for (;;) {
+    try {
+      const raw = (await readFile(path.join(userData, 'surface-url'), 'utf8')).trim()
+      if (raw !== '') return { ...report, surfaceUrl: raw }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    if (Date.now() > deadline) {
+      throw new Error('ui-ready pointed at the surface URL file but it never appeared')
+    }
+    await new Promise((resolve) => sleepTimer(resolve, 100))
+  }
+}
+
 const liveCleanups = new Set()
 
 /**
@@ -271,7 +294,7 @@ export async function runInstalledApp(input) {
           const deadline = Date.now() + waitMs
           for (;;) {
             const found = reports.find(predicate)
-            if (found !== undefined) return found
+            if (found !== undefined) return await attachSurfaceUrl(found, userData)
             if (Date.now() > deadline) {
               throw new Error(`timed out waiting for ${label ?? 'an app report'}`)
             }

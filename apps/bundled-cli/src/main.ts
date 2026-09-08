@@ -39,6 +39,49 @@ export type CliInvocationPlan =
  * for `--profile web`, `plugin` requires `--profile`, and root launcher
  * flags come before the first inner argument.
  */
+/**
+ * Launcher flags that consume the NEXT token as their value, per the pinned
+ * upstream dsh rc.1 grammar (`--profile <name>`, `--patch <path>`; both also
+ * accept `--flag=value`). Everything else launcher-side is boolean
+ * (--dump-config, --dump-default-config); a value flag without its value is
+ * upstream's own error. The scan stops at the first positional or `--`,
+ * exactly where upstream stops parsing launcher flags — misreading this
+ * order would route a write-mode invocation through the lease-less branch.
+ */
+const VALUE_LAUNCHER_FLAGS = new Set(['--profile', '--patch'])
+
+function scanLauncherProfile(argv: readonly string[]): string | undefined {
+  let profile: string | undefined
+  let expectingProfileValue = false
+  let consumingValue = false
+  for (const token of argv) {
+    if (consumingValue) {
+      consumingValue = false
+      if (expectingProfileValue) profile = token
+      expectingProfileValue = false
+      continue
+    }
+    if (token === '--') break
+    if (VALUE_LAUNCHER_FLAGS.has(token)) {
+      consumingValue = true
+      expectingProfileValue = token === '--profile'
+      continue
+    }
+    if (token.startsWith('--profile=')) {
+      profile = token.slice('--profile='.length)
+      continue
+    }
+    if (token.startsWith('-')) continue
+    // First positional token starts the inner app arguments; launcher
+    // flags cannot appear after it (upstream parses them the same way).
+    break
+  }
+  // `--profile` with no value at all: never attribute a lease on a
+  // half-parsed invocation — upstream reports the error either way.
+  if (expectingProfileValue) profile = undefined
+  return profile
+}
+
 export function planCliInvocation(argv: readonly string[]): CliInvocationPlan {
   if (argv.length === 2 && argv[0] === 'doctor' && argv[1] === '--unlock') {
     return { kind: 'doctor-unlock' }
@@ -47,35 +90,9 @@ export function planCliInvocation(argv: readonly string[]): CliInvocationPlan {
   if (argv[0] === 'web') {
     profile = 'web'
   } else if (argv[0] === 'plugin') {
-    for (const token of argv) {
-      if (token === undefined) continue
-      if (token.startsWith('--profile=')) profile = token.slice('--profile='.length)
-    }
-    const index = argv.indexOf('--profile')
-    if (index >= 0 && argv[index + 1] !== undefined) profile = argv[index + 1]
+    profile = scanLauncherProfile(argv.slice(1))
   } else {
-    let expectingValue = false
-    for (const token of argv) {
-      if (expectingValue) {
-        profile = token
-        expectingValue = false
-        continue
-      }
-      if (token === '--') break
-      if (token === '--profile') {
-        expectingValue = true
-        continue
-      }
-      if (token.startsWith('--profile=')) {
-        profile = token.slice('--profile='.length)
-        continue
-      }
-      if (token.startsWith('-')) continue
-      // First positional token starts the inner app arguments; launcher
-      // flags cannot appear after it.
-      break
-    }
-    if (expectingValue) profile = undefined
+    profile = scanLauncherProfile(argv)
   }
   // An empty profile name is upstream's own error to report, not ours.
   if (profile === '') profile = undefined

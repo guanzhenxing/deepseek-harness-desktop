@@ -15,6 +15,21 @@ export const SAFE_BUNDLE_PREFIX = [
 ] as const
 
 /**
+ * The exact manifest this module writes — and the only manifest an existing
+ * safe profile may carry. Generation and verification share it so no field
+ * can drift between them (a `patchReload: "live"` with the right bundles
+ * would otherwise ride through verification into the safe boot).
+ */
+export function safeProfileManifest() {
+  return {
+    name: 'dsh-profile-desktop-safe-mode',
+    private: true,
+    dependencies: {},
+    dsh: { profile: { bundles: [...SAFE_BUNDLE_PREFIX], patchReload: 'startup' } },
+  }
+}
+
+/**
  * Prepare (or verify) the Safe Mode profile: exactly the three first-party
  * bundles and nothing else. Any other entry in the profile directory — a
  * local `cordis.patch.yml`, `pnpm-workspace.yaml`, `node_modules`, or any
@@ -61,29 +76,23 @@ export async function prepareSafeProfile(
   const unexpected = entries.filter((entry) => entry !== 'package.json')
   if (unexpected.length > 0) return 'conflict'
   if (existing !== undefined) {
-    let bundles: unknown
+    let manifest: unknown
     try {
-      const manifest = JSON.parse(existing) as { dsh?: { profile?: { bundles?: unknown } } }
-      bundles = manifest.dsh?.profile?.bundles
+      manifest = JSON.parse(existing)
     } catch {
       // An unparsable manifest is unknown user content, not an empty profile.
       return 'conflict'
     }
-    if (JSON.stringify(bundles) !== JSON.stringify([...SAFE_BUNDLE_PREFIX])) {
+    // Verify the FULL controlled shape, not just the bundle list: a manifest
+    // with the same bundles but `patchReload: "live"` (or any other drift in
+    // the fields this module owns) must conflict — the safe boot's lifecycle
+    // depends on every controlled field, and only this module may write it.
+    if (JSON.stringify(manifest) !== JSON.stringify(safeProfileManifest())) {
       return 'conflict'
     }
     return 'prepared'
   }
-  const manifest = `${JSON.stringify(
-    {
-      name: 'dsh-profile-desktop-safe-mode',
-      private: true,
-      dependencies: {},
-      dsh: { profile: { bundles: [...SAFE_BUNDLE_PREFIX], patchReload: 'startup' } },
-    },
-    undefined,
-    2,
-  )}\n`
+  const manifest = `${JSON.stringify(safeProfileManifest(), undefined, 2)}\n`
   await writeAtomicDurable(manifestPath, new TextEncoder().encode(manifest))
   return 'prepared'
 }

@@ -94,6 +94,26 @@ describe('prepareSafeProfile', () => {
     await lease.release()
   })
 
+  it('refuses a manifest with the right bundles but a drifted controlled field', async () => {
+    // Regression: verification compared only dsh.profile.bundles, so a
+    // `patchReload: "live"` (or missing) manifest rode through into the safe
+    // boot, changing its startup-only lifecycle.
+    const { ref, lease } = await leasedHome()
+    await prepareSafeProfile(ref, lease)
+    const manifestPath = path.join(ref.dir, 'package.json')
+    const raw = JSON.parse(await readFile(manifestPath, 'utf8'))
+
+    raw.dsh.profile.patchReload = 'live'
+    await writeFile(manifestPath, `${JSON.stringify(raw, null, 2)}\n`)
+    await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
+
+    delete raw.dsh.profile.patchReload
+    await writeFile(manifestPath, `${JSON.stringify(raw, null, 2)}\n`)
+    await expect(prepareSafeProfile(ref, lease)).resolves.toBe('conflict')
+
+    await lease.release()
+  })
+
   it('treats an unparsable manifest as unknown user content, not an empty profile', async () => {
     const { ref, lease } = await leasedHome()
     await mkdir(ref.dir, { recursive: true, mode: 0o700 })

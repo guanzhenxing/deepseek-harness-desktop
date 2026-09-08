@@ -175,9 +175,10 @@ export async function withDesktop(home, userData, action, mode = 'shared-home') 
   const reports = []
   const nextReport = (predicate) => waitFor(() => reports.find(predicate), 90_000, 'desktop report')
   consumeLines(child.stdout, (line) => {
-    if (!line.includes('"surfaceUrl"')) process.stdout.write(`${line}\n`)
     if (line.startsWith('DSH_DESKTOP_SMOKE ')) {
       reports.push(JSON.parse(line.slice('DSH_DESKTOP_SMOKE '.length)))
+    } else {
+      process.stdout.write(`${line}\n`)
     }
   })
   consumeLines(child.stderr, (line) => process.stderr.write(`${line}\n`))
@@ -197,13 +198,15 @@ export async function withDesktop(home, userData, action, mode = 'shared-home') 
       90_000,
       'desktop ui-ready report',
     )
-    if (typeof ready.surfaceUrl !== 'string') {
-      throw new Error('desktop ui-ready report did not include the surface URL')
+    // The authenticated URL arrives through the userData file, never stdout.
+    if (ready.surfaceUrlFile !== 'surface-url') {
+      throw new Error('desktop ui-ready report did not point at the surface URL file')
     }
-    const client = await createWebApiClient(ready.surfaceUrl)
+    const surfaceUrl = (await readFile(path.join(userData, 'surface-url'), 'utf8')).trim()
+    const client = await createWebApiClient(surfaceUrl)
     await action({
       client,
-      surfaceUrl: ready.surfaceUrl,
+      surfaceUrl,
       report: ready,
       reports,
       waitForReport: (predicate) => nextReport(predicate),

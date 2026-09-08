@@ -242,6 +242,10 @@ export async function applyProfileTransaction(
   }
   const home = plan.ref.home
   const id = randomUUID()
+  // The lease must be proven live BEFORE any transaction state lands on
+  // disk: a stale lease would otherwise leave a half-born transaction for
+  // the recovery scan to trip over before the failure surfaces here.
+  await lease.assertHeld()
   // The transaction tree must sit inside the real home layout: a symlinked
   // run/ or profile-transactions/ root would move journals (and before
   // snapshots) outside the home.
@@ -275,7 +279,6 @@ export async function applyProfileTransaction(
 
   record = { ...record, state: 'applying' }
   await writeJournalDurable(home, record)
-  await lease.assertHeld()
 
   await ensureRealProfileDirectory(plan.ref)
   for (const write of plan.writes) {
