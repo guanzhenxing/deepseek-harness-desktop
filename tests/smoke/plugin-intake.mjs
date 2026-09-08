@@ -4,6 +4,7 @@
 // candidate's own plugin flow, prove the bundle loads on the real Host graph,
 // and prove the user's default desktop profile is untouched. Intake never
 // installs or enables anything for a user; a real home is never read.
+import { createHash } from 'node:crypto'
 import { readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,7 +19,8 @@ installTerminationHandlers()
 
 const { validatePluginIntake } = await import('../../scripts/plugin-intake.mjs')
 const { treeDigests } = await import('../helpers/upgrade-fixture.mjs')
-const { createSharedHomeFixture } = await import('../helpers/shared-home-driver.mjs')
+const { createSharedHomeFixture, createWebApiClient, driveOneTurn } =
+  await import('../helpers/shared-home-driver.mjs')
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const INTAKE_PROFILE = 'plugin-intake-rehearsal'
@@ -39,10 +41,19 @@ async function main() {
   if (record === undefined) {
     fail('candidate', `release/candidate/artifacts.json has no ${process.arch} record`)
   }
-  const install = await installFromDmg(
-    path.resolve(path.join(repositoryRoot, 'release', 'candidate'), record.file),
-    'DeepSeek Harness',
-  )
+  const dmgPath = path.resolve(path.join(repositoryRoot, 'release', 'candidate'), record.file)
+  // Bind the rehearsal to the archived BYTES, not just the index label: a
+  // stale index must not exercise a different same-named candidate.
+  const dmgDigest = createHash('sha256')
+    .update(await readFile(dmgPath))
+    .digest('hex')
+  if (dmgDigest !== record.sha256) {
+    fail(
+      'candidate',
+      `archived DMG digest ${dmgDigest.slice(0, 12)} != recorded ${record.sha256.slice(0, 12)}`,
+    )
+  }
+  const install = await installFromDmg(dmgPath, 'DeepSeek Harness')
 
   const embeddedManifest = await readJson(
     path.join(install.appPath, 'Contents', 'Resources', 'compatibility.json'),
@@ -117,14 +128,16 @@ async function main() {
     await validatePluginIntake(intakeRecord, stagedBundle, embeddedManifest)
 
     // 5. The intake profile itself boots through the installed candidate and
-    //    completes a real turn against the fixture's mock LLM: "the bundle's
-    //    profile can start" is proven on the exact profile the bundle was
-    //    staged into, not inferred from loader inputs. The gate FAILS CLOSED.
-    //    Known upstream defect on the rc.1 baseline (reproduced on candidate
-    //    29cee57, see ADR-0010): freshly created NON-TEMPLATE profiles crash
-    //    profile boot plugin-less (exit 1 in composeProfile) and hang with
-    //    the bundle staged — until an upstream fix ships, this command stays
-    //    red instead of reporting a skipped pass.
+    //    completes a real turn against the fixture's mock LLM through the
+    //    official surface. The round is attributable: the launcher's ui-ready
+    //    report must name the intake profile (a launcher regression that
+    //    silently boots the default profile fails loudly here), and the turn
+    //    proves the profile actually serves, not just that a window opened.
+    //    The gate FAILS CLOSED. Known upstream defect on the rc.1 baseline
+    //    (reproduced on candidate 29cee57, see ADR-0010): freshly created
+    //    NON-TEMPLATE profiles crash profile boot plugin-less — until an
+    //    upstream fix ships, this command stays red instead of reporting a
+    //    skipped pass.
     await runInstalledApp({
       executable: install.executable,
       mode: 'conversation',
@@ -134,10 +147,15 @@ async function main() {
       cwd: userData,
       timeoutMs: 180_000,
       async action({ waitFor }) {
-        await waitFor(
-          (report) => report.kind === 'ui-ready',
-          `ui-ready for intake profile ${INTAKE_PROFILE}`,
+        const ready = await waitFor(
+          (report) => report.kind === 'ui-ready' && report.profile === INTAKE_PROFILE,
+          `ui-ready naming the intake profile ${INTAKE_PROFILE}`,
         )
+        if (ready.surfaceUrl === undefined) {
+          fail('launch round', 'ui-ready carried no surface URL for the driver-owned mode')
+        }
+        const client = await createWebApiClient(ready.surfaceUrl)
+        await driveOneTurn(client, { cwd: userData, text: 'plugin intake rehearsal turn' })
       },
     })
 
@@ -169,7 +187,7 @@ async function main() {
   }
 
   console.log(
-    `PLUGIN-INTAKE passed — record validated, staged through the candidate's own plugin flow, staged bytes and loader inputs verified, intake profile booted through the candidate to a completed turn, desktop profile untouched (${record.releaseId})`,
+    `PLUGIN-INTAKE passed — record validated, staged through the candidate's own plugin flow, staged bytes and loader inputs verified, intake profile booted to ui-ready and completed a real turn through the official surface, desktop profile untouched (${record.releaseId})`,
   )
 }
 

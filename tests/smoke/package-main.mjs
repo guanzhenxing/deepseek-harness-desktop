@@ -6,10 +6,11 @@
 // neutral cwd); profile-recovery/safe-mode/admission run through the
 // installed runtime closure via the controller driver.
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { setTimeout as sleepTimer } from 'node:timers'
+import { clearTimeout as clearSleepTimer, setTimeout as sleepTimer } from 'node:timers'
 import { fileURLToPath } from 'node:url'
 
 import {
@@ -125,6 +126,14 @@ async function runControllerScenario(install, scenario) {
     const exit = await new Promise((resolve, reject) => {
       child.once('error', reject)
       child.once('exit', (code, signal) => resolve({ code, signal }))
+      // A deadlocked installed closure (exactly what this scenario exists to
+      // catch) must FAIL the run, not hang the whole package smoke.
+      const killTimer = sleepTimer(() => {
+        child.kill('SIGKILL')
+        reject(new Error(`controller driver ${scenario} timed out after 120s and was killed`))
+      }, 120_000)
+      killTimer.unref?.()
+      child.once('exit', () => clearSleepTimer(killTimer))
     })
     if (exit.code !== 0) {
       throw new Error(`controller driver ${scenario} exited ${exit.code}: ${output.slice(-800)}`)
@@ -726,6 +735,16 @@ async function readArtifactRecord() {
     )
   }
   const file = path.join(repositoryRoot, mine[0].file)
+  // The index must describe the BYTES on disk: after a rebuild without
+  // package:dmg the stale record would smoke the previous candidate green.
+  const bytes = await readFile(file)
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  if (digest !== mine[0].sha256) {
+    throw new Error(
+      `release/artifacts.json is stale: ${mine[0].file} hashes ${digest.slice(0, 12)} ` +
+        `but the record pins ${mine[0].sha256.slice(0, 12)}; re-run package:dmg`,
+    )
+  }
   return { record: mine[0], file }
 }
 
