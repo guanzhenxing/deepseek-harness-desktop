@@ -14,13 +14,13 @@
 | `<m0Home>`      | `<userData>/m0-dsh-home`；M0 launcher 单实例私有，不是共享 `<home>`                                                                                                                                                            |
 | `<profile>`     | v1 为 `<home>/profiles/desktop`                                                                                                                                                                                                |
 | `<safeProfile>` | M2 已交付的 Safe Mode 使用 `<home>/profiles/desktop-safe-mode`（精确三 bundle），同时作为 E3 前置                                                                                                                              |
-| `<userData>`    | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下的 DeepSeek Harness 专属目录                                                                                                     |
+| `<userData>`    | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下冻结的 `DeepSeek Harness Desktop` 目录（`dataDirectoryName`，不随产品展示名改名迁移）                                            |
 | `<launchRoot>`  | M0 为 `<m0Home>/profiles/.dsh-desktop-run-*` 临时目录；M1 起可迁移到 `<userData>/runtime/launch-root`                                                                                                                          |
 | `<testHome>`    | 测试通过系统临时目录 API 单独创建的 DSH home，绝不能指向真实 `<home>`                                                                                                                                                          |
 
 所有可写路径先解析为绝对路径并验证预期父目录。写入逻辑不得跟随用户可植入的目标 symlink 覆盖其他位置。
 
-产品身份（产品名 `DeepSeek Harness Desktop`、CLI 名 `dsh-native`、设置 namespace `dsh-native-shell`、renderer partition、默认 profile 名）集中维护在 `packages/product-config`，该包不允许依赖 Electron 或任何 `@deepseek-ai/*` 包。
+产品身份（产品名 `DeepSeek Harness`、冻结的 Electron userData 数据目录名 `DeepSeek Harness Desktop`、CLI 名 `dsh-native`、设置 namespace `dsh-native-shell`、renderer partition、默认 profile 名）集中维护在 `packages/product-config`，该包不允许依赖 Electron 或任何 `@deepseek-ai/*` 包。
 
 ## 2. DSH home
 

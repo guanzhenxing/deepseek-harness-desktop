@@ -1,15 +1,15 @@
 # 开发指南
 
-- 状态：M3 已完成制品级验收（打包候选 DMG + 安装级冒烟；M1/M2 已合并）
-- 日期：2026-09-02
+- 状态：M1–M6 均已验收合并（最新：M6 启动性能，基线 DSH 0.1.2-rc.1）
+- 日期：2026-09-08
 
 ## 1. 当前阶段
 
-仓库已完成 M0、M1（共享 home + lease + dsh-native）、M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）与 M3（托盘/菜单/窗口生命周期、外链策略、home 兼容性准入门、打包候选 DMG 与安装级冒烟）验收。版本闭包与升级演练属于 M4。
+仓库已完成 M0、M1（共享 home + lease + dsh-native）、M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）、M3（托盘/菜单/窗口生命周期、外链策略、home 兼容性准入门、打包候选 DMG 与安装级冒烟）、M4（版本闭包与升级演练）、M5（确定性 SBOM、许可证清单、统一发行证据 `verify:release-evidence`、合成插件引入 `verify:plugin-intake`）与 M6（安装制品启动性能测量与优化）验收。当前 DSH 基线为 0.1.2-rc.1；验收记录见 [validation](validation/)。
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 
-M1–M4 的逐任务执行文档与 zcode 首轮交接指令见[执行路线](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)。计划中的新增脚本须在对应任务实施后才能使用，不属于当前已交付命令。
+M1–M4 的逐任务执行文档与 zcode 首轮交接指令见[执行路线](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)；Post-M4 交付列车（rc.1 升级资格 → M5 → M6）的计划文档见 [superpowers/plans](superpowers/plans/)。`verify:release`、`verify:release-evidence`、`verify:plugin-intake`、`rehearse:upgrade` 等命令均已交付并在制品级验证。
 
 ## 2. 开发环境
 
@@ -50,7 +50,7 @@ corepack pnpm@11.7.0 check
 | `pnpm check:docs`          | 检查必需文档、兼容性事实、本地链接与文本格式            |
 | `pnpm check`               | 合并当前阶段要求的全部快速阻塞门禁                      |
 
-`pnpm smoke:package` 在 M3 Task 5 建立；在此之前不能把源码 smoke 描述成安装包验收。打包固定
+`pnpm smoke:package` 及后续交付的 `verify:release` / `verify:release-evidence` / `verify:plugin-intake` / `rehearse:upgrade` 都在安装制品（`.app`/DMG 副本）上执行，源码 smoke 不构成安装包验收。打包固定
 electron-builder 26.15.3（配置 schema 以安装包内的 app-builder-lib 为准）；Host/CLI 运行时全部来自
 `release/staging`（pnpm `--prod` deploy + 官方 Node/pnpm 制品校验），`.app` 内不依赖仓库
 node_modules、pnpm store、系统 Node/pnpm 或 ASAR 虚拟路径。

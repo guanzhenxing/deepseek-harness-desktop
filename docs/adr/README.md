@@ -15,6 +15,7 @@ ADR 记录本项目难以无成本撤销、会约束后续实现的架构决策�
 | [ADR-0007：launcher 恢复窗口与窄 IPC](0007-launcher-recovery-ipc.md)                                     | 已接受 | 恢复窗口隔离、sender 校验与有界重试                         |
 | [ADR-0008：持 lease 隔离超大 projection cache](0008-projection-cache-quarantine.md)                      | 已接受 | 可重建缓存的固定布局、隔离 rename 与意图 journal            |
 | [ADR-0009：以只读 home compatibility marker 实现最小准入](0009-home-compatibility-admission.md)          | 已接受 | 跨版本 home 数据的 fail-closed 准入与 M4 升级前置           |
+| [ADR-0010：插件引入（Plugin Intake）信任边界与持久记录 schema](0010-plugin-intake-trust-boundary.md)     | 已接受 | 第三方 bundle 的审查式引入、硬性拒绝项与封闭 schema 1       |
 
 ## 状态
 

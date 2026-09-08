@@ -1,6 +1,6 @@
-# DeepSeek Harness Desktop
+# DeepSeek Harness
 
-DeepSeek Harness Desktop 是面向 macOS 个人本机使用的原生 DSH 桌面壳。它使用独立 DSH bundle 插件承载 Desktop 集成，并由薄 Electron launcher 负责启动、Host 监督、窗口以及 Host 无法启动时仍可用的最低恢复控制面。
+DeepSeek Harness 是面向 macOS 个人本机使用的原生 DSH 桌面壳。它使用独立 DSH bundle 插件承载 Desktop 集成，并由薄 Electron launcher 负责启动、Host 监督、窗口以及 Host 无法启动时仍可用的最低恢复控制面。（历史产品名 `DeepSeek Harness Desktop` 仍冻结为 Electron userData 数据目录名，不随展示名改名迁移。）
 
 ## 当前状态
 

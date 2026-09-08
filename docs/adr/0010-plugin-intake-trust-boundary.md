@@ -12,7 +12,7 @@ M5 引入了第三方 bundle 进入产品信任边界的正式流程：声明式
 1. **引入是审查，不是安装**。intake 记录描述一个 bundle 的身份（npm 名/版本）、出处（repository + 40-hex commit）、逐字节摘要（`sha256-<base64url>` 目录摘要算法：排序相对路径 + NUL + 文件 SHA-256 hex + LF，排除顶层 `*.intake.json`）、SPDX 声明、能力清单与已验证平台。记录通过校验不改变任何用户 profile。
 2. **硬性拒绝项**：出处非 repository；身份/版本漂移；摘要漂移；bundle 自带 singleton 依赖（react/cordis/dsh）；安装期生命周期脚本；无当前平台打包证据；bundle 内 symlink/特殊文件。全部 fail-closed。
 3. **持久 schema**：`schemaVersion: 1`，封闭字段集；演进只做 additive，`schemaVersion` 2+ 的记录被现版本拒绝（与 home marker 同一纪律）。
-4. **打包级演练验证 staged 字节与加载器输入**：经候选制品自己的 `plugin add` 流程装入全新临时 profile 后，对 staged 目录复验摘要，并断言加载器将导入的 bundle 模块（`main: index.js` + 惰性 `apply()`，无副作用以保摘要确定）与 profile 补丁层存在且引用该 bundle。**在 intake profile 上直接跑启动轮**是设计目标，当前受上游阻断（全新非模板 profile 无插件也不能完成 CLI 回合，已复现记录）；上游修复后此步必须加回——那是"插件可启动"的最终证明。Host 图上的加载行为在修复前由 host-runner 集成测试承担。
+4. **打包级演练验证 staged 字节、加载器输入与 profile 可启动性**：经候选制品自己的 `plugin add` 流程装入全新临时 profile 后，对 staged 目录复验摘要，断言加载器将导入的 bundle 模块（`main: index.js` + 惰性 `apply()`，无副作用以保摘要确定）与 profile 补丁层存在且引用该 bundle，并**在该 intake profile 上经候选 CLI 完成一个真实回合**——这是 fail-closed 必经门：回合失败（含超时）即整条命令失败。rc.1 基线上游缺陷（全新非模板 profile 无插件也崩溃 exit 1；装入 bundle 后挂起）使该门当前保持失败（已在候选 `29cee57` 复现）；上游修复后该门自动生效为"插件可启动"的最终证明。Host 图上的加载行为由 host-runner 集成测试独立覆盖。
 5. **信任来源**是记录中的出处 commit 与逐字节摘要 + 人工审查；本产品不引入远程注册表、市场或签名链（v1 范围外）。
 
 ## 后果

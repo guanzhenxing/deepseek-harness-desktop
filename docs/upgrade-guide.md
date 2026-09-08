@@ -1,7 +1,7 @@
 # 升级与回退指南
 
 - 状态：M4 交付（本地自用构建；v1 无自动更新器）
-- 适用对象：DeepSeek Harness Desktop 的手动升级、回退与升级演练
+- 适用对象：DeepSeek Harness 的手动升级、回退与升级演练
 - 相关文档：[upstream-baseline](upstream-baseline.md)、[home-compatibility 协议](protocols/home-compatibility.md)、[主方案 §7.5](native-dsh-desktop-plan.md)
 
 ## 1. 手动升级流程
