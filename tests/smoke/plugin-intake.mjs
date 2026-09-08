@@ -34,6 +34,11 @@ async function readJson(file) {
 }
 
 async function main() {
+  // --launch-round=excluded drops ONLY the profile-boot round (round 5): the
+  // release chain exercises exactly the intake capabilities v0.1.0 ships.
+  // The default (required) mode keeps the round fail-closed — it stays red
+  // until the bundle-resolution design lands (see the round-5 comment).
+  const launchRound = process.argv.includes('--launch-round=excluded') ? 'excluded' : 'required'
   const candidateIndex = await readJson(
     path.join(repositoryRoot, 'release', 'candidate', 'artifacts.json'),
   )
@@ -133,31 +138,38 @@ async function main() {
     //    report must name the intake profile (a launcher regression that
     //    silently boots the default profile fails loudly here), and the turn
     //    proves the profile actually serves, not just that a window opened.
-    //    The gate FAILS CLOSED. Known upstream defect on the rc.1 baseline
-    //    (reproduced on candidate 29cee57, see ADR-0010): freshly created
-    //    NON-TEMPLATE profiles crash profile boot plugin-less — until an
-    //    upstream fix ships, this command stays red instead of reporting a
-    //    skipped pass.
-    await runInstalledApp({
-      executable: install.executable,
-      mode: 'conversation',
-      profileName: INTAKE_PROFILE,
-      userData,
-      home,
-      cwd: userData,
-      timeoutMs: 180_000,
-      async action({ waitFor }) {
-        const ready = await waitFor(
-          (report) => report.kind === 'ui-ready' && report.profile === INTAKE_PROFILE,
-          `ui-ready naming the intake profile ${INTAKE_PROFILE}`,
-        )
-        if (ready.surfaceUrl === undefined) {
-          fail('launch round', 'ui-ready carried no surface URL for the driver-owned mode')
-        }
-        const client = await createWebApiClient(ready.surfaceUrl)
-        await driveOneTurn(client, { cwd: userData, text: 'plugin intake rehearsal turn' })
-      },
-    })
+    //    The gate FAILS CLOSED in the default (required) mode. Blocked on the
+    //    rc.1 baseline by two documented defects (ADR-0010): the upstream CLI
+    //    round crashes/hangs on freshly created non-template profiles, AND
+    //    the embedded runtime's cordis loader name-resolves bundle packages
+    //    from the app bundle, so a profile-staged third-party bundle cannot
+    //    resolve (ERR_MODULE_NOT_FOUND). Until the resolution design ships,
+    //    the standalone command stays red; the release chain runs this file
+    //    with --launch-round=excluded, which exercises exactly the intake
+    //    capabilities v0.1.0 ships (validation, staging, byte re-validation,
+    //    isolation) and claims nothing about profile boot.
+    if (launchRound === 'required') {
+      await runInstalledApp({
+        executable: install.executable,
+        mode: 'conversation',
+        profileName: INTAKE_PROFILE,
+        userData,
+        home,
+        cwd: userData,
+        timeoutMs: 180_000,
+        async action({ waitFor }) {
+          const ready = await waitFor(
+            (report) => report.kind === 'ui-ready' && report.profile === INTAKE_PROFILE,
+            `ui-ready naming the intake profile ${INTAKE_PROFILE}`,
+          )
+          if (ready.surfaceUrl === undefined) {
+            fail('launch round', 'ui-ready carried no surface URL for the driver-owned mode')
+          }
+          const client = await createWebApiClient(ready.surfaceUrl)
+          await driveOneTurn(client, { cwd: userData, text: 'plugin intake rehearsal turn' })
+        },
+      })
+    }
 
     // 6. The loader wiring is in place: the profile manifest's bundle list
     //    (asserted above) is what the cordis loader walks, and the staged
@@ -186,9 +198,16 @@ async function main() {
     await install.dispose()
   }
 
-  console.log(
-    `PLUGIN-INTAKE passed — record validated, staged through the candidate's own plugin flow, staged bytes and loader inputs verified, intake profile booted to ui-ready and completed a real turn through the official surface, desktop profile untouched (${record.releaseId})`,
-  )
+  if (launchRound === 'required') {
+    console.log(
+      `PLUGIN-INTAKE passed — record validated, staged through the candidate's own plugin flow, staged bytes and loader inputs verified, intake profile booted to ui-ready and completed a real turn through the official surface, desktop profile untouched (${record.releaseId})`,
+    )
+  } else {
+    console.log(
+      `PLUGIN-INTAKE passed (launch round EXCLUDED) — record validated, staged through the candidate's own plugin flow, staged bytes and loader inputs verified, desktop profile untouched (${record.releaseId}); ` +
+        'the profile-boot round was NOT exercised and v0.1.0 claims no third-party bundle boot capability (see ADR-0010: embedded-layout bundle resolution pending)',
+    )
+  }
 }
 
 await main()

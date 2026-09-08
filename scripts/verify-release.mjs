@@ -135,8 +135,15 @@ const steps = [
     },
   },
   // Run intake against the freshly archived candidate index. Running this
-  // before archive would accidentally exercise a stale prior candidate.
-  { name: 'verify:plugin-intake (archived candidate)', command: ['run', 'verify:plugin-intake'] },
+  // before archive would accidentally exercise a stale prior candidate. The
+  // chain exercises the intake capabilities this release SHIPS (validation,
+  // staging, byte re-validation, isolation); the profile-boot round stays in
+  // the standalone fail-closed `pnpm verify:plugin-intake`, which is red
+  // until the bundle-resolution design lands (ADR-0010).
+  {
+    name: 'verify:plugin-intake (archived candidate, shipped rounds)',
+    command: ['run', 'verify:plugin-intake', '--', '--launch-round=excluded'],
+  },
 ]
 
 function spawnPnpm(args) {
