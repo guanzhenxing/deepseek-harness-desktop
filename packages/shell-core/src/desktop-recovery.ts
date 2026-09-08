@@ -126,6 +126,14 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
           )
         }
         adopted = applied[0]!.id
+        if (profileName !== 'desktop') {
+          // Only the desktop profile has an app-owned plan to re-verify the
+          // adopted candidate against; a non-desktop boot profile cannot
+          // prove the journal still matches its desired shape — fail closed.
+          return needsReviewBlock(
+            'a previous startup left this non-desktop profile mid-transaction; the profile was left untouched — inspect run/profile-transactions in the DSH home (the journal records the divergence)',
+          )
+        }
         // The desired profile must still equal the adopted candidate: a
         // change would stack a second open journal. Detect it at PLAN time,
         // before any file is touched.
@@ -136,22 +144,28 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
           )
         }
       }
-      let result: Awaited<ReturnType<typeof reconcileDesktopProfile>>
-      try {
-        result = await reconcileDesktopProfile(normalRef, lease)
-      } catch (error) {
-        const phase = error instanceof ProfileReconcileError ? error.phase : 'apply'
-        throw new StartupFailureError(
-          toStartupFailure({
-            stage: phase === 'plan' ? 'resolve-profile' : 'reconcile-profile',
-            code: phase === 'plan' ? 'PROFILE_INVALID' : 'RECONCILE_FAILED',
-            summary: error instanceof Error ? error.message : String(error),
-            retryable: false,
-            home,
-          }),
-        )
+      let result: Awaited<ReturnType<typeof reconcileDesktopProfile>> | undefined
+      if (profileName === 'desktop') {
+        try {
+          result = await reconcileDesktopProfile(normalRef, lease)
+        } catch (error) {
+          const phase = error instanceof ProfileReconcileError ? error.phase : 'apply'
+          throw new StartupFailureError(
+            toStartupFailure({
+              stage: phase === 'plan' ? 'resolve-profile' : 'reconcile-profile',
+              code: phase === 'plan' ? 'PROFILE_INVALID' : 'RECONCILE_FAILED',
+              summary: error instanceof Error ? error.message : String(error),
+              retryable: false,
+              home,
+            }),
+          )
+        }
       }
-      if (adopted !== undefined && result.transactionId !== undefined) {
+      // A non-desktop boot profile (packaged smoke rounds) is owned by its
+      // creator — e.g. the CLI's plugin flow staged it. The app recovers its
+      // interrupted transactions and quarantines the shared cache, but never
+      // reconciles it against the desktop template.
+      if (result !== undefined && adopted !== undefined && result.transactionId !== undefined) {
         // Lost a race with an edit between the plan check and the apply:
         // restore the fresh transaction's files, then block for review.
         await rollbackProfileTransaction(result.transactionId, lease).catch(() => undefined)
@@ -159,10 +173,10 @@ export function createDesktopProfileRecovery(options: DesktopRecoveryOptions): P
           'the desired profile changed since an interrupted startup left one mid-transaction; the profile was left untouched — inspect run/profile-transactions in the DSH home (the journal records the divergence)',
         )
       }
-      const transactionId = result.transactionId ?? adopted
+      const transactionId = result?.transactionId ?? adopted
       const ready: ProfilePrepareResult = {
         kind: 'ready',
-        changed: result.changed || adopted !== undefined,
+        changed: (result?.changed ?? false) || adopted !== undefined,
         ...(transactionId === undefined ? {} : { transactionId }),
       }
       return ready
