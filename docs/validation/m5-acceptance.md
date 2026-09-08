@@ -1,6 +1,6 @@
 # M5 验收记录：发行证据与插件引入
 
-- **状态：已验收——SBOM、许可证清单、统一发行证据与合成插件引入均在本轮新候选上通过安装制品级验证**
+- **状态：已验收——SBOM、许可证清单、统一发行证据与合成插件引入全部交付并在安装制品级验证；运行时行为零改动（M5 面内）**。第三轮收口（8dec724）对本记录的回溯改写已在 §9 作废并如实重述
 - 日期：2026-09-08（通宵自主执行）
 - 基线：rc.1 资格验证 GO 后的 `main` @ `260bf9e`
 - 分支：`feat/m5-release-evidence`（提交 `00ed80c` → `2e32ff0`）
@@ -24,12 +24,12 @@
 
 ## 3. 门禁结果（最终轮，HEAD `2e32ff0`）
 
-| 命令                        | 结果                                                                |
-| --------------------------- | ------------------------------------------------------------------- |
-| `pnpm check`                | 全绿（单测 402、含 release-evidence 11 + plugin-intake 8、文档 45） |
-| `pnpm verify:release`       | **16/16 步**，退出码 0                                              |
-| `pnpm verify:plugin-intake` | 制品级演练通过（当前候选归档后执行，见 §8）                         |
-| `git diff --check`          | 通过                                                                |
+| 命令                        | 结果                                                                       |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `pnpm check`                | 全绿（单测 402、含 release-evidence 11 + plugin-intake 8、文档 45）        |
+| `pnpm verify:release`       | **15/15 步**（含新证据门两步），退出码 0（最终轮 HEAD `2e32ff0` 的链形状） |
+| `pnpm verify:plugin-intake` | 制品级演练通过（见 §4.4；后续轮次的修正见 §7–§9）                          |
+| `git diff --check`          | 通过                                                                       |
 
 制品级冒烟 16/16；跨版本演练 18/18（previous=M4 `caa5c51` 冻结件，不变）；SBOM 重复生成字节相同；全新 staging 重建后 SBOM 仍字节相同。
 
@@ -39,7 +39,7 @@
 2. **SBOM** `release/evidence/sbom.cdx.json`：510 组件（501 注册表 + 9 工作区），SHA `c157b5ef24c7b433a5d5f7bc9de222d7d96a6790569b4f1e370bd80fce1c1956`。
 3. **许可证清单** `release/evidence/licenses.json`：501 声明 / 9 `NOASSERTION`（9 个 `@dsh-desktop/*` 工作区包未声明 SPDX），SHA `6d646d1f…`。
 4. **统一报告** `release/evidence/release-evidence.json`（SHA `541cb404…`）+ 冒烟报告 `release/package-smoke.json`（SHA `94d88fae…`，16 场景全过）；`verify:release-evidence` 在链内确认全部身份绑定同一候选。
-5. **插件引入**：记录校验、候选自身 `plugin add`、staged 字节复验与 intake profile `ui-ready`/真实回合均通过；默认 desktop profile 逐字节不变。
+5. **插件引入**：`@fixture/m5-example-bundle` 记录校验 → 经候选自身 `plugin --profile plugin-intake-rehearsal add` 装入全新临时 profile → staged 字节复验 → 候选启动 ui-ready → 默认 desktop profile 逐字节不变。
 
 ## 5. 状态与边界（如实）
 
