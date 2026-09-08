@@ -133,6 +133,13 @@ describe('parseReleaseManifest', () => {
     descending.supportedDataEpochs = [1, 0]
     descending.dataEpoch = 1
     expect(() => parseReleaseManifest(descending)).toThrow(/ascending/)
+
+    // dataEpoch must be the NEWEST supported epoch: a higher trailing entry
+    // would admit that epoch's homes and silently downgrade-stamp the marker.
+    const ceiling = validManifestInput()
+    ceiling.supportedDataEpochs = [1, 2]
+    ceiling.dataEpoch = 1
+    expect(() => parseReleaseManifest(ceiling)).toThrow(/newest/)
   })
 
   it('rejects non-object and array inputs', () => {

@@ -262,11 +262,6 @@ async function safeLstat(file: string) {
   })
 }
 
-async function regularFile(file: string): Promise<boolean> {
-  const identity = await safeLstat(file)
-  return identity !== undefined && identity.isFile()
-}
-
 /** `.credentials.yaml`: upstream defines `version: 1` + a refs map; the
  * pre-release flat layout is a foreign shape, not this baseline's format. */
 async function credentialsFormatId(file: string, budget: InspectionBudget): Promise<SlotResult> {
@@ -381,13 +376,18 @@ async function readBoundedText(
 async function settingsFormatId(home: string): Promise<SlotResult> {
   const yaml = path.join(home, 'settings.yaml')
   const json = path.join(home, 'settings.json')
-  if (await regularFile(yaml)) return { state: 'known', formatId: SETTINGS_FORMAT_ID }
-  if (await regularFile(json)) return { state: 'known', formatId: SETTINGS_FORMAT_ID }
+  let known = false
   for (const file of [yaml, json]) {
     const identity = await safeLstat(file)
-    if (identity !== undefined) return { state: 'unknown', relative: path.basename(file) }
+    if (identity === undefined) continue
+    // BOTH candidates are classified: a symlink, FIFO, or directory planted
+    // at the sibling the provider did not pick must still surface as an
+    // unknown path instead of riding through admission behind the other
+    // file's clean shape.
+    if (!identity.isFile()) return { state: 'unknown', relative: path.basename(file) }
+    known = true
   }
-  return { state: 'absent' }
+  return known ? { state: 'known', formatId: SETTINGS_FORMAT_ID } : { state: 'absent' }
 }
 
 /**
@@ -768,6 +768,12 @@ async function storagesFormatId(
       continue
     }
     if (identity.isFile()) {
+      // A quarantine backup is always a renamed directory; anything FILE-
+      // shaped carrying its name is foreign.
+      if (entry.startsWith('session_projcache.quarantine-')) {
+        flagUnknown(budget, unknown, path.relative(home, target))
+        continue
+      }
       const unit = await readUnitHeader(target, budget)
       if (unit === undefined) {
         flagUnknown(budget, unknown, path.relative(home, target))
@@ -778,6 +784,13 @@ async function storagesFormatId(
       }
       continue
     }
+    // A quarantine backup (`session_projcache.quarantine-<uuid>`, written by
+    // this product's prepare step — see shell-core projection-cache.ts) is
+    // the live cache layout renamed aside, not a foreign domain. It is
+    // audited with exactly the projection-cache rules (anchor-less, v4/v5
+    // stamps only); a symlink or a foreign-stamped record inside it still
+    // flags unknown. It never contributes to the live slot's identity.
+    const quarantineBackup = entry.startsWith('session_projcache.quarantine-')
     // Per-record units take their identity from the directory name; the
     // version stamp lives in global.json when the domain has a global slot,
     // otherwise in the record documents themselves. The interior walk runs
@@ -800,7 +813,7 @@ async function storagesFormatId(
           if (entry === 'session_projcache') projcacheFromDirectory = stamp
         }
       }
-    } else if (entry === 'session_projcache') {
+    } else if (entry === 'session_projcache' || quarantineBackup) {
       // The projection-cache domain is anchor-less: rc.1's domain spec
       // declares no global slot, so its readable stamps (v4/v5) come from
       // this release's policy — never from the records self-certifying — and
@@ -813,10 +826,10 @@ async function storagesFormatId(
       // fails closed.
       flagUnknown(budget, unknown, path.relative(home, target))
     }
-    const audit =
-      entry === 'session_projcache'
-        ? await auditUnitInterior(target, home, unitVersion, unknown, budget, new Set([4, 5]))
-        : await auditUnitInterior(target, home, unitVersion, unknown, budget)
+    const projcacheRules = entry === 'session_projcache' || quarantineBackup
+    const audit = projcacheRules
+      ? await auditUnitInterior(target, home, unitVersion, unknown, budget, new Set([4, 5]))
+      : await auditUnitInterior(target, home, unitVersion, unknown, budget)
     if (entry === 'session_projcache') {
       projcacheInteriorFlagged = audit.flagged
       if (audit.maxStamp !== undefined) {

@@ -205,6 +205,14 @@ function parseSupportedDataEpochs(value: unknown, dataEpoch: number): readonly n
       `supportedDataEpochs must contain the release dataEpoch ${dataEpoch}`,
     )
   }
+  // The release's own epoch is the NEWEST it can understand: a manifest
+  // listing a higher epoch than dataEpoch would admit that epoch's homes and
+  // then stamp the marker back down to dataEpoch — a silent downgrade write.
+  if (epochs[epochs.length - 1] !== dataEpoch) {
+    throw new ManifestSchemaError(
+      `dataEpoch ${dataEpoch} must be the newest supportedDataEpoch (newest is ${epochs[epochs.length - 1]})`,
+    )
+  }
   return epochs
 }
 

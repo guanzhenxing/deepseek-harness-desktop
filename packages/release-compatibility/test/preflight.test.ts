@@ -504,6 +504,54 @@ describe('inspectHomeFormats', () => {
     }
   })
 
+  it('admits a home carrying its own quarantine backup of the projection cache', async () => {
+    const home = await tempHome()
+    try {
+      const domain = path.join(home, 'storages', 'session_projcache', 'sessions')
+      await mkdir(domain, { recursive: true })
+      await writeFile(path.join(domain, 'session-1.json'), '{"version":5,"record":{"watermark":9}}')
+      // prepare() renames the oversized cache aside and keeps it; admission
+      // on the NEXT session must not mistake our own backup for a foreign
+      // storages domain (the journal records only the latest backup, so the
+      // exemption cannot hang off it).
+      const backup = path.join(home, 'storages', 'session_projcache.quarantine-test-id', 'sessions')
+      await mkdir(backup, { recursive: true })
+      await writeFile(
+        path.join(backup, 'session-old.json'),
+        '{"version":4,"record":{"watermark":1}}',
+      )
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toEqual([])
+      expect(observed.formats.projcache).toBe('dsh-session-projcache-5')
+      expect(observed.formats.storages).toBe('dsh-storage-unit-0.1.2-rc.1')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('still refuses foreign content shaped like a quarantine backup', async () => {
+    const home = await tempHome()
+    try {
+      const backup = path.join(home, 'storages', 'session_projcache.quarantine-test-id', 'sessions')
+      await mkdir(backup, { recursive: true })
+      await writeFile(path.join(backup, 'session-future.json'), '{"version":6,"record":null}')
+      const observed = await inspectHomeFormats(home)
+      expect(observed.unknownPaths).toContain(
+        'storages/session_projcache.quarantine-test-id/sessions/session-future.json',
+      )
+
+      await rm(path.dirname(backup), { recursive: true, force: true })
+      await writeFile(
+        path.join(home, 'storages', 'session_projcache.quarantine-test-id'),
+        'file-shaped impostor',
+      )
+      const fileShaped = await inspectHomeFormats(home)
+      expect(fileShaped.unknownPaths).toContain('storages/session_projcache.quarantine-test-id')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('allows the rc1 release to read a home whose cache advanced to v5 under an M4 marker', () => {
     expect(
       preflightHome({
@@ -1149,6 +1197,19 @@ describe('inspectHomeFormats', () => {
       expect(observed.fresh).toBe(false)
       expect(observed.unknownPaths.length).toBeGreaterThan(0)
       expect(observed.formats.settings).toBeUndefined()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a foreign shape at the settings sibling the provider did not pick', async () => {
+    const home = await tempHome()
+    try {
+      await writeFile(path.join(home, 'settings.yaml'), 'llm-deepseek:\n  baseURL: https://x\n')
+      await symlink('/etc/passwd', path.join(home, 'settings.json'))
+      const observed = await inspectHomeFormats(home)
+      expect(observed.formats.settings).toBeUndefined()
+      expect(observed.unknownPaths).toContain('settings.json')
     } finally {
       await rm(home, { recursive: true, force: true })
     }
