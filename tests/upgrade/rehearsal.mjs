@@ -578,32 +578,41 @@ export async function runUpgradeRehearsal(input) {
         )
       }
       const sawV5 = stamps.includes(5)
-      if (sawV5) {
-        const downgradeRoot = await mkdtemp(path.join(tmpdir(), 'dsh-downgrade-'))
-        const downgradeHome = path.join(downgradeRoot, 'home')
-        await cp(candidateHome, downgradeHome, { recursive: true })
-        try {
-          const before = await dataDigests(downgradeHome)
-          const refused = await runInstalledCli(
-            previousInstall.cliEntry,
-            ['--profile', 'headless', 'must be refused'],
-            { home: downgradeHome, cwd: fixture.cwd },
-          )
-          if (refused.code !== 5) {
-            fail(
-              'm4 downgrade refusal',
-              `previous cli exit ${refused.code} on the rc1-written home: ${refused.output.slice(-300)}`,
-            )
-          }
-          await assertOnlyCoordinationChanged('m4 downgrade refusal', downgradeHome, before)
-        } finally {
-          await rm(downgradeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-        }
+      // The downgrade-refusal proof is a REQUIRED gate, not a best-effort
+      // note: an rc.1-baseline candidate that drove real rounds always leaves
+      // v5 records, so their absence means the gate cannot be exercised and
+      // the rehearsal must fail instead of reporting a skipped pass.
+      if (!sawV5) {
+        fail(
+          'm4 downgrade refusal',
+          `the candidate wrote no v5 projection record (stamps ${JSON.stringify(stamps)}) — the downgrade-refusal gate cannot be exercised`,
+        )
       }
+      const downgradeRoot = await mkdtemp(path.join(tmpdir(), 'dsh-downgrade-'))
+      const downgradeHome = path.join(downgradeRoot, 'home')
+      await cp(candidateHome, downgradeHome, { recursive: true })
+      try {
+        const before = await dataDigests(downgradeHome)
+        const refused = await runInstalledCli(
+          previousInstall.cliEntry,
+          ['--profile', 'headless', 'must be refused'],
+          { home: downgradeHome, cwd: fixture.cwd },
+        )
+        if (refused.code !== 5) {
+          fail(
+            'm4 downgrade refusal',
+            `previous cli exit ${refused.code} on the rc1-written home: ${refused.output.slice(-300)}`,
+          )
+        }
+        await assertOnlyCoordinationChanged('m4 downgrade refusal', downgradeHome, before)
+      } finally {
+        await rm(downgradeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      }
+      record('m4-downgrade-refusal', true, 'M4 refuses the rc1-written home without touching it')
       record(
         'upgraded-home-formats',
         true,
-        `epoch 1 kept; projcache stamps ${JSON.stringify([...new Set(stamps)].sort())}${sawV5 ? '; M4 refuses the rc1-written home untouched' : '; no v5 record written yet — M4 refusal not exercised'}`,
+        `epoch 1 kept; projcache stamps ${JSON.stringify([...new Set(stamps)].sort())}`,
       )
     }
 
