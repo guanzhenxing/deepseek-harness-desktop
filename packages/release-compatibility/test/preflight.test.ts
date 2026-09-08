@@ -287,6 +287,66 @@ describe('preflightHome', () => {
     ).toEqual({ kind: 'refuse', code: 'UNREADABLE_FORMAT' })
   })
 
+  it('refuses a marker slot the disk does not observe (markers cannot self-certify)', () => {
+    // A marker claiming a format slot the inspection cannot see — whether a
+    // foreign slot name or a recorded domain whose data is gone — is
+    // marker/disk disagreement and must refuse, not silently allow.
+    expect(
+      preflightHome({
+        release: BASELINE_MANIFEST,
+        marker: {
+          schemaVersion: 1,
+          dataEpoch: 1,
+          lastWriterReleaseId: 'future-release',
+          formats: { projcache: 'dsh-session-projcache-5' },
+        },
+        observed: {
+          fresh: false,
+          formats: { settings: 'dsh-settings-file-0.1.2-rc.1' },
+          unknownPaths: [],
+        },
+      }),
+    ).toEqual({ kind: 'refuse', code: 'UNKNOWN_FORMAT' })
+
+    expect(
+      preflightHome({
+        release: BASELINE_MANIFEST,
+        marker: {
+          schemaVersion: 1,
+          dataEpoch: 1,
+          lastWriterReleaseId: 'future-release',
+          formats: { 'evil-slot': 'dsh-evil-1' },
+        },
+        observed: { fresh: false, formats: {}, unknownPaths: [] },
+      }),
+    ).toEqual({ kind: 'refuse', code: 'UNKNOWN_FORMAT' })
+  })
+
+  it('allows disk slots the marker does not record yet (write-lag is normal)', () => {
+    // The marker is reserved BEFORE a session's writes, so a home can carry
+    // formats younger than its marker; the reservation refreshes on the next
+    // admission. Only the reverse direction (marker ⊋ disk) refuses.
+    expect(
+      preflightHome({
+        release: BASELINE_MANIFEST,
+        marker: {
+          schemaVersion: 1,
+          dataEpoch: 1,
+          lastWriterReleaseId: 'rc1-0.0.0-darwin-arm64-test000',
+          formats: {},
+        },
+        observed: {
+          fresh: false,
+          formats: {
+            sessions: 'dsh-session-jsonl-0',
+            projcache: 'dsh-session-projcache-5',
+          },
+          unknownPaths: [],
+        },
+      }),
+    ).toMatchObject({ kind: 'allow' })
+  })
+
   it('refuses an invalid marker as unknown format', () => {
     expect(
       preflightHome({

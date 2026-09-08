@@ -52,7 +52,14 @@ export function preflightHome(input: {
   if (marker !== null) {
     for (const [slot, markerFormat] of Object.entries(marker.formats)) {
       const observedFormat = observed.formats[slot]
-      if (observedFormat !== undefined && observedFormat !== markerFormat) {
+      if (observedFormat === undefined) {
+        // The marker claims a format slot the disk does not carry: the
+        // marker's vocabulary or the data beneath it changed under a writer
+        // this release never authorized (a hand-crafted or future marker can
+        // self-certify exactly this way). Marker/disk disagreement refuses.
+        return { kind: 'refuse', code: 'UNKNOWN_FORMAT' }
+      }
+      if (observedFormat !== markerFormat) {
         // Unequal marker/observed IDs are compatible only when ONE format
         // rule of THIS release declares both readable — the projection cache
         // advancing v4 → v5 inside one rule. IDs from different rules, or
