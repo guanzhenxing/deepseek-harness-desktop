@@ -39,13 +39,20 @@ export async function writeAtomicDurable(filename: string, bytes: Uint8Array): P
   } finally {
     await handle.close()
   }
-  await rename(temporary, filename)
+  try {
+    await rename(temporary, filename)
+  } catch (error) {
+    // Never leak the temp file when the atomic swap itself fails: a stray
+    // *.tmp entry inside profiles/<name> or desktop-safe-mode reads back as
+    // a conflict and blocks Safe Mode until it is removed by hand.
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  }
   const written = await open(filename, 'r')
   try {
     await written.sync()
   } finally {
     await written.close()
   }
-  await unlink(temporary).catch(() => undefined)
   await syncDirectory(path.dirname(filename))
 }
