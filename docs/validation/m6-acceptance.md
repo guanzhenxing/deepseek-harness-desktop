@@ -59,3 +59,12 @@
 ## 7. 基线移交
 
 本候选 `m4-0.0.0-darwin-arm64-46ff25e`（`release/candidate/artifacts.json`）为当前已验证制品；Post-M4 交付列车（rc.1 资格 → M5 → M6）就此闭环。
+
+## 8. codex 复审轮处置（2026-09-08，修复分支 `fix/post-delivery-review` @ `29cee57`）
+
+| 发现                                                       | 处置                                                                                                                                          |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 报告未绑定 sourceCommit/Node/Electron                     | `validateStartupReport` 增加第三参 `identity`（sourceCommit/node/electron 逐项比对）；冒烟入口传入实测值；篡改负例入测试                        |
+| P2 schema 未封闭、未校验 initialization.stages                | 顶层/candidate/platform/initialization/warm/每轮事件全部封闭字段集（未知字段拒）；`initialization.stages` 必须等于七阶段契约；codex 的篡改用例全部转为失败测试（10/10） |
+
+修复轮在干净提交 `29cee57` 上全链 15/15；新候选复测：初始化 3785ms，热中位 2287.5 / P95 2337ms（仍满足端到端 P95 ≤2500 的验收门槛；与 M6 验收轮的 2167ms 差异属跨时段机器噪声，两轮均以各自候选绑定）。**当前已验证候选更新为 `29cee57`**。

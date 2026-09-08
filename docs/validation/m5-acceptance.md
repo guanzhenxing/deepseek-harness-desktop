@@ -56,3 +56,18 @@
 ## 6. 基线移交
 
 M6 的输入是本候选 `m4-0.0.0-darwin-arm64-2e32ff0`（DMG SHA `d0c189b4…`）：测量与可选优化都绑定这一制品。
+
+## 7. codex 复审轮处置（2026-09-08，基线 `2fbad90`，修复分支 `fix/post-delivery-review` @ `29cee57`）
+
+复审提出 Standards 2 项 + Spec 6 项，处置如下（全部实装验证，非口头）：
+
+| 发现                                           | 处置                                                                                                                                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P2 插件准入缺 ADR（信任边界 + 持久 schema）      | 新增 [ADR-0010](../adr/0010-plugin-intake-trust-boundary.md)：引入=审查非安装、硬性拒绝项、schema 1 封闭演进、信任来源、拒绝的替代方案                                                                 |
+| P2 运行文档仍写旧产品名                          | `native-dsh-desktop-plan.md` 与 `data-layout.md` 修正为产品名 `DeepSeek Harness` + **冻结数据目录名** `DeepSeek Harness Desktop`（userData 不随产品改名）的准确表述                                       |
+| P1 演练未启动被引入 profile                      | fixture 补 `main: index.js` + 惰性 `apply()`（可加载、摘要确定）并重算记录摘要；演练断言 staged 加载器输入（bundle 模块 + 自带补丁层 + manifest bundles 列表）。**启动轮受阻上游**：全新非模板 profile 即使不含插件也无法完成 CLI 回合（已在当前候选以无插件 profile 复现，`plugin add` 正常、`headless` 模板正常）；该缺口连同复现证据记录于 ADR-0010 与 plugin-intake.md，上游修复后必须把启动轮加回。Host 图上的加载行为由 host-runner 集成测试覆盖 |
+| P1 runtimes.node/electron 未校验                | `verifyReleaseEvidence` 增加 `expectedRuntimes` 交叉校验；CLI 现场重测（staged 捆绑 node `--version` + launcher 锁定的 electron）后传入；篡改负例入测试（21/21）                                        |
+| P1 file 字段可路径逃逸                           | 报告的三个 evidence 文件名钉死为 schema 常量（不符即拒）；CLI 按常量读文件，不再拼接报告值；`../../` 逃逸负例入测试                                                                                     |
+| P1 只比 record 摘要、未验 DMG 内清单             | CLI 现挂载 DMG（只读）提取 `Contents/Resources/compatibility.json`：字节摘要对报告、内容做身份校验，卸载保证干净；修复期间还现场复现了"repo 清单随提交漂移 ≠ DMG 内清单"正是该发现所述风险                                            |
+
+修复轮门禁：`pnpm check` 全绿（含新增篡改负例）；`verify:release` **15/15**（第一次因 electron-builder 下载 Electron 的瞬时 TLS 断开失败，非代码问题，重跑通过）；最终候选 `m4-0.0.0-darwin-arm64-29cee57`（DMG SHA `0aa48514…`）上 `verify:plugin-intake` 与证据门全过。**当前已验证候选更新为 `29cee57`**。
