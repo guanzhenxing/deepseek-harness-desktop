@@ -85,7 +85,11 @@ function reportFixture(warmCount = 10) {
       node: '24.11.1',
       electron: '44.1.0',
     },
-    initialization: { events: timeline(0, 12, 40, 55, 140, 160, 260), totalMs: 260 },
+    initialization: {
+      events: timeline(0, 12, 40, 55, 140, 160, 260),
+      stages: [...STAGES],
+      totalMs: 260,
+    },
     warm: {
       runs,
       totalMedianMs: 204.5,
@@ -143,4 +147,31 @@ test('validateStartupReport rejects a surviving lease marker', () => {
   const report = reportFixture()
   report.warm.runs[0].leaseSurvived = true
   assert.throws(() => validateStartupReport(report, ARTIFACT), /lease/u)
+})
+
+test('validateStartupReport binds sourceCommit and runtime identity', () => {
+  const identity = { sourceCommit: 'a'.repeat(40), node: '24.11.1', electron: '44.1.0' }
+  assert.equal(validateStartupReport(reportFixture(), ARTIFACT, identity), undefined)
+  const drifted = reportFixture()
+  drifted.candidate.sourceCommit = 'f'.repeat(40)
+  assert.throws(() => validateStartupReport(drifted, ARTIFACT, identity), /sourceCommit/u)
+  const wrongNode = reportFixture()
+  wrongNode.platform.node = '99.0.0'
+  assert.throws(() => validateStartupReport(wrongNode, ARTIFACT, identity), /node/u)
+  const wrongElectron = reportFixture()
+  wrongElectron.platform.electron = '1.2.3'
+  assert.throws(() => validateStartupReport(wrongElectron, ARTIFACT, identity), /electron/u)
+})
+
+test('validateStartupReport enforces the closed schema', () => {
+  const identity = { sourceCommit: 'a'.repeat(40), node: '24.11.1', electron: '44.1.0' }
+  const extraTop = reportFixture()
+  extraTop.notes = 'injected'
+  assert.throws(() => validateStartupReport(extraTop, ARTIFACT, identity), /field/u)
+  const extraStageList = reportFixture()
+  extraStageList.initialization.stages = ['launcher-ready']
+  assert.throws(() => validateStartupReport(extraStageList, ARTIFACT, identity), /stages/u)
+  const extraRunField = reportFixture()
+  extraRunField.warm.runs[0].note = 'injected'
+  assert.throws(() => validateStartupReport(extraRunField, ARTIFACT, identity), /field/u)
 })

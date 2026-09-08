@@ -82,6 +82,26 @@ export function summarizeWarmRuns(runs) {
   }
 }
 
+const REPORT_KEYS = ['schemaVersion', 'candidate', 'platform', 'initialization', 'warm']
+const CANDIDATE_KEYS = ['releaseId', 'dmgSha256', 'sourceCommit']
+const PLATFORM_KEYS = ['osRelease', 'arch', 'node', 'electron']
+const INITIALIZATION_KEYS = ['events', 'stages', 'totalMs']
+const WARM_KEYS = ['runs', 'totalMedianMs', 'totalP95Ms', 'stageMediansMs', 'stageP95Ms']
+const RUN_KEYS = ['events']
+
+function assertExactKeys(value, keys, where) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`startup-performance: ${where} must be an object`)
+  }
+  const actual = Object.keys(value).sort()
+  const expected = [...keys].sort()
+  if (actual.length !== expected.length || actual.some((key, at) => key !== expected[at])) {
+    throw new Error(
+      `startup-performance: ${where} fields ${JSON.stringify(actual)} are not the closed set (unexpected field)`,
+    )
+  }
+}
+
 function scanAbsolutePaths(value, where) {
   if (typeof value === 'string') {
     if (value.startsWith('/')) {
@@ -100,8 +120,30 @@ function scanAbsolutePaths(value, where) {
 
 /** Whole-report validation: identity binding, population size, timeline
  * validity, honest statistics, and no absolute paths or lease leftovers. */
-export function validateStartupReport(report, artifact) {
+export function validateStartupReport(report, artifact, identity) {
   if (report.schemaVersion !== 1) throw new Error('startup-performance: schemaVersion != 1')
+  assertExactKeys(report, REPORT_KEYS, 'report')
+  assertExactKeys(report.candidate, CANDIDATE_KEYS, 'candidate')
+  assertExactKeys(report.platform, PLATFORM_KEYS, 'platform')
+  assertExactKeys(report.initialization, INITIALIZATION_KEYS, 'initialization')
+  assertExactKeys(report.warm, WARM_KEYS, 'warm')
+  for (const run of report.warm.runs) {
+    assertExactKeys(run, RUN_KEYS, 'warm run')
+  }
+  if (JSON.stringify(report.initialization.stages) !== JSON.stringify(STAGES)) {
+    throw new Error('startup-performance: initialization.stages is not the seven-stage contract')
+  }
+  if (identity !== undefined) {
+    if (report.candidate.sourceCommit !== identity.sourceCommit) {
+      throw new Error('startup-performance: report sourceCommit != the measured manifest commit')
+    }
+    if (report.platform.node !== identity.node) {
+      throw new Error('startup-performance: report node != the driver runtime')
+    }
+    if (report.platform.electron !== identity.electron) {
+      throw new Error('startup-performance: report electron != the launcher pin')
+    }
+  }
   scanAbsolutePaths(report, 'report')
   if (report.candidate.releaseId !== artifact.releaseId) {
     throw new Error(`startup-performance: candidate releaseId does not match the artifact record`)

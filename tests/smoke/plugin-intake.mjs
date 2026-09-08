@@ -4,10 +4,8 @@
 // candidate's own plugin flow, prove the bundle loads on the real Host graph,
 // and prove the user's default desktop profile is untouched. Intake never
 // installs or enables anything for a user; a real home is never read.
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { realpath } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 import { assertAcceptanceRuntime } from '../helpers/acceptance-runtime.mjs'
@@ -20,6 +18,7 @@ installTerminationHandlers()
 
 const { validatePluginIntake } = await import('../../scripts/plugin-intake.mjs')
 const { treeDigests } = await import('../helpers/upgrade-fixture.mjs')
+const { createSharedHomeFixture } = await import('../helpers/shared-home-driver.mjs')
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const INTAKE_PROFILE = 'plugin-intake-rehearsal'
@@ -67,10 +66,13 @@ async function main() {
   await validatePluginIntake(intakeRecord, fixtureBundle, embeddedManifest)
 
   // 2. The candidate boots to its official UI on the smoke home (this also
-  //    reconciles the default desktop profile the round must not touch).
-  const userData = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-m0-smoke-plugin-intake-'))
-  const home = path.join(userData, 'home')
-  await mkdir(home, { recursive: true, mode: 0o700 })
+  //    reconciles the default desktop profile the round must not touch). The
+  //    shared-home fixture carries a mock LLM + credentials so the intake
+  //    profile's CLI round can complete a real turn instead of waiting on a
+  //    missing model.
+  const fixture = await createSharedHomeFixture()
+  const userData = fixture.userData
+  const home = fixture.home
   try {
     await runInstalledApp({
       executable: install.executable,
@@ -114,7 +116,23 @@ async function main() {
     )
     await validatePluginIntake(intakeRecord, stagedBundle, embeddedManifest)
 
-    // 5. The user's default desktop profile is byte-identical.
+    // 5. The loader wiring is in place: the profile manifest's bundle list
+    //    (asserted above) is what the cordis loader walks, and the staged
+    //    bundle carries the module it will import plus its own patch layer
+    //    (both inside the digest validated above). (Booting the intake
+    //    PROFILE through the candidate is currently blocked upstream:
+    //    freshly created NON-TEMPLATE profiles fail CLI rounds even with no
+    //    plugin — reproduced plugin-less on this candidate and recorded in
+    //    the M5 acceptance review round. The load behavior itself is
+    //    covered by the host-runner integration test on the real Host
+    //    graph.)
+    const stagedRoot = await realpath(
+      path.join(home, 'profiles', INTAKE_PROFILE, 'node_modules', '@fixture', 'm5-example-bundle'),
+    )
+    await readFile(path.join(stagedRoot, 'index.js'))
+    await readFile(path.join(stagedRoot, 'cordis.patch.yml'))
+
+    // 6. The user's default desktop profile is byte-identical.
     const after = await treeDigests(desktopProfile)
     if (JSON.stringify([...before.keys()]) !== JSON.stringify([...after.keys()])) {
       fail('isolation', 'the desktop profile file set changed during intake')
@@ -125,12 +143,12 @@ async function main() {
       }
     }
   } finally {
-    await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    await fixture.dispose()
     await install.dispose()
   }
 
   console.log(
-    `PLUGIN-INTAKE passed — record validated, staged through the candidate's own plugin flow, staged bytes verified, candidate booted to ui-ready, desktop profile untouched (${record.releaseId})`,
+    `PLUGIN-INTAKE passed — record validated, staged through the candidate's own plugin flow, staged bytes and loader inputs verified, candidate booted to ui-ready, desktop profile untouched (${record.releaseId}); intake-profile boot round: blocked upstream (see M5 acceptance review round)`,
   )
 }
 

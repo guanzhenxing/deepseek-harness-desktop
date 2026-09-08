@@ -324,7 +324,7 @@ Host 控制通道的 capability 只认证 launcher 所启动的 Host 进程，�
 
 `desktop-launcher` 与 `desktop-plugin` 共享一份只含产品差异的配置：
 
-- `productName = DeepSeek Harness Desktop`；
+- `productName = DeepSeek Harness`（.app/可执行/Helper 与一切系统可见名；userData 数据目录名冻结为 `DeepSeek Harness Desktop`，不随产品改名）；
 - `binName = dsh-desktop`；
 - `defaultProfileName = desktop`；
 - `settingsNamespace = dsh-native-shell`；

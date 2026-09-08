@@ -259,6 +259,7 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
         file: 'release/dist/x.dmg',
       },
     ],
+    expectedRuntimes: { node: '24.11.1', electron: '44.1.0' },
     dmgDigest: 'b'.repeat(64),
     embeddedManifest: {
       releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
@@ -323,4 +324,108 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
   )
   delete missingSbom.sbom
   assert.throws(() => verifyReleaseEvidence(missingSbom), /EVIDENCE_COMPONENT_MISSING/u)
+})
+
+test('verifyReleaseEvidence pins the evidence file names against traversal', () => {
+  const sha256 = (value) => createHash('sha256').update(value).digest('hex')
+  const input = {
+    report: {
+      schemaVersion: 1,
+      releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+      sourceCommit: 'a'.repeat(40),
+      artifact: { sha256: 'b'.repeat(64), platform: 'darwin', arch: 'arm64' },
+      compatibilityManifestSha256: 'c'.repeat(64),
+      runtimes: { node: '24.11.1', electron: '44.1.0', dsh: '0.1.2-rc.1' },
+      evidence: {
+        sbom: { file: '../../outside/secret.json', sha256: sha256('sbom') },
+        licenses: { file: 'licenses.json', sha256: sha256('licenses') },
+        packageSmoke: {
+          file: '../package-smoke.json',
+          sha256: sha256('{}'),
+          passed: true,
+          scenarioCount: 1,
+        },
+      },
+    },
+    sbom: Buffer.from('sbom'),
+    licenses: Buffer.from('licenses'),
+    packageSmoke: {
+      candidate: {
+        releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+        sha256: 'b'.repeat(64),
+        platform: 'darwin',
+        arch: 'arm64',
+      },
+      results: [{ name: 'one', ok: true }],
+    },
+    artifactRecords: [
+      {
+        releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+        sha256: 'b'.repeat(64),
+        platform: 'darwin',
+        arch: 'arm64',
+      },
+    ],
+    dmgDigest: 'b'.repeat(64),
+    embeddedManifest: {
+      releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+      sourceCommit: 'a'.repeat(40),
+      dsh: { tag: 't', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
+    },
+    expectedRuntimes: { node: '24.11.1', electron: '44.1.0' },
+  }
+  assert.throws(() => verifyReleaseEvidence(input), /file|traversal|escape/u)
+})
+
+test('verifyReleaseEvidence cross-checks the reported runtime versions', () => {
+  const build = () => {
+    const sha256 = (value) => createHash('sha256').update(value).digest('hex')
+    return {
+      report: {
+        schemaVersion: 1,
+        releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+        sourceCommit: 'a'.repeat(40),
+        artifact: { sha256: 'b'.repeat(64), platform: 'darwin', arch: 'arm64' },
+        compatibilityManifestSha256: 'c'.repeat(64),
+        runtimes: { node: '99.0.0-tampered', electron: '44.1.0', dsh: '0.1.2-rc.1' },
+        evidence: {
+          sbom: { file: 'sbom.cdx.json', sha256: sha256('sbom') },
+          licenses: { file: 'licenses.json', sha256: sha256('licenses') },
+          packageSmoke: {
+            file: '../package-smoke.json',
+            sha256: sha256('{}'),
+            passed: true,
+            scenarioCount: 1,
+          },
+        },
+      },
+      sbom: Buffer.from('sbom'),
+      licenses: Buffer.from('licenses'),
+      packageSmoke: {
+        candidate: {
+          releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+          sha256: 'b'.repeat(64),
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        results: [{ name: 'one', ok: true }],
+      },
+      artifactRecords: [
+        {
+          releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+          sha256: 'b'.repeat(64),
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+      ],
+      dmgDigest: 'b'.repeat(64),
+      embeddedManifest: {
+        releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
+        sourceCommit: 'a'.repeat(40),
+        dsh: { tag: 't', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
+      },
+      expectedRuntimes: { node: '24.11.1', electron: '44.1.0' },
+    }
+  }
+  assert.throws(() => verifyReleaseEvidence(build()), /runtime/u)
 })

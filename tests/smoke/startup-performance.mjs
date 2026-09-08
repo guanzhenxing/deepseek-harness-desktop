@@ -51,7 +51,11 @@ const report = await runStartupPerformance({
     electron: launcher.devDependencies.electron,
   },
 })
-validateStartupReport(report, record)
+validateStartupReport(report, record, {
+  sourceCommit: manifest.sourceCommit,
+  node: process.versions.node,
+  electron: launcher.devDependencies.electron,
+})
 
 const target = path.join(repositoryRoot, 'release', 'startup-performance.json')
 await writeFile(`${target}.tmp`, `${JSON.stringify(report, undefined, 2)}\n`)

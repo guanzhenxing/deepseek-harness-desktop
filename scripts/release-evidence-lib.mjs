@@ -388,6 +388,19 @@ export function verifyReleaseEvidence(input) {
     ['file', 'sha256', 'passed', 'scenarioCount'],
     'evidence.packageSmoke',
   )
+  // The evidence file names are schema constants, not caller input: a
+  // report that points elsewhere (including traversal) is refused, and the
+  // CLI reads by these constants — never by report-supplied paths.
+  if (
+    report.evidence.sbom.file !== 'sbom.cdx.json' ||
+    report.evidence.licenses.file !== 'licenses.json' ||
+    report.evidence.packageSmoke.file !== '../package-smoke.json'
+  ) {
+    failEvidence(
+      'REPORT_INVALID',
+      'evidence file names must be the schema constants (sbom.cdx.json, licenses.json, ../package-smoke.json)',
+    )
+  }
   for (const digest of [
     report.artifact.sha256,
     report.compatibilityManifestSha256,
@@ -422,6 +435,16 @@ export function verifyReleaseEvidence(input) {
       'REPORT_INVALID',
       `runtimes.dsh ${report.runtimes.dsh} != manifest ${manifest.dsh.npmVersion}`,
     )
+  }
+  if (input.expectedRuntimes !== undefined) {
+    for (const runtime of ['node', 'electron']) {
+      if (report.runtimes[runtime] !== input.expectedRuntimes[runtime]) {
+        failEvidence(
+          'REPORT_INVALID',
+          `runtimes.${runtime} ${report.runtimes[runtime]} != measured ${input.expectedRuntimes[runtime]}`,
+        )
+      }
+    }
   }
 
   const record = input.artifactRecords.find((entry) => entry.releaseId === report.releaseId)

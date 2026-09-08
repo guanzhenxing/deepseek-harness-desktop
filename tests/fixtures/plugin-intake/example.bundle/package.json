@@ -7,5 +7,6 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
-  }
+  },
+  "main": "index.js"
 }

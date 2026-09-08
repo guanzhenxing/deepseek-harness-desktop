@@ -6,8 +6,10 @@
     "kind": "repository",
     "commit": "0123456789abcdef0123456789abcdef01234567"
   },
-  "integrity": "sha256-IqUh9R7FGtquSrgjRVCsF5aI-x-laDL8HO8yeolK0b0",
+  "integrity": "sha256-PRQzyKMzKmqfstgBj6VidQbex583fa64iV_d42nihRI",
   "license": "MIT",
   "capabilities": [],
-  "validatedPlatforms": ["darwin-arm64"]
+  "validatedPlatforms": [
+    "darwin-arm64"
+  ]
 }
