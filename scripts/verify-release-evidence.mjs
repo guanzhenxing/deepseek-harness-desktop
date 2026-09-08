@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile, readdir } from 'node:fs/promises'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,23 +30,34 @@ async function readJson(file) {
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 /** Mount the DMG read-only and return the embedded compatibility manifest
- * bytes. The mount is always detached, including on failure. */
+ * bytes. The mount is always detached and the temporary mount directory
+ * removed, including on failure paths. */
 async function extractEmbeddedManifest(dmgPath) {
   const mountPoint = await mkdtemp(path.join(tmpdir(), 'dsh-evidence-mount-'))
-  execFileSync(
-    'hdiutil',
-    ['attach', '-readonly', '-nobrowse', '-mountpoint', mountPoint, dmgPath],
-    {
-      stdio: 'ignore',
-    },
-  )
+  let mounted = false
   try {
+    execFileSync(
+      'hdiutil',
+      ['attach', '-readonly', '-nobrowse', '-mountpoint', mountPoint, dmgPath],
+      {
+        stdio: 'ignore',
+      },
+    )
+    mounted = true
     const app = (await readdir(mountPoint)).find((name) => name.endsWith('.app'))
     if (app === undefined)
       throw new Error('EVIDENCE_REPORT_INVALID: the DMG carries no .app bundle')
     return await readFile(path.join(mountPoint, app, 'Contents', 'Resources', 'compatibility.json'))
   } finally {
-    execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+    // Detach FIRST; only a detached mount point may be deleted (rm of an
+    // active mount point would walk into the read-only volume). A failed
+    // detach propagates and skips the rm on purpose — the mount still needs
+    // its directory. A failed ATTACH never mounted, so the empty directory
+    // is removed on every path.
+    if (mounted) {
+      execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+    }
+    await rm(mountPoint, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   }
 }
 

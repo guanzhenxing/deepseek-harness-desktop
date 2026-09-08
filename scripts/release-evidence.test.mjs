@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -136,6 +136,57 @@ test('directoryDigestHex feeds sorted paths and file digests deterministically',
   }
 })
 
+test('traversal fails closed on unreadable directories instead of skipping them', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-evidence-'))
+  try {
+    // An unreadable subdirectory inside a digest walk must throw, never hash
+    // a silently smaller tree.
+    await mkdir(path.join(root, 'locked'), { recursive: true })
+    await writeFile(path.join(root, 'a.txt'), 'one\n')
+    await writeFile(path.join(root, 'locked', 'b.txt'), 'two\n')
+    await chmod(path.join(root, 'locked'), 0o000)
+    await assert.rejects(directoryDigestHex(root))
+
+    // An unreadable scope inside the closure must throw the collection, never
+    // drop those packages from the SBOM.
+    const closure = await mkdtemp(path.join(tmpdir(), 'dsh-evidence-'))
+    try {
+      await packageDir(closure, 'plain', { name: 'plain', version: '1.0.0' })
+      await packageDir(closure, '@locked/pkg', { name: '@locked/pkg', version: '1.0.0' })
+      await chmod(path.join(closure, 'node_modules', '@locked'), 0o000)
+      await assert.rejects(
+        collectClosureComponents([closure], new Map([[npmPurl('plain', '1.0.0'), 'sha512-p']])),
+      )
+    } finally {
+      await chmod(path.join(closure, 'node_modules', '@locked'), 0o700).catch(() => undefined)
+      await rm(closure, { recursive: true, force: true })
+    }
+
+    // An unreadable package directory must throw the license inventory, never
+    // emit the package with an empty license-file list.
+    const licensed = await packageDir(root, 'c', {
+      name: 'c',
+      version: '1.0.0',
+      license: 'MIT',
+    })
+    await writeFile(path.join(licensed, 'LICENSE'), 'text\n')
+    const components = await collectClosureComponents(
+      [root],
+      new Map([[npmPurl('c', '1.0.0'), 'sha512-c']]),
+    )
+    // Drop the locked directory so the final recursive rm never has to enter
+    // it, then lock the package directory itself for the inventory round.
+    await chmod(path.join(root, 'locked'), 0o700)
+    await rm(path.join(root, 'locked'), { recursive: true, force: true })
+    await chmod(licensed, 0o000)
+    await assert.rejects(createLicenseInventory(components, [root]))
+    await chmod(licensed, 0o700)
+  } finally {
+    await chmod(path.join(root, 'locked'), 0o700).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('canonicalJson sorts keys recursively and appends exactly one newline', () => {
   assert.equal(canonicalJson({ b: 1, a: { d: 2, c: 3 } }), '{"a":{"c":3,"d":2},"b":1}\n')
   assert.equal(canonicalJson({ x: [3, 1, { z: 1, y: 2 }] }), '{"x":[3,1,{"y":2,"z":1}]}\n')
@@ -244,6 +295,7 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
         sha256: 'b'.repeat(64),
         platform: 'darwin',
         arch: 'arm64',
+        compatibilityManifestSha256: 'c'.repeat(64),
       },
       results: [
         { name: 'one', ok: true },
@@ -264,6 +316,8 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
     embeddedManifest: {
       releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
       sourceCommit: 'a'.repeat(40),
+      platform: 'darwin',
+      arch: 'arm64',
       dsh: { tag: 'dsh-v0.1.2-rc.1', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
     },
   })
@@ -315,6 +369,43 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
   replacedDmg.dmgDigest = 'f'.repeat(64)
   assert.throws(() => verifyReleaseEvidence(replacedDmg), /EVIDENCE_ARTIFACT_DIGEST_MISMATCH/u)
 
+  // The smoke report's candidate must bind the SAME artifact, not just echo
+  // the release id: a tampered DMG digest (platform/arch/manifest digest are
+  // covered by the same comparison) must fail even with a recomputed smoke
+  // digest, so a mixed-candidate smoke report cannot ride through.
+  const mixedSmoke = baseInput()
+  mixedSmoke.report.evidence.sbom.sha256 = sha256(mixedSmoke.sbom)
+  mixedSmoke.report.evidence.licenses.sha256 = sha256(mixedSmoke.licenses)
+  mixedSmoke.packageSmoke.candidate.sha256 = '0'.repeat(64)
+  mixedSmoke.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(mixedSmoke.packageSmoke).trim(),
+  )
+  assert.throws(() => verifyReleaseEvidence(mixedSmoke), /EVIDENCE_SMOKE_ARTIFACT_MISMATCH/u)
+
+  const mixedManifest = baseInput()
+  mixedManifest.report.evidence.sbom.sha256 = sha256(mixedManifest.sbom)
+  mixedManifest.report.evidence.licenses.sha256 = sha256(mixedManifest.licenses)
+  mixedManifest.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(mixedManifest.packageSmoke).trim(),
+  )
+  mixedManifest.packageSmoke.candidate.compatibilityManifestSha256 = '0'.repeat(64)
+  mixedManifest.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(mixedManifest.packageSmoke).trim(),
+  )
+  assert.throws(() => verifyReleaseEvidence(mixedManifest), /EVIDENCE_SMOKE_ARTIFACT_MISMATCH/u)
+
+  // An embedded manifest declaring the wrong architecture is
+  // self-consistent with its own artifact index but must not survive the
+  // cross-check against the report's artifact identity.
+  const wrongEmbeddedArch = baseInput()
+  wrongEmbeddedArch.report.evidence.sbom.sha256 = sha256(wrongEmbeddedArch.sbom)
+  wrongEmbeddedArch.report.evidence.licenses.sha256 = sha256(wrongEmbeddedArch.licenses)
+  wrongEmbeddedArch.report.evidence.packageSmoke.sha256 = sha256(
+    canonicalJson(wrongEmbeddedArch.packageSmoke).trim(),
+  )
+  wrongEmbeddedArch.embeddedManifest.arch = 'x64'
+  assert.throws(() => verifyReleaseEvidence(wrongEmbeddedArch), /EVIDENCE_ARCH_MISMATCH/u)
+
   const missingSbom = baseInput()
   missingSbom.evidence = undefined
   missingSbom.report.evidence.sbom.sha256 = sha256(missingSbom.sbom)
@@ -355,6 +446,7 @@ test('verifyReleaseEvidence pins the evidence file names against traversal', () 
         sha256: 'b'.repeat(64),
         platform: 'darwin',
         arch: 'arm64',
+        compatibilityManifestSha256: 'c'.repeat(64),
       },
       results: [{ name: 'one', ok: true }],
     },
@@ -370,6 +462,8 @@ test('verifyReleaseEvidence pins the evidence file names against traversal', () 
     embeddedManifest: {
       releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
       sourceCommit: 'a'.repeat(40),
+      platform: 'darwin',
+      arch: 'arm64',
       dsh: { tag: 't', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
     },
     expectedRuntimes: { node: '24.11.1', electron: '44.1.0' },
@@ -407,6 +501,7 @@ test('verifyReleaseEvidence cross-checks the reported runtime versions', () => {
           sha256: 'b'.repeat(64),
           platform: 'darwin',
           arch: 'arm64',
+          compatibilityManifestSha256: 'c'.repeat(64),
         },
         results: [{ name: 'one', ok: true }],
       },
@@ -422,6 +517,8 @@ test('verifyReleaseEvidence cross-checks the reported runtime versions', () => {
       embeddedManifest: {
         releaseId: 'm4-0.0.0-darwin-arm64-aaaaaaa',
         sourceCommit: 'a'.repeat(40),
+        platform: 'darwin',
+        arch: 'arm64',
         dsh: { tag: 't', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
       },
       expectedRuntimes: { node: '24.11.1', electron: '44.1.0' },

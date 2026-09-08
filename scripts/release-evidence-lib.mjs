@@ -40,11 +40,38 @@ async function isRealDirectory(target) {
   return identity !== undefined && identity.isDirectory()
 }
 
+/** A listing that only tolerates a MISSING directory: ENOENT yields [], any
+ * other I/O failure (permissions, vanished mid-walk, device errors) throws.
+ * Swallowing those would silently shrink the SBOM, the license inventory, or
+ * a directory digest — evidence must fail closed instead. */
+async function readdirIfPresent(directory, options) {
+  try {
+    return await readdir(directory, options)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
+}
+
+/** lstat skip that only tolerates a vanished entry (race with a concurrent
+ * writer); permission and other I/O failures must surface, not skip files. */
+async function lstatIfPresent(target) {
+  try {
+    return await lstat(target)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
 async function* walkFiles(root) {
-  const names = (await readdir(root).catch(() => [])).sort(byCodepoints)
+  // No catch: the root is pre-verified by directoryDigestHex and every
+  // recursion follows an lstat-confirmed directory, so a failed readdir here
+  // is a real I/O problem (or a tree mutating under the digest) — throw.
+  const names = (await readdir(root)).sort(byCodepoints)
   for (const name of names) {
     const target = path.join(root, name)
-    const identity = await lstat(target).catch(() => undefined)
+    const identity = await lstatIfPresent(target)
     if (identity === undefined) continue
     if (identity.isDirectory()) {
       yield* walkFiles(target)
@@ -95,7 +122,7 @@ async function* packageManifests(closureRoot) {
     yield path.join(modulesRoot, name, 'package.json')
   }
   const store = path.join(modulesRoot, '.pnpm')
-  for (const installKey of (await readdir(store).catch(() => [])).sort(byCodepoints)) {
+  for (const installKey of (await readdirIfPresent(store)).sort(byCodepoints)) {
     const innerRoot = path.join(store, installKey, 'node_modules')
     for (const name of await listPackageSlots(innerRoot, undefined)) {
       yield path.join(innerRoot, name, 'package.json')
@@ -106,16 +133,16 @@ async function* packageManifests(closureRoot) {
 /** One-level package slots ("<name>" or "<@scope>/<name>") of a node_modules
  * directory, sorted, with dot entries (and `exclude`) skipped. */
 async function listPackageSlots(directory, exclude) {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+  const entries = await readdirIfPresent(directory, { withFileTypes: true })
   const slots = []
   const sorted = entries
     .filter((entry) => !entry.name.startsWith('.') && entry.name !== exclude)
     .sort((left, right) => byCodepoints(left.name, right.name))
   for (const entry of sorted) {
     if (entry.name.startsWith('@')) {
-      const inner = await readdir(path.join(directory, entry.name), {
+      const inner = await readdirIfPresent(path.join(directory, entry.name), {
         withFileTypes: true,
-      }).catch(() => [])
+      })
       for (const nested of inner
         .filter((child) => !child.name.startsWith('.'))
         .sort((left, right) => byCodepoints(left.name, right.name))) {
@@ -145,7 +172,7 @@ export async function collectClosureComponents(closureRoots, integrityByPurl) {
   const byPurl = new Map()
   for (const root of closureRoots) {
     for await (const manifestPath of packageManifests(root)) {
-      const identity = await lstat(manifestPath).catch(() => undefined)
+      const identity = await lstatIfPresent(manifestPath)
       if (identity === undefined) continue
       const resolved = await realpath(manifestPath)
       if (!insideAnyRoot(resolved)) {
@@ -256,7 +283,7 @@ export async function createLicenseInventory(components, closureRoots) {
   for (const component of components) {
     const files = []
     const digests = {}
-    const names = (await readdir(component.manifestDirectory).catch(() => [])).sort(byCodepoints)
+    const names = (await readdirIfPresent(component.manifestDirectory)).sort(byCodepoints)
     for (const name of names) {
       if (!LICENSE_FILE_PATTERN.test(name)) continue
       const target = path.join(component.manifestDirectory, name)
@@ -430,6 +457,12 @@ export function verifyReleaseEvidence(input) {
   if (manifest.sourceCommit !== report.sourceCommit) {
     failEvidence('REPORT_INVALID', `embedded manifest sourceCommit != report sourceCommit`)
   }
+  if (manifest.platform !== report.artifact.platform || manifest.arch !== report.artifact.arch) {
+    failEvidence(
+      'ARCH_MISMATCH',
+      `embedded manifest ${manifest.platform}/${manifest.arch} != report ${report.artifact.platform}/${report.artifact.arch}`,
+    )
+  }
   if (report.runtimes.dsh !== manifest.dsh.npmVersion) {
     failEvidence(
       'REPORT_INVALID',
@@ -474,6 +507,24 @@ export function verifyReleaseEvidence(input) {
     failEvidence(
       'SMOKE_RELEASE_MISMATCH',
       `smoke report binds ${smoke.candidate.releaseId}, evidence binds ${report.releaseId}`,
+    )
+  }
+  // The smoke report must bind the SAME candidate, not just echo the release
+  // id: its DMG digest, platform, arch, and embedded-manifest digest are
+  // compared field by field against the unified report (which the artifact
+  // record and the DMG bytes already vouch for above).
+  if (
+    smoke.candidate.sha256 !== report.artifact.sha256 ||
+    smoke.candidate.platform !== report.artifact.platform ||
+    smoke.candidate.arch !== report.artifact.arch ||
+    smoke.candidate.compatibilityManifestSha256 !== report.compatibilityManifestSha256
+  ) {
+    failEvidence(
+      'SMOKE_ARTIFACT_MISMATCH',
+      `smoke candidate ${smoke.candidate.platform}/${smoke.candidate.arch} ` +
+        `${smoke.candidate.sha256} manifest ${smoke.candidate.compatibilityManifestSha256} ` +
+        `!= evidence ${report.artifact.platform}/${report.artifact.arch} ` +
+        `${report.artifact.sha256} manifest ${report.compatibilityManifestSha256}`,
     )
   }
   if (!report.evidence.packageSmoke.passed || smoke.results.some((entry) => entry.ok !== true)) {
