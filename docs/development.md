@@ -1,11 +1,11 @@
 # 开发指南
 
-- 状态：M1–M6 均已验收合并（最新：M6 启动性能，基线 DSH 0.1.2-rc.1）
+- 状态：M1–M6 已验收合并（M5 intake profile 启动门已通过，基线 DSH 0.1.2-rc.1）
 - 日期：2026-09-08
 
 ## 1. 当前阶段
 
-仓库已完成 M0、M1（共享 home + lease + dsh-native）、M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）、M3（托盘/菜单/窗口生命周期、外链策略、home 兼容性准入门、打包候选 DMG 与安装级冒烟）、M4（版本闭包与升级演练）、M5（确定性 SBOM、许可证清单、统一发行证据 `verify:release-evidence`、合成插件引入 `verify:plugin-intake`）与 M6（安装制品启动性能测量与优化）验收。当前 DSH 基线为 0.1.2-rc.1；验收记录见 [validation](validation/)。
+仓库已完成 M0、M1（共享 home + lease + dsh-native）、M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）、M3（托盘/菜单/窗口生命周期、外链策略、home 兼容性准入门、打包候选 DMG 与安装级冒烟）、M4（版本闭包与升级演练）、M5（确定性 SBOM、许可证清单、统一发行证据与合成插件引入）与 M6（安装制品启动性能测量与优化）验收。当前 DSH 基线为 0.1.2-rc.1；验收记录见 [validation](validation/)。
 
 实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
 

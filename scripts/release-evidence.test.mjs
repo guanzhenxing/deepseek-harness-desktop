@@ -318,6 +318,8 @@ test('verifyReleaseEvidence rejects the four identity mutations with specific co
       sourceCommit: 'a'.repeat(40),
       platform: 'darwin',
       arch: 'arm64',
+      node: '24.11.1',
+      electron: '44.1.0',
       dsh: { tag: 'dsh-v0.1.2-rc.1', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
     },
   })
@@ -471,8 +473,8 @@ test('verifyReleaseEvidence pins the evidence file names against traversal', () 
   assert.throws(() => verifyReleaseEvidence(input), /file|traversal|escape/u)
 })
 
-test('verifyReleaseEvidence cross-checks the reported runtime versions', () => {
-  const build = () => {
+test('verifyReleaseEvidence cross-checks the reported and embedded runtime versions', () => {
+  const build = (tamperEmbedded = false) => {
     const sha256 = (value) => createHash('sha256').update(value).digest('hex')
     return {
       report: {
@@ -519,10 +521,15 @@ test('verifyReleaseEvidence cross-checks the reported runtime versions', () => {
         sourceCommit: 'a'.repeat(40),
         platform: 'darwin',
         arch: 'arm64',
+        node: tamperEmbedded ? '99.0.0-tampered' : '24.11.1',
+        electron: '44.1.0',
         dsh: { tag: 't', commit: 'g'.repeat(40), npmVersion: '0.1.2-rc.1' },
       },
       expectedRuntimes: { node: '24.11.1', electron: '44.1.0' },
     }
   }
   assert.throws(() => verifyReleaseEvidence(build()), /runtime/u)
+  const embeddedTamper = build(true)
+  embeddedTamper.report.runtimes.node = '24.11.1'
+  assert.throws(() => verifyReleaseEvidence(embeddedTamper), /embedded manifest node/u)
 })

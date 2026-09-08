@@ -56,32 +56,33 @@ function assertClosedKeys(value, keys, where) {
  * empty-payload constant. */
 export async function bundleDigest(bundleRoot) {
   const hasher = createHash('sha256')
-  const digestFile = async (directory, relative) => {
+  const digestFile = async (relative) => {
     hasher.update(relative)
     hasher.update('\0')
     hasher.update(
       createHash('sha256')
-        .update(await readFile(path.join(directory, relative)))
+        .update(await readFile(path.join(bundleRoot, relative)))
         .digest('hex'),
     )
     hasher.update('\n')
   }
   const walk = async (directory, prefix) => {
-    const entries = (await readdir(directory, { withFileTypes: true }).catch(() => [])).sort(
-      (left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0),
+    const entries = (await readdirIfPresent(directory)).sort((left, right) =>
+      left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
     )
     for (const entry of entries) {
       const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`
-      const identity = await lstat(path.join(directory, relative))
+      const entryPath = path.join(directory, entry.name)
+      const identity = await lstat(entryPath)
       if (identity.isDirectory()) {
-        await walk(directory, relative)
+        await walk(entryPath, relative)
         continue
       }
       if (!identity.isFile()) {
         reject('UNSAFE_BUNDLE', `${relative} is not a regular file`)
       }
       if (prefix === '' && /\.intake\.json$/u.test(entry.name)) continue
-      await digestFile(directory, relative)
+      await digestFile(relative)
     }
   }
   const rootIdentity = await lstat(bundleRoot).catch(() => undefined)
@@ -90,6 +91,15 @@ export async function bundleDigest(bundleRoot) {
   }
   await walk(bundleRoot, '')
   return `sha256-${hasher.digest('base64url')}`
+}
+
+export async function readdirIfPresent(directory) {
+  try {
+    return await readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
 }
 
 /**

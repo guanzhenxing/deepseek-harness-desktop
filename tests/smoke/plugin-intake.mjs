@@ -125,17 +125,21 @@ async function main() {
     //    profile boot plugin-less (exit 1 in composeProfile) and hang with
     //    the bundle staged — until an upstream fix ships, this command stays
     //    red instead of reporting a skipped pass.
-    const launched = await runInstalledCli(
-      install.cliEntry,
-      ['--profile', INTAKE_PROFILE, 'intake profile boot round'],
-      { home, cwd: userData, timeoutMs: 180_000 },
-    )
-    if (launched.code !== 0) {
-      fail(
-        'intake profile launch',
-        `candidate cli exit ${launched.code} booting profile ${INTAKE_PROFILE}: ${launched.output.slice(-400)}`,
-      )
-    }
+    await runInstalledApp({
+      executable: install.executable,
+      mode: 'conversation',
+      profileName: INTAKE_PROFILE,
+      userData,
+      home,
+      cwd: userData,
+      timeoutMs: 180_000,
+      async action({ waitFor }) {
+        await waitFor(
+          (report) => report.kind === 'ui-ready',
+          `ui-ready for intake profile ${INTAKE_PROFILE}`,
+        )
+      },
+    })
 
     // 6. The loader wiring is in place: the profile manifest's bundle list
     //    (asserted above) is what the cordis loader walks, and the staged

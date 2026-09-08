@@ -112,6 +112,9 @@ const steps = [
       ])
     },
   },
+  // Run intake against the freshly archived candidate index. Running this
+  // before archive would accidentally exercise a stale prior candidate.
+  { name: 'verify:plugin-intake (archived candidate)', command: ['run', 'verify:plugin-intake'] },
 ]
 
 function spawnPnpm(args) {

@@ -198,6 +198,7 @@ export async function runInstalledApp(input) {
   const {
     executable,
     mode,
+    profileName,
     userData,
     home,
     action,
@@ -214,6 +215,7 @@ export async function runInstalledApp(input) {
       HOME: process.env.HOME,
       ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
       DSH_DESKTOP_SMOKE: mode,
+      ...(profileName === undefined ? {} : { DSH_DESKTOP_SMOKE_PROFILE: profileName }),
       DSH_DESKTOP_M0_USER_DATA: userData,
       ...(home === undefined ? {} : { DSH_HOME: home }),
       DSH_TELEMETRY_DISABLED: '1',

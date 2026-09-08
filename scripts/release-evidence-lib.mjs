@@ -122,7 +122,10 @@ async function* packageManifests(closureRoot) {
     yield path.join(modulesRoot, name, 'package.json')
   }
   const store = path.join(modulesRoot, '.pnpm')
-  for (const installKey of (await readdirIfPresent(store)).sort(byCodepoints)) {
+  for (const installKey of (await readdirIfPresent(store, { withFileTypes: true }))
+    .filter((entry) => entry.name !== 'lock.yaml')
+    .map((entry) => entry.name)
+    .sort(byCodepoints)) {
     const innerRoot = path.join(store, installKey, 'node_modules')
     for (const name of await listPackageSlots(innerRoot, undefined)) {
       yield path.join(innerRoot, name, 'package.json')
@@ -448,6 +451,9 @@ export function verifyReleaseEvidence(input) {
   }
 
   const manifest = input.embeddedManifest
+  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    failEvidence('REPORT_INVALID', 'embedded manifest must be an object')
+  }
   if (manifest.releaseId !== report.releaseId) {
     failEvidence(
       'REPORT_INVALID',
@@ -475,6 +481,21 @@ export function verifyReleaseEvidence(input) {
         failEvidence(
           'REPORT_INVALID',
           `runtimes.${runtime} ${report.runtimes[runtime]} != measured ${input.expectedRuntimes[runtime]}`,
+        )
+      }
+      if (typeof manifest[runtime] !== 'string' || manifest[runtime] === '') {
+        failEvidence('REPORT_INVALID', `embedded manifest ${runtime} runtime is missing`)
+      }
+      if (manifest[runtime] !== report.runtimes[runtime]) {
+        failEvidence(
+          'REPORT_INVALID',
+          `embedded manifest ${runtime} ${manifest[runtime]} != report ${report.runtimes[runtime]}`,
+        )
+      }
+      if (manifest[runtime] !== input.expectedRuntimes[runtime]) {
+        failEvidence(
+          'REPORT_INVALID',
+          `embedded manifest ${runtime} ${manifest[runtime]} != measured ${input.expectedRuntimes[runtime]}`,
         )
       }
     }

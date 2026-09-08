@@ -35,6 +35,8 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 async function extractEmbeddedManifest(dmgPath) {
   const mountPoint = await mkdtemp(path.join(tmpdir(), 'dsh-evidence-mount-'))
   let mounted = false
+  let embeddedBytes
+  let detachError
   try {
     execFileSync(
       'hdiutil',
@@ -47,18 +49,30 @@ async function extractEmbeddedManifest(dmgPath) {
     const app = (await readdir(mountPoint)).find((name) => name.endsWith('.app'))
     if (app === undefined)
       throw new Error('EVIDENCE_REPORT_INVALID: the DMG carries no .app bundle')
-    return await readFile(path.join(mountPoint, app, 'Contents', 'Resources', 'compatibility.json'))
+    embeddedBytes = await readFile(
+      path.join(mountPoint, app, 'Contents', 'Resources', 'compatibility.json'),
+    )
   } finally {
-    // Detach FIRST; only a detached mount point may be deleted (rm of an
-    // active mount point would walk into the read-only volume). A failed
-    // detach propagates and skips the rm on purpose — the mount still needs
-    // its directory. A failed ATTACH never mounted, so the empty directory
-    // is removed on every path.
+    // Detach FIRST; only a detached mount point may be deleted. hdiutil can
+    // transiently refuse while Finder has the volume open, so retry a few
+    // times before surfacing the failure. Never remove an active mountpoint.
+    let detached = !mounted
     if (mounted) {
-      execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+      for (let attempt = 0; attempt < 3 && !detached; attempt += 1) {
+        try {
+          execFileSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+          detached = true
+        } catch (error) {
+          detachError = error
+        }
+      }
     }
-    await rm(mountPoint, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    if (detached) {
+      await rm(mountPoint, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    }
   }
+  if (detachError !== undefined) throw detachError
+  return embeddedBytes
 }
 
 async function main() {

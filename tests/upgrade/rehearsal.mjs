@@ -817,7 +817,7 @@ export async function runUpgradeRehearsal(input) {
         'previous app refuses a newer-epoch home in its admission chain, before any write',
       )
     } finally {
-      await rm(desktopNegativeHome, {
+      await rm(negativeUserData, {
         recursive: true,
         force: true,
         maxRetries: 5,

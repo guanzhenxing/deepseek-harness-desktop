@@ -6,7 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
-import { bundleDigest, validatePluginIntake } from './plugin-intake.mjs'
+import { bundleDigest, readdirIfPresent, validatePluginIntake } from './plugin-intake.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fixtureBundle = path.join(
@@ -43,6 +43,31 @@ test('an empty bundle digests to the well-known empty payload constant', async (
     assert.equal(await bundleDigest(empty), 'sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU')
   } finally {
     await rm(empty, { recursive: true, force: true })
+  }
+})
+
+test('bundle digest walks nested files using their relative paths', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-intake-nested-'))
+  try {
+    await writeFile(path.join(root, 'package.json'), '{"name":"nested","version":"1"}\n')
+    await mkdir(path.join(root, 'sub', 'deep'), { recursive: true })
+    await writeFile(path.join(root, 'sub', 'deep', 'index.js'), 'export default 1\n')
+    const digest = await bundleDigest(root)
+    assert.match(digest, /^sha256-[A-Za-z0-9_-]+$/u)
+    assert.equal(digest, await bundleDigest(root))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('bundle traversal propagates non-ENOENT directory errors', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dsh-intake-io-'))
+  const file = path.join(root, 'not-a-directory')
+  try {
+    await writeFile(file, 'file\n')
+    await assert.rejects(readdirIfPresent(file), /ENOTDIR/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
 

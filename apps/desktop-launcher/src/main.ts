@@ -82,6 +82,14 @@ const installedRuntime: InstalledRuntimePaths | undefined = app.isPackaged
 const hostEntryPath =
   installedRuntime?.hostEntry ?? fileURLToPath(new URL('./host-entry.js', import.meta.url))
 const smokeMode = process.env.DSH_DESKTOP_SMOKE
+const smokeProfileOverride =
+  smokeMode === undefined ? undefined : process.env.DSH_DESKTOP_SMOKE_PROFILE
+if (
+  smokeProfileOverride !== undefined &&
+  !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(smokeProfileOverride)
+) {
+  throw new Error('invalid DSH_DESKTOP_SMOKE_PROFILE')
+}
 const isLoadingSmoke = smokeMode === 'loading'
 const isStartupPerfSmoke = smokeMode === 'startup-perf'
 const userDataOverride = await resolveSmokeUserData(smokeMode, process.env.DSH_DESKTOP_M0_USER_DATA)
@@ -529,6 +537,7 @@ async function startApplication(): Promise<void> {
     entryExecutables: [process.execPath],
   })
   const profileName = PRODUCT.defaultProfileName
+  const bootProfileName = smokeProfileOverride ?? profileName
   const marker = createRecoveryMarkerStore(app.getPath('userData'), home)
   const stateFile = path.join(app.getPath('userData'), 'window-state.json')
   const initialState = await readWindowState(stateFile)
@@ -726,7 +735,7 @@ async function startApplication(): Promise<void> {
           try {
             const ready = await attemptSupervisor.start({
               home,
-              profileName: mode === 'safe' ? SAFE_PROFILE_NAME : profileName,
+              profileName: mode === 'safe' ? SAFE_PROFILE_NAME : bootProfileName,
               mode,
               lease,
               probe,
