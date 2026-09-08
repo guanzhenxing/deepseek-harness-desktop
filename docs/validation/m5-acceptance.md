@@ -89,3 +89,11 @@ M6 的输入是本候选 `m4-0.0.0-darwin-arm64-2e32ff0`（DMG SHA `d0c189b4…`
 | P2 文档身份矛盾                               | README/upgrade-guide/data-layout 产品名改 `DeepSeek Harness`、冻结数据目录名 `DeepSeek Harness Desktop` 厘清（含 data-layout `<userData>` 行）；ADR-0010 补入索引；development.md 状态更新到 M1–M6 已验收、已交付命令清单更正                                                                                                                                                                                                                                                                                                                                                          |
 
 本轮门禁：`pnpm check` 全绿（node:test 6 个脚本文件 + vitest 34 文件 401 测试 + 文档 49 文件）；`verify:release-evidence` 真实 DMG 通过（含新增候选绑定与清单架构校验）；`verify:plugin-intake` **按设计失败于启动轮**（上游阻断，退出码 1、180s 有界、零残留）——这是如实证据而非回归。**当前已验证候选仍为 `29cee57`**；下一个候选构建后须重跑 `rehearse:upgrade`（降级门已改必经）与 `verify:plugin-intake`（上游修复后应自动转绿）。
+
+## 9. 第三轮收口记录（2026-09-08 晚，作废 8dec724 对本记录的回溯改写）
+
+`8dec724`（第三轮）对本记录做了三处回溯改写并留下断口，本节如实重述，被改写的表述以上文 §3/§4 恢复后的原文为准：
+
+1. **发生了什么**：该轮给 main.ts 加了 `DSH_DESKTOP_SMOKE_PROFILE` 覆盖、把 `verify:plugin-intake` 加入 verify:release 链（第 16 步）、16:26 用**脏树**重建 DMG 并归档（名仍 `d14e127`，实际内容为未提交代码），随后把本记录 §3 改写为"16/16 步退出码 0"、§4.5 改写为"真实回合均通过"。
+2. **为何不实**：审查证明覆盖变量没接进 lease（`LEASE_PROFILE_MISMATCH` 必然拒绝），intake 启动轮在打包件上**不可能通过**——"16/16"是把"旧 DMG 上的 15 步链"与"新 DMG 上手动跑的 plugin-intake"拼成的复合声明；16 步链形状在该提交才存在，从未在单一候选上完整运行。证据与冒烟仍绑 15:50 旧 DMG（`7e76bd8c…`，已被重建覆盖），`verify:release-evidence` 于 `8dec724` 实测红（`EVIDENCE_ARTIFACT_DIGEST_MISMATCH`）。
+3. **处置与现状**：全量代码审查（两轮，含 codex @ `45e4e8f`）修复全部发现；启动轮的真正阻断点被精确定性为嵌入式布局下 bundle 按名解析断链（ADR-0010 已更新）；链内 intake 步骤改为演练 v0.1.0 实际交付的引入能力（`--launch-round=excluded`），独立命令保持 fail-closed 红色。**v0.1.0 候选 `v0.1.0-darwin-arm64-a11dfd9` 于干净 HEAD 单链 17/17 通过（含演练 19/19 与必经降级门首次实跑）——当前已验证候选以 [v0.1.0 验收记录](v0.1.0-acceptance.md) 为准。**

@@ -31,7 +31,7 @@
     "policy": "build/compatibility-policy.json",
     "upstreamArtifacts": "build/upstream-artifacts.json",
     "patchLedger": "patches/manifest.json",
-    "$comment": "Mapping to the schema-2 embedded release manifest. The facts above stay the source baseline; the manifest is generated from them plus the policy/upstream/lockfile inputs (pnpm generate:compatibility) and never duplicates artifact SHAs \u2014 those stay external in release/artifacts.json."
+    "$comment": "Mapping to the schema-2 embedded release manifest. The facts above stay the source baseline; the manifest is generated from them plus the policy/upstream/lockfile inputs (pnpm generate:compatibility) and never duplicates artifact SHAs — those stay external in release/artifacts.json."
   },
   "verification": [
     {
@@ -64,6 +64,14 @@
         "controller-admission",
         "controller-safemode"
       ]
+    },
+    {
+      "date": "2026-09-08",
+      "os": "darwin",
+      "arch": "arm64",
+      "artifact": "dmg",
+      "releaseId": "v0.1.0-darwin-arm64-a11dfd9",
+      "smokes": ["package-16", "rehearsal-19", "plugin-intake-shipped-rounds"]
     }
   ]
 }
