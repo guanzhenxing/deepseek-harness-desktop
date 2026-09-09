@@ -37,9 +37,9 @@ import {
 } from '../helpers/shared-home-driver.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-// The frozen M4 baseline was built at caa5c51 — BEFORE the app-bundle rename
+// The frozen baseline was built at caa5c51 — BEFORE the app-bundle rename
 // (56c9c6e) — so its DMG still carries 'DeepSeek Harness Desktop.app'; the
-// rc.1 candidate carries the renamed bundle.
+// current candidate carries the renamed bundle.
 const PREVIOUS_APP_NAME = 'DeepSeek Harness Desktop'
 const CANDIDATE_APP_NAME = 'DeepSeek Harness'
 const UPSTREAM_REPO = 'https://github.com/deepseek-ai/deepseek-harness.git'
@@ -112,14 +112,14 @@ function isLeaseCoordination(relative) {
 
 /**
  * Wait until the home lease is released after an installed-app exit. The
- * launcher never blocks quit on a failed release (M1 semantics), so a slow
- * or retried release briefly leaves run/host.lock behind — the M3 package
- * smoke waits the same way before any CLI round.
+ * launcher never blocks quit on a failed release, so a slow or retried
+ * release briefly leaves run/host.lock behind — the package smoke waits
+ * the same way before any CLI round.
  *
- * The frozen M3 previous artifact also has a flaky release (its probe can
+ * The frozen previous artifact also has a flaky release (its probe can
  * fail during quit, leaving a genuinely stale lock whose owner is gone);
  * there `doctor --unlock` — its own designed remediation — cleans up. The
- * M4 candidate gets no such tolerance: its release path must be clean.
+ * current candidate gets no such tolerance: its release path must be clean.
  */
 async function waitForLeaseGone(home, timeoutMs = 30_000) {
   const { stat } = await import('node:fs/promises')
@@ -308,8 +308,9 @@ export async function runUpgradeRehearsal(input) {
         })
         // Pin an explicit human title from the PREVIOUS release: titles are
         // projection-cache values, so the candidate keeping this title after
-        // the upgrade is the API-level proof that rc.1 reads M4's cached v4
-        // projections (upstream's cross-version read-compat contract).
+        // the upgrade is the API-level proof that rc.1 reads the previous
+        // candidate's cached v4 projections (upstream's cross-version
+        // read-compat contract).
         const renamed = await client.rpc('session/rename', {
           request: { sessionId: seededSessionId, title: 'rehearsal-cross-version-title' },
         })
@@ -355,8 +356,8 @@ export async function runUpgradeRehearsal(input) {
     // -- Step 5: the candidate upgrades the seeded home IN PLACE. -----------
     // A real upgrade replaces the .app and keeps both the home path and the
     // application-support directory; profile journals pin absolute ref paths
-    // and MUST NOT be relocated (the M2 containment check would rightly call
-    // them corrupt). So the candidate runs against the fixture's own
+    // and MUST NOT be relocated (the journal containment check would rightly
+    // call them corrupt). So the candidate runs against the fixture's own
     // userData/home; the verified copy stays untouched as the pristine
     // baseline for the refusal negatives.
     const candidateHome = fixture.home
@@ -388,7 +389,7 @@ export async function runUpgradeRehearsal(input) {
         if (titleOf(oldItem) !== seededTitle) {
           fail(
             'candidate upgrade',
-            `upgraded session lost its M4 title: expected ${JSON.stringify(seededTitle)}, listed ${JSON.stringify(oldItem.title)}`,
+            `upgraded session lost its seeded title: expected ${JSON.stringify(seededTitle)}, listed ${JSON.stringify(oldItem.title)}`,
           )
         }
         const continued = await driveOneTurn(client, {
@@ -542,11 +543,11 @@ export async function runUpgradeRehearsal(input) {
       'restart re-reads the seeded history (continued in place, all three rounds preserved)',
     )
 
-    // -- Step 6.6: the upgraded home's format facts and the M4 refusal. -----
+    // -- Step 6.6: the upgraded home's format facts and the refusal gate. --
     // The candidate must have kept data epoch 1; the projection cache may now
-    // hold v4 records M4 wrote and v5 records rc.1 wrote (identity = newest
-    // stamp). If any v5 exists, the M4 release — which reads only v4 — must
-    // refuse this home without touching it.
+    // hold v4 records the previous release wrote and v5 records rc.1 wrote
+    // (identity = newest stamp). If any v5 exists, the previous release —
+    // which reads only v4 — must refuse this home without touching it.
     {
       const upgradedMarker = JSON.parse(
         await readFile(path.join(candidateHome, 'run', 'compatibility.json'), 'utf8'),
@@ -584,7 +585,7 @@ export async function runUpgradeRehearsal(input) {
       // the rehearsal must fail instead of reporting a skipped pass.
       if (!sawV5) {
         fail(
-          'm4 downgrade refusal',
+          'downgrade refusal',
           `the candidate wrote no v5 projection record (stamps ${JSON.stringify(stamps)}) — the downgrade-refusal gate cannot be exercised`,
         )
       }
@@ -600,15 +601,15 @@ export async function runUpgradeRehearsal(input) {
         )
         if (refused.code !== 5) {
           fail(
-            'm4 downgrade refusal',
+            'downgrade refusal',
             `previous cli exit ${refused.code} on the rc1-written home: ${refused.output.slice(-300)}`,
           )
         }
-        await assertOnlyCoordinationChanged('m4 downgrade refusal', downgradeHome, before)
+        await assertOnlyCoordinationChanged('downgrade refusal', downgradeHome, before)
       } finally {
         await rm(downgradeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
       }
-      record('m4-downgrade-refusal', true, 'M4 refuses the rc1-written home without touching it')
+      record('downgrade-refusal', true, 'The previous candidate refuses the rc1-written home without touching it')
       record(
         'upgraded-home-formats',
         true,

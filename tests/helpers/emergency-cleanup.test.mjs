@@ -1,8 +1,7 @@
 // Behavior tests for the emergency-cleanup registry: failed cleanups must be
 // retried by a later drain, successful ones must not re-run, one failing
 // cleanup must never abort the drain, and the beforeExit flush hook must be
-// registered unconditionally on import (codex round-6 St4 — the round-5
-// "behavior test" only ever ran in a shell and was no regression gate).
+// registered unconditionally on import.
 import { describe, expect, it } from 'vitest'
 
 import { setTimeout as sleepTimer } from 'node:timers'
