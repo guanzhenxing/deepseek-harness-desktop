@@ -44,6 +44,8 @@ singleton 规则：整个闭包（lockfile 与每个 staged closure）中每个�
 - 升级失败不阻塞其他交付，回退保留已验证基线；
 - 涉及不可逆数据迁移的上游版本（例如改动 Session 持久化所有权并写入 Session v2 的版本线）属后续独立迁移资格计划，不并入常规升级。
 
+当前基线 `dsh-v0.1.2-rc.1` 由此前的 `dsh-v0.1.2-alpha.3`（commit [`dd6322d604e00eec1ba0e0c8541159906a21094a`](https://github.com/deepseek-ai/deepseek-harness/commit/dd6322d604e00eec1ba0e0c8541159906a21094a)）经独立的升级资格验证演进而来。
+
 ## 5. 工具链出处
 
 | 工具     | 版本    | 出处与校验                                            |
@@ -51,3 +53,20 @@ singleton 规则：整个闭包（lockfile 与每个 staged closure）中每个�
 | Node     | 24.11.1 | nodejs.org 官方 SHASUMS256.txt 逐项核对（staging 时） |
 | pnpm     | 11.7.0  | npm 官方 tarball + 固定 integrity（stage-runtime）    |
 | Electron | 44.1.0  | launcher devDependency，经 pnpm-lock integrity 解析   |
+
+## 6. 外部参考实现（固定版本）
+
+以下外部桌面项目只作为实现参考：不是本项目的依赖、升级信号、兼容性门或运行时基线。参考点固定在所阅读的提交上，避免以后把这些项目变化后的代码误当成当初的依据。
+
+| 项目                                                      | 固定参考点                                                                                                                                                                                            | 参考范围                                                                      |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [anywhere-labs/dsh-desktop](https://github.com/anywhere-labs/dsh-desktop) | commit [`e71a9ef0b168763d422042835a8c3b7d6d809800`](https://github.com/anywhere-labs/dsh-desktop/commit/e71a9ef0b168763d422042835a8c3b7d6d809800)（2026-08-30 master HEAD，晚于 v2.0.4 tag `d29bf7a`）                              | Desktop 插件/launcher 边界、profile 修复、Electron 生命周期、打包与平台适配   |
+| anywhere-labs vendored DSH runtime                        | [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.1)，upstream commit [`cd5ef8148158c3a752a658978873241fdf8e2bbc`](https://github.com/deepseek-ai/deepseek-harness/commit/cd5ef8148158c3a752a658978873241fdf8e2bbc) | 只用于理解其当时的兼容性处理，不作为本项目 DSH 基线                           |
+| [dataelement/dsh-desktop](https://github.com/dataelement/dsh-desktop) | commit [`07fd40a2a9301fd34672931faeb37d1ddbe67538`](https://github.com/dataelement/dsh-desktop/commit/07fd40a2a9301fd34672931faeb37d1ddbe67538)（2026-08-31 main HEAD）                                                                 | 独立 Host 进程监督、Safe Mode、插件 generation、配对 bridge、更新状态机与打包 |
+| dataelement vendored DSH runtime                          | [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-alpha.1)                                                                                                        | 只用于理解其协议适配与 generation 实现，不作为本项目 DSH 基线                 |
+
+记录规则：
+
+- 后续只有在实际查阅新的外部代码并采用了其中思路时，才更新这张记录；
+- 外部项目的 PR、release 节奏和测试结果不是本项目的升级信号或放行条件；
+- 本项目采用架构模式，不复制外部实现；若以后直接移植 dataelement 的代码，必须按其 [MIT License](https://github.com/dataelement/dsh-desktop/blob/07fd40a2a9301fd34672931faeb37d1ddbe67538/LICENSE) 保留版权和许可声明，并在本仓库的依赖/NOTICE 记录中注明来源。
