@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-本项目是面向个人本机使用的 macOS Desktop。当前不公开分发、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
+本项目是面向个人本机使用的 macOS Desktop，源代码可公开并由使用者自行构建；项目当前不公开分发预编译二进制、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
 
 安全模型由[架构](docs/architecture.md)、[Host-control 协议](docs/protocols/host-control.md)和[数据布局](docs/data-layout.md)共同约束。
 
@@ -119,4 +119,4 @@ launcher 保存校验后的 last-effective policy，并内置 Host 插件不能�
 
 发现安全问题时，通过与仓库所有者既有的私有沟通渠道报告，不在公开 issue、日志粘贴或聊天截图中附带 credentials、authenticated URL、home 内容或设备秘密。
 
-公开分发前会补充正式安全联系人、支持版本窗口、响应时限和安全公告流程。
+公开分发预编译二进制前会补充正式安全联系人、支持版本窗口、响应时限和安全公告流程。

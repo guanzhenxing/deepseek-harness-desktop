@@ -228,7 +228,7 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 链外要求：人工使用一个观察周期后才把候选标记为当前版本；保留上一健康 DMG 作为二进制回退候选。手动升级与回退步骤见[升级指南](upgrade-guide.md)。
 
-公开分发前必须另行设计评审，完成 Developer ID、hardened runtime、notarization、正式许可证、隐私说明、安全联系和更新通道。
+公开源代码不要求 Developer ID、hardened runtime 或 notarization。公开分发预编译二进制前必须另行设计评审，完成 Developer ID、hardened runtime、notarization、隐私说明、正式安全联系和更新通道。
 
 ## 10. 测试与证据基线
 

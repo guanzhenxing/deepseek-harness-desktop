@@ -94,12 +94,13 @@ corepack pnpm@11.7.0 smoke:package    # 安装级制品冒烟
 
 当前版本：**v0.1.0**（darwin-arm64）。候选已通过完整发布链（含安装级冒烟与跨版本升级演练）；按[开发指南](docs/development.md)的发布流程，完成一个日用观察周期后才正式标记为当前发布。
 
-以下能力不在当前版本内（进入条件见[路线图](docs/roadmap.md)）：自动更新、插件市场、远程访问、setup wizard、桌面终端、多 profile UI、Windows/Linux 支持、签名与公证。
+以下能力不在当前版本内（进入条件见[路线图](docs/roadmap.md)）：自动更新、插件市场、远程访问、setup wizard、桌面终端、多 profile UI、Windows/Linux 支持、预编译制品签名与公证。
 
 已知限制：
 
-- 第三方 bundle 的引入审查（校验、隔离装入、字节复验）可用，但第三方 bundle 在 profile 内启动不在本版能力内（上游 loader 按名解析的布局限制，见[插件引入](docs/plugin-intake.md)）；`verify:plugin-intake` 的启动轮在该设计落地前保持失败；
-- Dock 右键退出与 Dock 图标存在已知问题。
+- 第三方 bundle 的引入审查（校验、隔离装入、字节复验）可用，但第三方 bundle 在 profile 内启动不在本版能力内（上游 loader 按名解析的布局限制，见[插件引入](docs/plugin-intake.md)）；`verify:plugin-intake` 的启动轮在该设计落地前保持失败。
+
+Dock 图标与 Dock 右键退出已于 2026-09-09 完成人工验证。
 
 ## 文档
 
@@ -130,4 +131,4 @@ tests/               # 隔离 home 的源码级桌面冒烟与共享 home driver
 
 ## 许可证
 
-本仓库尚未选择开源许可证（根 package 标记为 `UNLICENSED`）。公开发布或接受外部贡献前必须明确许可证，并记录任何直接移植代码的第三方版权与许可。
+本项目采用 [MIT License](LICENSE)，Copyright (c) 2026 Jesen。
