@@ -34,7 +34,7 @@ launcher 侧阶段（shell-core / desktop-recovery）：
 
 `lease` 错误码不进恢复窗口：lease 获取失败保持入口生命周期行为（Desktop 对话框+退出 1，CLI 退出码 3）。
 
-¹ 上游 dsh 0.1.2-rc.1 的 boot 阶段错误统一以 `BOOT_FAILED` 到达，尚不携带结构化的 `MISSING_CREDENTIAL`/`PORT_IN_USE` 码；这两行映射在上游 fatal 信封携带这些 code 时生效，当前这类失败分类为 unknown（绝不从消息文本猜测）。native-ui 阶段同样为接口预留。
+¹ 当前上游基线的 boot 阶段错误统一以 `BOOT_FAILED` 到达，尚不携带结构化的 `MISSING_CREDENTIAL`/`PORT_IN_USE` 码；这两行映射在上游 fatal 信封携带这些 code 时生效，当前这类失败分类为 unknown（绝不从消息文本猜测）。native-ui 阶段同样为接口预留。
 
 ## 2. 摘要脱敏
 

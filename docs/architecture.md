@@ -144,8 +144,8 @@ desktop-recovery-bridge
 ```text
 launcher identity/single-instance
 → resolve DSH home
-→ home compatibility admission（勘察 + 预检，见协议）
 → acquire home lease
+→ home compatibility admission（marker 读取 + 格式勘察 + 预检；写入预约随首次写入，见协议）
 → profile-manager snapshots and reconciles ProfileRef("desktop")
 → host-supervisor creates private channel and Host runner
 → Host runner boots DSH and injects desktopSurface proxy
