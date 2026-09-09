@@ -22,7 +22,39 @@ corepack pnpm@11.7.0 install --frozen-lockfile
 corepack pnpm@11.7.0 check
 ```
 
-## 2. 命令清单
+## 2. 目录结构
+
+```text
+deepseek-harness-desktop/
+├── .github/workflows/            # CI 门禁（check / macOS 集成与冒烟 / 候选打包）
+├── apps/
+│   ├── desktop-launcher/         # Electron 自举入口：应用身份、窗口/托盘/菜单、恢复 UI 与打包配置
+│   └── bundled-cli/              # dsh-native 包装进程：lease、子进程身份登记与退出码契约
+├── packages/
+│   ├── desktop-plugin/           # DSH bundle 插件，Desktop 产品集成主体（正常 surface 发布者）
+│   ├── desktop-recovery-bridge/  # Safe Mode 最小第一方 bundle（recovery surface 发布者）
+│   ├── desktop-contracts/        # 按能力分入口、独立版本的可序列化窄控制契约
+│   ├── host-supervisor/          # 独立 Host 进程创建、握手校验、稳定性窗口与有界关停
+│   ├── profile-manager/          # ProfileRef、reconcile、修订事务恢复与 Safe Mode 投影
+│   ├── home-lease/               # 整 home 排他 lease、owner 身份与 doctor 清锁
+│   ├── release-compatibility/    # home 兼容性准入：marker、格式勘察、预检与写入预约
+│   ├── product-config/           # 产品身份常量（产品名、数据目录名、CLI 名、默认 profile 名）
+│   └── shell-core/               # Electron 生命周期编排、窗口、托盘、日志与恢复状态
+├── scripts/                      # 构建与校验脚本：staging、打包、闭包/补丁对账、发行证据、升级演练、文档校验
+│   └── dsh-native.mjs            # dsh-native 开发入口（持 lease）
+├── tests/
+│   ├── smoke/                    # 源码级与安装级桌面冒烟（dsh-ui/host-crash/package 等）
+│   ├── helpers/                  # 隔离 home fixture、共享 home driver、mock LLM、启动性能探针
+│   ├── fixtures/                 # home 格式、插件引入与安装控制器测试夹具
+│   └── upgrade/                  # 跨版本升级演练驱动与夹具
+├── build/                        # 兼容性策略、上游制品记录、electron-builder 配置与图标素材
+├── patches/                      # 本地补丁账本（当前为空账本）
+└── docs/                         # 架构、协议、数据布局、路线图与开发文档
+```
+
+各 package 的职责与依赖方向详见[架构](architecture.md)。
+
+## 3. 命令清单
 
 | 命令                                        | 用途                                                        |
 | ------------------------------------------- | ----------------------------------------------------------- |
@@ -68,7 +100,7 @@ corepack pnpm@11.7.0 check
 
 命令名是仓库契约；package 内部脚本可以变化，但 CI 和开发文档不引用临时实现路径。
 
-## 3. 工作项分类
+## 4. 工作项分类
 
 每个变更先有一个可追踪的 issue 或本地 spec，至少写清：用户或维护问题、范围和明确不改的内容、影响的进程/数据和信任边界、可观察验收条件、回滚或失败行为。
 
@@ -83,7 +115,7 @@ corepack pnpm@11.7.0 check
 
 局部实现、可逆重构和 bug 修复使用 issue/spec 与测试即可，不为每个提交写设计说明。
 
-## 4. 分支与提交
+## 5. 分支与提交
 
 采用 trunk-based workflow：
 
@@ -94,7 +126,7 @@ corepack pnpm@11.7.0 check
 - 不把 DSH baseline 升级与壳架构重构或产品功能放在同一分支；
 - 不提交真实 DSH home、credentials、authenticated URL、签名私钥或脱敏前日志。
 
-## 5. 实施循环
+## 6. 实施循环
 
 每个工作项遵循：
 
@@ -111,11 +143,11 @@ issue/spec
 → merge
 ```
 
-### 5.1 最小纵向切片
+### 6.1 最小纵向切片
 
 优先交付可观察的端到端路径，而不是先铺满所有抽象：一条切片必须从 launcher 创建 Host runner，一直走到 `desktop-plugin` 发布 surface 并挂载官方 UI；不能只完成一组没有运行路径的 package skeleton。
 
-### 5.2 Contract-first 与 TDD
+### 6.2 Contract-first 与 TDD
 
 以下部分先写失败测试，再实现最小行为：
 
@@ -128,7 +160,7 @@ issue/spec
 
 跨进程协议保留 launcher-new/Host-old 和 launcher-old/Host-new 双向 fixtures。测试不得仅断言 TypeScript 编译通过。
 
-### 5.3 Fixture 与故障注入
+### 6.3 Fixture 与故障注入
 
 profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)规定的 `<testHome>`。
 
@@ -143,7 +175,7 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 测试结束后先验证临时目录身份，再执行清理；不对环境变量展开后的宽路径做递归删除。
 
-## 6. 审查门禁
+## 7. 审查门禁
 
 | 变更范围                | 必须通过                                                        |
 | ----------------------- | --------------------------------------------------------------- |
@@ -161,7 +193,7 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 1. Standards：是否符合架构、安全和开发规范；
 2. Spec：是否实现工作项要求，有无遗漏或范围漂移。
 
-## 7. 文档规则
+## 8. 文档规则
 
 | 文档                          | 内容权威                       | 何时更新                         |
 | ----------------------------- | ------------------------------ | -------------------------------- |
@@ -178,7 +210,7 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 `pnpm check:docs` 必须随新增文档继续验证本地链接和格式。
 
-## 8. 发布流程
+## 9. 发布流程
 
 发布本机候选 DMG 的完整链（`pnpm verify:release`）：
 
@@ -198,7 +230,7 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 公开分发前必须另行设计评审，完成 Developer ID、hardened runtime、notarization、正式许可证、隐私说明、安全联系和更新通道。
 
-## 9. 测试与证据基线
+## 10. 测试与证据基线
 
 当前基线（合并任何变更前必须保持继续通过）：
 
