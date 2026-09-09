@@ -480,9 +480,33 @@ function sameInode(
   return left.dev === right.dev && left.ino === right.ino
 }
 
+/**
+ * Every path segment from the home down must be a real directory before a
+ * recursive delete: a symlinked `run`, `profile-transactions`, or `<id>`
+ * would redirect the prune outside the home. lstat only refuses to follow
+ * its final segment, so each accumulated prefix is checked on its own.
+ */
+async function isRealDirectoryChain(home: string, ...segments: string[]): Promise<boolean> {
+  const { lstat } = await import('node:fs/promises')
+  let current = home
+  for (const segment of segments) {
+    current = path.join(current, segment)
+    try {
+      const stats = await lstat(current)
+      if (stats.isSymbolicLink() || !stats.isDirectory()) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
 /** Drop terminal transaction directories beyond the retention window. */
 export async function pruneRetainedTransactions(home: string): Promise<void> {
   const root = transactionsRoot(home)
+  // A redirected root (symlinked `run/` or `profile-transactions/`) means
+  // every enumerated id would delete outside the home — prune nothing.
+  if (!(await isRealDirectoryChain(home, 'run', 'profile-transactions'))) return
   const entries = await readdirSafe(root)
   const records: { id: string; createdAt: string }[] = []
   for (const id of entries) {
@@ -500,7 +524,11 @@ export async function pruneRetainedTransactions(home: string): Promise<void> {
   records.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
   const excess = records.slice(0, records.length - RETAINED_TRANSACTION_LIMIT)
   for (const record of excess) {
-    await rm(transactionDir(home, record.id), { recursive: true, force: true })
+    // Re-check immediately before the delete: only a real directory under
+    // the real root is ever removed; a symlinked id stays untouched.
+    if (await isRealDirectoryChain(home, 'run', 'profile-transactions', record.id)) {
+      await rm(transactionDir(home, record.id), { recursive: true, force: true })
+    }
   }
   await syncDirectory(root)
 }

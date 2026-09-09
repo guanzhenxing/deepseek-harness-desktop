@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   categorizeFailure,
+  redactSummaryText,
   shouldRollbackProfile,
   toStartupFailure,
   type StartupFailure,
@@ -183,5 +184,25 @@ describe('toStartupFailure', () => {
     })
     expect(failure.category).toBe('credentials')
     expect(failure.summary).toContain('official')
+  })
+})
+
+describe('redactSummaryText', () => {
+  it('masks authenticated URL query tokens from raw error messages', () => {
+    const text =
+      'Failed to load URL: http://127.0.0.1:53219/?token=abc123DEF&x=1 (ERR_CONNECTION_REFUSED)'
+    expect(redactSummaryText(text, undefined)).not.toContain('abc123DEF')
+    expect(redactSummaryText(text, undefined)).toContain('token=<redacted>')
+  })
+
+  it('replaces the configured home path with a hint', () => {
+    const text = `cannot read ${'/tmp/dsh-home-xyz'}/settings.yaml`
+    expect(redactSummaryText(text, '/tmp/dsh-home-xyz')).not.toContain('/tmp/dsh-home-xyz')
+    expect(redactSummaryText(text, '/tmp/dsh-home-xyz')).toContain('the configured DSH home')
+  })
+
+  it('bounds and strips control characters without crashing on odd input', () => {
+    expect(redactSummaryText(`x${'\u0000'}y`, undefined)).toBe('x y')
+    expect(redactSummaryText('a'.repeat(5_000), undefined).length).toBeLessThanOrEqual(1_024)
   })
 })

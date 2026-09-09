@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 import type { HomeLease, ProcessProbe } from '@dsh-desktop/home-lease'
 
@@ -10,6 +10,11 @@ import {
   type LauncherToHostMessage,
   type LoopbackSurface,
 } from '@dsh-desktop/desktop-contracts/host-control'
+
+/** Short discriminating digest of a home path, for error messages only. */
+function homeDigest(home: string): string {
+  return `#${createHash('sha256').update(home).digest('hex').slice(0, 12)}`
+}
 
 export type HostBootstrap = Readonly<{
   home: string
@@ -210,11 +215,13 @@ export class HostSupervisor {
     try {
       // The lease authorizes writes to ITS home; a mismatched request.home
       // would hand the Host write authorization for a different home —
-      // refuse before anything is registered or spawned.
+      // refuse before anything is registered or spawned. The message carries
+      // short digests, not the paths themselves: local paths never belong in
+      // errors that reach logs or smoke reports.
       if (request.home !== request.lease.home) {
         throw new HostControlError(
           'BOOT_FAILED',
-          `lease covers home ${JSON.stringify(request.lease.home)}, not ${JSON.stringify(request.home)}`,
+          `lease covers home ${homeDigest(request.lease.home)}, not ${homeDigest(request.home)}`,
         )
       }
       await request.lease.beforeSpawn(request.profileName)

@@ -374,6 +374,24 @@ async function main() {
   if (process.platform !== 'darwin') {
     throw new Error(`packaged desktop targets macOS (got ${process.platform})`)
   }
+  // `pnpm deploy` rewrites the root lockfile and the restore step below puts
+  // back exactly what this run started from. A lockfile with uncommitted
+  // changes would therefore be silently destroyed — refuse up front rather
+  // than discard the user's work (the release chain's clean-tree gate makes
+  // the same demand before any staging happens).
+  const lockfileStatus = spawnSync('git', ['status', '--porcelain', '--', 'pnpm-lock.yaml'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  if (lockfileStatus.status !== 0 || lockfileStatus.error !== undefined) {
+    throw new Error('stage-runtime: cannot inspect the pnpm-lock.yaml state (git status failed)')
+  }
+  if (lockfileIsDirty(lockfileStatus.stdout)) {
+    throw new Error(
+      'stage-runtime: pnpm-lock.yaml has uncommitted changes that staging would overwrite — commit or stash them first',
+    )
+  }
+  const lockfileBefore = readFileSync(path.join(root, 'pnpm-lock.yaml'), 'utf8')
   const arch = process.arch
   await assertIcons()
   console.log('stage-runtime: building workspace')
@@ -381,6 +399,38 @@ async function main() {
   run('corepack', [`pnpm@${PNPM_VERSION}`, 'run', 'build:native'], { cwd: root })
   loadProduct()
 
+  let stagingError
+  let restoreError
+  try {
+    await stageAll(arch)
+  } catch (error) {
+    stagingError = error
+  } finally {
+    // Restore the lockfile this run started from — also on failure, so a
+    // half-finished deploy never leaves the injected-lockfile state
+    // behind. The restore itself never throws from the finally block, so
+    // it can neither mask nor be masked by the staging error.
+    if (process.env.DSH_STAGE_SKIP_RESTORE !== '1') {
+      try {
+        writeFileSync(path.join(root, 'pnpm-lock.yaml'), lockfileBefore)
+        run('corepack', [`pnpm@${PNPM_VERSION}`, 'install', '--frozen-lockfile'], { cwd: root })
+        console.log('stage-runtime: restored pnpm-lock.yaml after deploy')
+      } catch (error) {
+        restoreError = error
+      }
+    }
+  }
+  if (stagingError !== undefined) {
+    if (restoreError !== undefined) {
+      console.error('stage-runtime: lockfile restore also failed:', restoreError)
+    }
+    throw stagingError
+  }
+  // A restore failure on an otherwise-successful run must fail the run.
+  if (restoreError !== undefined) throw restoreError
+}
+
+async function stageAll(arch) {
   await mkdir(staging, { recursive: true })
   await rm(staging, { recursive: true, force: true })
   await mkdir(staging, { recursive: true })
@@ -433,19 +483,16 @@ async function main() {
 
   const entries = await readdir(staging)
   console.log(`stage-runtime: staged ${entries.join(', ')} (releaseId ${releaseId})`)
-
-  // `pnpm deploy` rewrites the root lockfile with file: injections for the
-  // deployed closure; a clean checkout would then resolve those packages to
-  // inert store copies (no build output) and break tsc/vitest. Restore the
-  // committed lockfile and re-link the workspace so the developer tree stays
-  // clean after every staging run.
-  if (process.env.DSH_STAGE_SKIP_RESTORE !== '1') {
-    const restore = spawnSync('git', ['checkout', '--', 'pnpm-lock.yaml'], { cwd: root })
-    if (restore.status === 0) {
-      console.log('stage-runtime: restored pnpm-lock.yaml after deploy')
-      run('corepack', [`pnpm@${PNPM_VERSION}`, 'install', '--frozen-lockfile'])
-    }
-  }
 }
 
-await main()
+/**
+ * `git status --porcelain -- pnpm-lock.yaml` output is empty only when the
+ * lockfile matches HEAD (and is tracked). Anything else means the restore
+ * step would discard uncommitted work.
+ */
+export function lockfileIsDirty(porcelainOutput) {
+  return porcelainOutput.trim() !== ''
+}
+
+const invokedDirectly = process.argv[1] === fileURLToPath(import.meta.url)
+if (invokedDirectly) await main()

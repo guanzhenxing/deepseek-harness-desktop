@@ -1,4 +1,14 @@
-import { mkdir, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
+import {
+  lstat,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -15,10 +25,12 @@ import { planDesktopReconcile } from '../src/reconcile-plan.js'
 import {
   applyProfileTransaction,
   commitProfileTransaction,
+  pruneRetainedTransactions,
   readJournal,
   retainProfileTransaction,
   rollbackProfileTransaction,
   transactionDir,
+  transactionsRoot,
 } from '../src/revision-transaction.js'
 import {
   findAppliedTransactions,
@@ -424,3 +436,93 @@ async function applyFullInitial(
   const tx = await applyProfileTransaction(plan, lease)
   await commitProfileTransaction(tx.id, lease)
 }
+
+describe('pruneRetainedTransactions', () => {
+  function terminalJournal(home: string, id: string, createdAt: string): string {
+    return JSON.stringify({
+      schemaVersion: 1,
+      id,
+      ref: { home, name: 'desktop', dir: path.join(home, 'profiles', 'desktop') },
+      state: 'committed',
+      createdAt,
+      writes: [],
+    })
+  }
+
+  function uuid(index: number): string {
+    return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
+  }
+
+  async function seedTerminalJournals(home: string, count: number): Promise<void> {
+    for (let index = 0; index < count; index += 1) {
+      const dir = transactionDir(home, uuid(index))
+      await mkdir(dir, { recursive: true, mode: 0o700 })
+      await writeFile(
+        path.join(dir, 'transaction.json'),
+        terminalJournal(
+          home,
+          uuid(index),
+          `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+        ),
+      )
+    }
+  }
+
+  it('keeps the newest RETAINED_TRANSACTION_LIMIT terminal transactions', async () => {
+    const { ref } = await leasedHome()
+    await seedTerminalJournals(ref.home, 22)
+    await pruneRetainedTransactions(ref.home)
+    // 22 seeded - 20 retained = the 2 oldest gone, the rest present.
+    expect(await readJournal(ref.home, uuid(0))).toBe('missing')
+    expect(await readJournal(ref.home, uuid(1))).toBe('missing')
+    expect((await readJournal(ref.home, uuid(2))) !== 'missing').toBe(true)
+  })
+
+  it('never deletes through a symlinked transaction directory', async () => {
+    const { ref } = await leasedHome()
+    await seedTerminalJournals(ref.home, 22)
+    // Redirect the oldest excess id at a directory outside the home.
+    const outside = path.join(path.dirname(ref.home), 'outside-canary')
+    await mkdir(outside, { recursive: true })
+    await writeFile(path.join(outside, 'payload.txt'), 'untouched\n')
+    await rm(transactionDir(ref.home, uuid(0)), { recursive: true, force: true })
+    await symlink(outside, transactionDir(ref.home, uuid(0)))
+    // The journal itself stays valid: the leaf is a directory again, so
+    // only the prune-side chain check can stop the redirected delete.
+    await writeFile(
+      path.join(transactionDir(ref.home, uuid(0)), 'transaction.json'),
+      terminalJournal(ref.home, uuid(0), '2026-01-01T00:00:00Z'),
+    )
+    await pruneRetainedTransactions(ref.home)
+    expect(await readFile(path.join(outside, 'payload.txt'), 'utf8')).toBe('untouched\n')
+    expect((await lstat(transactionDir(ref.home, uuid(0)))).isSymbolicLink()).toBe(true)
+    // The real excess directory is still pruned.
+    expect(await readJournal(ref.home, uuid(1))).toBe('missing')
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  it('prunes nothing when the transactions root is a redirected symlink', async () => {
+    const { ref } = await leasedHome()
+    await seedTerminalJournals(ref.home, 22)
+    const root = transactionsRoot(ref.home)
+    const outside = path.join(path.dirname(ref.home), 'outside-root')
+    await mkdir(outside, { recursive: true })
+    // Swap the real root for a symlink to an outside directory that also
+    // holds a canary the prune must never touch.
+    const canary = path.join(outside, 'canary.txt')
+    await writeFile(canary, 'untouched\n')
+    const realRoot = `${root}.real`
+    await rename(root, realRoot)
+    await symlink(outside, root)
+    let canaryContent: string | undefined
+    try {
+      await pruneRetainedTransactions(ref.home)
+      canaryContent = await readFile(canary, 'utf8')
+    } finally {
+      await unlink(root)
+      await rename(realRoot, root)
+      await rm(outside, { recursive: true, force: true })
+    }
+    expect(canaryContent).toBe('untouched\n')
+  })
+})

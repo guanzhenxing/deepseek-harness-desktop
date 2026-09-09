@@ -86,6 +86,16 @@ function sanitizeSummary(summary: string, home: string | undefined): string {
   return text
 }
 
+/**
+ * Redact a diagnostic string for stderr/logs/smoke reports: home paths
+ * become a hint, token/api-key/password/Bearer shapes are masked, control
+ * characters collapse, and the result is bounded. Anything the launcher
+ * prints outside the normal startup-failure pipeline must go through this.
+ */
+export function redactSummaryText(summary: string, home: string | undefined): string {
+  return sanitizeSummary(summary, home)
+}
+
 const CREDENTIAL_GUIDANCE =
   'credential is missing; configure it through the official DSH settings — the desktop never creates or copies credentials'
 

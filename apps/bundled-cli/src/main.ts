@@ -82,6 +82,39 @@ function scanLauncherProfile(argv: readonly string[]): string | undefined {
   return profile
 }
 
+/**
+ * The `plugin` subcommand grammar differs from the root launcher: bundle
+ * names are positionals that legitimately precede `--profile`, and the
+ * upstream Commander accepts the flag wherever it appears. Stopping at the
+ * first positional here (as the root scan does) would route
+ * `plugin add <bundle> --profile <name>` through the lease-less branch
+ * while upstream still writes that profile.
+ */
+function scanPluginProfile(argv: readonly string[]): string | undefined {
+  let profile: string | undefined
+  let expectingProfileValue = false
+  for (const token of argv) {
+    if (expectingProfileValue) {
+      expectingProfileValue = false
+      profile = token
+      continue
+    }
+    if (token === '--') break
+    if (token === '--profile') {
+      expectingProfileValue = true
+      continue
+    }
+    if (token.startsWith('--profile=')) {
+      profile = token.slice('--profile='.length)
+    }
+    // Any other token — the verb, bundle names, or other options — does
+    // not stop the scan.
+  }
+  // A dangling `--profile` with no value never attributes a lease.
+  if (expectingProfileValue) profile = undefined
+  return profile
+}
+
 export function planCliInvocation(argv: readonly string[]): CliInvocationPlan {
   if (argv.length === 2 && argv[0] === 'doctor' && argv[1] === '--unlock') {
     return { kind: 'doctor-unlock' }
@@ -90,7 +123,7 @@ export function planCliInvocation(argv: readonly string[]): CliInvocationPlan {
   if (argv[0] === 'web') {
     profile = 'web'
   } else if (argv[0] === 'plugin') {
-    profile = scanLauncherProfile(argv.slice(1))
+    profile = scanPluginProfile(argv.slice(1))
   } else {
     profile = scanLauncherProfile(argv)
   }

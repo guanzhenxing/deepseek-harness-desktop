@@ -153,8 +153,8 @@ describe('planCliInvocation', () => {
       kind: 'passthrough',
       profile: 'tui',
     })
-    // After the first positional or --, launcher flags belong to the inner
-    // app/pnpm and must not change our lease attribution.
+    // Root launcher flags stop at the first positional or `--`; beyond that
+    // they belong to the inner app and must not change lease attribution.
     expect(planCliInvocation(['run', '--profile', 'x'])).toEqual({
       kind: 'passthrough',
       profile: undefined,
@@ -163,7 +163,28 @@ describe('planCliInvocation', () => {
       kind: 'passthrough',
       profile: undefined,
     })
+    // The `plugin` subcommand is different: bundle names are positionals
+    // that legitimately precede `--profile`, and upstream Commander parses
+    // the flag wherever it appears — so the scan must keep walking them.
     expect(planCliInvocation(['plugin', 'add', '--profile', 'x'])).toEqual({
+      kind: 'passthrough',
+      profile: 'x',
+    })
+    expect(planCliInvocation(['plugin', 'add', '@example/a', '--profile', 'desktop'])).toEqual({
+      kind: 'passthrough',
+      profile: 'desktop',
+    })
+    expect(planCliInvocation(['plugin', 'remove', 'a', 'b', '--profile=x'])).toEqual({
+      kind: 'passthrough',
+      profile: 'x',
+    })
+    // Operands after `--` are bundle names, not options, upstream and here.
+    expect(planCliInvocation(['plugin', 'add', 'fixture', '--', '--profile', 'x'])).toEqual({
+      kind: 'passthrough',
+      profile: undefined,
+    })
+    // No `--profile` anywhere: upstream rejects the invocation itself.
+    expect(planCliInvocation(['plugin', 'add', 'fixture'])).toEqual({
       kind: 'passthrough',
       profile: undefined,
     })

@@ -207,10 +207,16 @@ describe('HostSupervisor lease ordering', () => {
   it('refuses a start whose home does not match the lease home', async () => {
     const setup = fixture()
     const request = { ...startRequest(setup.lease), home: '/tmp/a-different-home' }
-    await expect(setup.supervisor.start(request)).rejects.toMatchObject({
+    const rejection = await setup.supervisor.start(request).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    expect(rejection).toMatchObject({
       code: 'BOOT_FAILED',
-      message: /lease covers home/u,
+      message: /lease covers home #/u,
     })
+    // Local paths never reach logs or smoke reports, even from this guard.
+    expect((rejection as Error).message).not.toContain('/tmp/a-different-home')
     // Nothing registered, nothing spawned: the whole-home single-writer
     // guarantee is enforced before any state changes.
     expect(setup.events).not.toContain('spawn-waiting')

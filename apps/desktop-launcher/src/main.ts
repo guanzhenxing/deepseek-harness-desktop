@@ -1,6 +1,5 @@
 import os from 'node:os'
 import { existsSync, readFileSync } from 'node:fs'
-import { writeFile as writeFilePromise } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -37,6 +36,7 @@ import {
   readWindowState,
   RendererReloadBudget,
   restoreWindowState,
+  redactSummaryText,
   RecoverySessionController,
   StartupFailureError,
   toStartupFailure,
@@ -53,6 +53,7 @@ import {
 } from './external-links.js'
 import { describeLeaseBlock, resolveSmokeHome } from './lease-diagnostics.js'
 import { createRecoveryWindow, type RecoveryWindowHandle } from './recovery-window.js'
+import { writeSurfaceUrlFile } from './surface-url-file.js'
 import { resolveSmokeUserData } from './m0-paths.js'
 import {
   buildAboutPanelOptions,
@@ -639,9 +640,14 @@ async function startApplication(): Promise<void> {
     ) {
       smokeReport({ kind: 'renderer-reloaded', reason: details.reason })
       void port.reloadSurface().catch((reloadError: unknown) => {
+        // Electron loadURL rejections can embed the full authenticated URL;
+        // stderr is not exempt from the redaction rules.
         console.error(
           'renderer reload failed:',
-          reloadError instanceof Error ? reloadError.message : reloadError,
+          redactSummaryText(
+            reloadError instanceof Error ? reloadError.message : String(reloadError),
+            home,
+          ),
         )
         // The one reload the budget granted is gone and no further
         // render-process-gone is guaranteed to arrive: route to the recovery
@@ -732,7 +738,7 @@ async function startApplication(): Promise<void> {
             smokeReport({
               kind: 'host-failed',
               code: event.error.code,
-              summary: event.error.message,
+              summary: redactSummaryText(event.error.message, home),
             })
           }
           if (event.kind !== 'crashed') return
@@ -859,16 +865,14 @@ async function startApplication(): Promise<void> {
     let surfaceOrigin: string | undefined
     if (driverOwnedModes.includes(smokeMode) && readyHost !== undefined) {
       surfaceOrigin = new URL(readyHost.surface.url).origin
-      await writeFilePromise(
-        path.join(app.getPath('userData'), 'surface-url'),
-        `${readyHost.surface.url}\n`,
-        { mode: 0o600 },
-      ).catch((error: unknown) => {
-        console.error(
-          'surface URL file could not be written:',
-          error instanceof Error ? error.message : error,
-        )
-      })
+      await writeSurfaceUrlFile(app.getPath('userData'), readyHost.surface.url).catch(
+        (error: unknown) => {
+          console.error(
+            'surface URL file could not be written:',
+            error instanceof Error ? error.message : error,
+          )
+        },
+      )
     }
     smokeReport({
       kind: 'ui-ready',
