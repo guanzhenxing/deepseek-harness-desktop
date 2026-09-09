@@ -117,6 +117,6 @@ launcher 保存校验后的 last-effective policy，并内置 Host 插件不能�
 
 ## 报告安全问题
 
-发现安全问题时，通过与仓库所有者既有的私有沟通渠道报告，不在公开 issue、日志粘贴或聊天截图中附带 credentials、authenticated URL、home 内容或设备秘密。
+发现安全问题时，通过 GitHub 私密漏洞报告提交（仓库 Security 页的 "Report a vulnerability"）；仓库仍为私有时，使用与仓库所有者既有的私有沟通渠道。任何渠道都不得附带 credentials、authenticated URL、home 内容或设备秘密，也不要用公开 issue 或日志粘贴报告安全问题。
 
-公开分发预编译二进制前会补充正式安全联系人、支持版本窗口、响应时限和安全公告流程。
+公开分发预编译二进制前会补充支持版本窗口、响应时限和安全公告流程。
