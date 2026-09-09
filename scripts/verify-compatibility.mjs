@@ -2,7 +2,8 @@
 // Verify the release compatibility manifest chain:
 //
 //   1. regenerate the manifest from the pinned inputs and compare it
-//      byte-for-byte with the committed release/compatibility.json;
+//      byte-for-byte with the generated release/compatibility.json
+//      (release/ is untracked; a fresh clone must run generate:compatibility once);
 //   2. parse both the regenerated and the staged (if present) manifest with
 //      the strict release schema and require the embedded copy to carry the
 //      same release facts;
@@ -54,8 +55,8 @@ async function main() {
     )
     return 1
   }
-  const committedBytes = await readFile(releasePath, 'utf8')
-  if (committedBytes !== `${JSON.stringify(manifest, undefined, 2)}\n`) {
+  const releaseBytes = await readFile(releasePath, 'utf8')
+  if (releaseBytes !== `${JSON.stringify(manifest, undefined, 2)}\n`) {
     console.error(
       'verify-compatibility: release/compatibility.json does not match the pinned inputs; regenerate it',
     )

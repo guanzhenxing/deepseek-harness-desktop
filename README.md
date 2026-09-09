@@ -48,9 +48,12 @@ Electron launcher / dsh-native wrapper
 
 ```bash
 corepack pnpm@11.7.0 install --frozen-lockfile
+corepack pnpm@11.7.0 generate:compatibility
 corepack pnpm@11.7.0 package:dir
 corepack pnpm@11.7.0 package:dmg
 ```
+
+`generate:compatibility` 生成 `release/compatibility.json`（`release/` 不入库，全新 clone 后必须先生成一次，`package:dir` 的清单校验才可通过）。
 
 构建产物位于 `release/dist/`，SHA-256 与内嵌清单见 `release/artifacts.json`。手动升级、回退与升级演练见[升级指南](docs/upgrade-guide.md)。
 
