@@ -14,7 +14,6 @@ const requiredDocuments = [
   'docs/protocols/host-control.md',
   'docs/protocols/home-lease.md',
   'docs/protocols/startup-recovery.md',
-  'docs/adr/README.md',
 ]
 
 const ignoredDirectories = new Set([

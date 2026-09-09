@@ -98,7 +98,7 @@ corepack pnpm@11.7.0 smoke:package    # 安装级制品冒烟
 
 已知限制：
 
-- 第三方 bundle 的引入审查（校验、隔离装入、字节复验）可用，但第三方 bundle 在 profile 内启动不在本版能力内（上游 loader 按名解析的布局限制，见 [ADR-0010](docs/adr/0010-plugin-intake-trust-boundary.md)）；`verify:plugin-intake` 的启动轮在该设计落地前保持失败；
+- 第三方 bundle 的引入审查（校验、隔离装入、字节复验）可用，但第三方 bundle 在 profile 内启动不在本版能力内（上游 loader 按名解析的布局限制，见[插件引入](docs/plugin-intake.md)）；`verify:plugin-intake` 的启动轮在该设计落地前保持失败；
 - Dock 右键退出与 Dock 图标存在已知问题。
 
 ## 文档
@@ -116,13 +116,12 @@ corepack pnpm@11.7.0 smoke:package    # 安装级制品冒烟
 - [开发指南](docs/development.md)：环境、命令、测试与发布流程；
 - [安全策略](SECURITY.md)：威胁模型与未来能力进入条件；
 - [兼容性清单](docs/compatibility.json)：Desktop、DSH、Electron、Node、pnpm 与协议版本的机器可读事实；
-- [ADR 索引](docs/adr/README.md)：架构决策记录。
 
 ## 仓库结构
 
 ```text
 .github/workflows/   # CI 门禁
-docs/                # 架构、协议、ADR、路线图和开发文档
+docs/                # 架构、协议、路线图和开发文档
 scripts/             # 仓库验证与构建脚本
 apps/                # Electron launcher、bundled CLI（dsh-native）与独立 Host 入口
 packages/            # 契约、home-lease、profile、插件、监督器与 shell-core

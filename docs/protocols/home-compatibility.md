@@ -1,7 +1,6 @@
 # Home Compatibility Marker 协议
 
 - 状态：已实现（`packages/release-compatibility`）
-- 相关决策：[ADR-0009](../adr/0009-home-compatibility-admission.md)
 - 适用入口：Desktop launcher（含 Safe Mode 会话）与 `dsh-native` CLI 的全部会写 home 的路径
 
 ## 1. 目标与非目标
@@ -10,7 +9,7 @@
 
 - **只读 marker 读取 + fail-closed admission**：marker 缺失允许进入（现存 home 早于本机制）；未知 schema、损坏内容、不受支持的 dataEpoch 一律拒绝，且不产生任何 home 写入。
 - **只读 home 格式勘察**（`inspectHomeFormats`）、**纯预检判定**（`preflightHome`）与**写入预约**（`reserveHomeWrite`）：受支持入口在写入前将 schema 1 marker 原子落盘；未知格式、不可读格式、更高 epoch、需要迁移的数据在写入前拒绝。
-- **非目标**：自动数据迁移（preflight 返回 `MIGRATION_REQUIRED`，需独立 ADR）；阻止不受支持入口（裸 CLI、无 guard 旧二进制）写入。
+- **非目标**：自动数据迁移（preflight 返回 `MIGRATION_REQUIRED`，需单独的迁移设计）；阻止不受支持入口（裸 CLI、无 guard 旧二进制）写入。
 
 ## 2. Marker 布局与格式
 
@@ -79,7 +78,7 @@ parse marker → inspectHomeFormats（只读） → preflightHome（纯判定）
 
 - dataEpoch 是**本项目**的兼容性分组，不是 DSH 官方 schema。当前 epoch = 1，`supportedDataEpochs = [1]`，由 policy（`build/compatibility-policy.json`）与生成清单共同声明。
 - epoch 只在格式证据支持的升级里提升，且提升必须伴随升级演练证据；不为每个 Desktop 版本无故+1。
-- `MIGRATION_REQUIRED` 是显式缺口：本版本不迁移；迁移需要独立 ADR、停写与可验证备份。
+- `MIGRATION_REQUIRED` 是显式缺口：本版本不迁移；迁移需要单独的迁移设计、停写与可验证备份。
 
 ## 5. 安全与诚实边界
 

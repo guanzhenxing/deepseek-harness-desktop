@@ -1,7 +1,6 @@
 # Home Lease 协议
 
 - 状态：已实现（`packages/home-lease`）
-- 决策记录：[ADR-0005](../adr/0005-home-lease-process-identity.md)
 - 数据布局：[数据布局 §3](../data-layout.md)
 
 ## 1. 目标

@@ -5,7 +5,6 @@
 ```
 
 - 状态：已实现（`packages/shell-core/src/failure-policy.ts`、`packages/shell-core/src/recovery-controller.ts`、`packages/host-supervisor` 阶段化 boot）
-- 决策记录：[ADR-0006](../adr/0006-profile-revision-recovery.md)、[ADR-0007](../adr/0007-launcher-recovery-ipc.md)
 
 ## 1. 分类模型
 
@@ -49,7 +48,7 @@ launcher 侧阶段（shell-core / desktop-recovery）：
 2. 本次 reconcile 确实修改了 profile（或采纳了一个仍处 applied 的未归因事务）；
 3. 失败 category ∈ { profile-write, profile-composition }。
 
-其余一切失败（lease、home-config、credentials、network、runtime、renderer、unknown）保持用户数据原样，pending 事务以 `retained` 终态记录失败类别后进入恢复窗口（ADR-0007）由用户选择重试、Safe Mode 或退出。
+其余一切失败（lease、home-config、credentials、network、runtime、renderer、unknown）保持用户数据原样，pending 事务以 `retained` 终态记录失败类别后进入恢复窗口，由用户选择重试、Safe Mode 或退出。
 
 会话语义（`RecoverySessionController`）：
 

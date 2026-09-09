@@ -33,9 +33,9 @@ corepack pnpm@11.7.0 check
 - 可观察的验收条件；
 - 回滚或失败行为。
 
-## 何时需要 ADR
+## 重大变更的先行设计评审
 
-以下变化必须先建立 ADR（见 [ADR 索引](docs/adr/README.md)）：
+以下变化必须先写设计说明（记录问题、方案与被否决的备选），经评审后实施：
 
 - 新增或改变进程/信任边界；
 - 改变状态唯一权威或持久化 schema；
@@ -44,7 +44,7 @@ corepack pnpm@11.7.0 check
 - 选择 market provider、remote relay、设备凭据格式或 updater channel；
 - 数据不可逆迁移或公开发布策略。
 
-局部实现、可逆重构和 bug 修复使用 issue/spec 与测试即可，不为每次重构建立 ADR。
+局部实现、可逆重构和 bug 修复使用 issue/spec 与测试即可，不为每次重构写设计说明。
 
 ## 测试要求
 

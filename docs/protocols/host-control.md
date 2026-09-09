@@ -4,7 +4,6 @@
 - major：`1`
 - minor：`0`
 - 状态：normative（当前实现）
-- 决策来源：[ADR-0004](../adr/0004-version-native-capabilities-independently.md)
 
 ## 1. 适用范围
 

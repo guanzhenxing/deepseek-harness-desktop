@@ -20,6 +20,6 @@
 ### 已知限制
 
 - 本地自用构建：未签名/未公证（Gatekeeper 首次启动需右键打开），无自动更新器；
-- 第三方 bundle 的引入审查可用，但第三方 bundle 在 profile 内启动不可用（嵌入式 loader 按名解析的布局限制，见 [ADR-0010](docs/adr/0010-plugin-intake-trust-boundary.md)）；`verify:plugin-intake` 的启动轮在该设计落地前保持失败；
+- 第三方 bundle 的引入审查可用，但第三方 bundle 在 profile 内启动不可用（嵌入式 loader 按名解析的布局限制，见[插件引入](docs/plugin-intake.md)）；`verify:plugin-intake` 的启动轮在该设计落地前保持失败；
 - 仅 darwin-arm64；插件市场、远程访问、setup wizard、桌面终端、多 profile UI 不在当前范围（见[路线图](docs/roadmap.md)）；
 - Dock 右键退出与 Dock 图标存在已知问题。

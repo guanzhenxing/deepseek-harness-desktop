@@ -1,6 +1,5 @@
 # 架构
 
-- 决策来源：[ADR 索引](adr/README.md)
 - 相关文档：[协议](protocols/)、[数据布局](data-layout.md)、[路线图](roadmap.md)
 
 ## 1. 架构目标
@@ -214,7 +213,7 @@ Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依�
 
 | 能力                 | 进入实现前的门槛                                                                                                    |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 单 Host 多客户端     | 本地 discovery/attach、Host 所有权、客户端 principal 和协议 ADR                                                     |
+| 单 Host 多客户端     | 本地 discovery/attach、Host 所有权、客户端 principal 和协议设计                                                     |
 | 更新                 | Developer ID、notarization、签名信任根、last-effective policy、emergency stable source、迁移/降级规则               |
 | 插件市场             | recovery bridge Safe Mode、profile generation journal、plugin package contract、受信 catalog、故障归因与 drift 流程 |
 | 远程                 | 固定 DSH 基线上的 principal 传播和逐方法授权 prototype、设备撤销、TLS/可信 relay 与审计设计                         |
@@ -223,6 +222,6 @@ Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依�
 
 ## 10. 架构变更流程
 
-改变进程边界、状态权威、信任边界、持久化格式或公共协议 major version 时必须新建 ADR。可逆的内部实现调整记录在对应 issue/spec 和测试中，不为每次重构建立 ADR。
+改变进程边界、状态权威、信任边界、持久化格式或公共协议 major version 时，必须先通过专门的设计评审并记录变更理由与备选方案。可逆的内部实现调整记录在对应 issue/spec 和测试中，不要求单独设计文档。
 
 开发、审查和发布流程见[开发指南](development.md)。

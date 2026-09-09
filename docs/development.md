@@ -1,7 +1,7 @@
 # 开发指南
 
 - 入门与贡献流程见[贡献指南](../CONTRIBUTING.md)
-- 架构与边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)
+- 架构与边界见[架构](architecture.md)
 
 ## 1. 开发环境
 
@@ -72,7 +72,7 @@ corepack pnpm@11.7.0 check
 
 每个变更先有一个可追踪的 issue 或本地 spec，至少写清：用户或维护问题、范围和明确不改的内容、影响的进程/数据和信任边界、可观察验收条件、回滚或失败行为。
 
-以下变化必须先建立 ADR：
+以下变化必须先写设计说明并经评审：
 
 - 新增或改变进程/信任边界；
 - 改变状态唯一权威或持久化 schema；
@@ -81,7 +81,7 @@ corepack pnpm@11.7.0 check
 - 选择 market provider、remote relay、设备凭据格式或 updater channel；
 - 数据不可逆迁移或公开发布策略。
 
-局部实现、可逆重构和 bug 修复使用 issue/spec 与测试即可，不为每个提交创建 ADR。
+局部实现、可逆重构和 bug 修复使用 issue/spec 与测试即可，不为每个提交写设计说明。
 
 ## 4. 分支与提交
 
@@ -101,7 +101,7 @@ corepack pnpm@11.7.0 check
 ```text
 issue/spec
 → boundary review
-→ ADR when required
+→ design review when required
 → smallest vertical slice
 → contract/unit tests
 → implementation
@@ -154,11 +154,11 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 | Electron/IPC/navigation | security review、错误 sender/origin/schema 测试                 |
 | runtime/build/package   | `.app`/DMG 冒烟，不只运行开发入口                               |
 | DSH baseline            | 兼容性清单、补丁对账、完整测试与独立升级分支                    |
-| market/remote/updater   | 新 ADR、threat-model review、供应链/授权/迁移专项测试           |
+| market/remote/updater   | 设计评审、threat-model review、供应链/授权/迁移专项测试        |
 
 审查沿两个轴分别给结论：
 
-1. Standards：是否符合架构、ADR、安全和开发规范；
+1. Standards：是否符合架构、安全和开发规范；
 2. Spec：是否实现工作项要求，有无遗漏或范围漂移。
 
 ## 7. 文档规则
@@ -170,7 +170,6 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 | `CONTRIBUTING.md`             | 贡献入口与工作流               | 流程或门禁变化                   |
 | `docs/architecture.md`        | 当前组件、进程、信任和依赖边界 | 架构现状变化                     |
 | `docs/roadmap.md`             | 范围外能力与进入条件           | 范围或规划变化                   |
-| `docs/adr/**`                 | 不可逆决策及依据               | 新决策、替代或废弃旧决策         |
 | `docs/protocols/**`           | normative 跨边界协议           | schema、状态机或版本支持变化     |
 | `docs/data-layout.md`         | 路径、所有权、备份和迁移       | 新持久化状态或迁移出现           |
 | `SECURITY.md`                 | 威胁模型和安全进入条件         | 信任边界、发行或报告流程变化     |
@@ -197,7 +196,7 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 链外要求：人工使用一个观察周期后才把候选标记为当前版本；保留上一健康 DMG 作为二进制回退候选。手动升级与回退步骤见[升级指南](upgrade-guide.md)。
 
-公开分发前必须另立 ADR，完成 Developer ID、hardened runtime、notarization、正式许可证、隐私说明、安全联系和更新通道。
+公开分发前必须另行设计评审，完成 Developer ID、hardened runtime、notarization、正式许可证、隐私说明、安全联系和更新通道。
 
 ## 9. 测试与证据基线
 
