@@ -1,9 +1,7 @@
 # 架构
 
-- 状态：M3 已完成制品级验收（候选 DMG + 安装级冒烟，`codex/m3-packaged-desktop` 待合并；M1/M2 已合并）
-- 日期：2026-09-02
 - 决策来源：[ADR 索引](adr/README.md)
-- 详细里程碑：[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)
+- 相关文档：[协议](protocols/)、[数据布局](data-layout.md)、[路线图](roadmap.md)
 
 ## 1. 架构目标
 
@@ -18,35 +16,27 @@
 
 ## 2. 系统上下文
 
-M0 当前运行路径：
-
-```text
-Electron desktop-launcher
-├── sandboxed BrowserWindow
-├── profile-manager → userData/m0-dsh-home/profiles/desktop
-└── host-supervisor → utilityProcess
-    └── Host runner → DSH + desktop-plugin → official Web UI
-```
-
-v1 目标路径在 M1 增加 `home-lease` 与共享 `~/.dsh`，在 M2 增加修订恢复与 Safe Mode，在 M3 增加安装制品；逐任务安排见 [M1–M4 执行路线](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：
+当前运行路径：
 
 ```text
 macOS
 └── Electron desktop-launcher
     ├── BrowserWindow / Tray / Dock / Menu
-    ├── launcher-owned recovery and update control plane
+    ├── launcher-owned recovery control plane
     ├── home-lease
     ├── profile-manager
     └── host-supervisor
         └── Node-capable DSH Host runner
             ├── DSH runtime and official Web UI
             ├── desktop-plugin                  # normal mode
-            ├── desktop-recovery-bridge         # M2 Safe Mode (delivered), E3 prerequisite
+            ├── desktop-recovery-bridge         # Safe Mode surface bridge
             └── future product plugins
                 ├── plugin-market
                 ├── remote-access
                 └── desktop-updater
 ```
+
+配套 CLI `dsh-native` 是独立入口：包装进程持有同一 home lease，在 lease 上登记子进程身份后才授权官方 DSH CLI 子进程启动（见 [home-lease 协议](protocols/home-lease.md)）。
 
 Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host runner 与 launcher 通过 [Host-control 1.0](protocols/host-control.md) 通信，不解析 stdout 文案。
 
@@ -86,7 +76,7 @@ Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host run
 
 `packages/desktop-recovery-bridge`：
 
-- 是 E3 开放市场前交付的最小第一方 bundle，不属于 M0；
+- 随应用发布的最小第一方 bundle；
 - 在 `desktop-safe-mode` 中发布 recovery surface；
 - 不包含市场、profile 修改、产品设置或更新策略；
 - 不导入 Electron。
@@ -104,17 +94,17 @@ Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host run
 - 创建独立 Host runner；
 - 建立私有控制通道；
 - 验证握手、Host 身份、稳定性窗口和有界关停；
-- 把 Host 异常转化为结构化状态，不直接拥有窗口或 profile。
-- 根 export 只暴露监督器；DSH Host runner 只能从 `./host-runner` subpath 导入，防止 Electron Main 间接求值 DSH。
+- 把 Host 异常转化为结构化状态，不直接拥有窗口或 profile；
+- 根 export 只暴露监督器；DSH Host runner 只能从 `./host-runner` subpath 导入，防止 Electron Main 间接求值 DSH；
 - Host runner 的 shared module fallback 只物化当前安装依赖闭包；选中 bundle 的局部 fallback 与中性 `cordis.yml` 位于临时 launch root，不写入 named profile。产品安装入口由 launcher 注入，共享 `desktopSurface` 服务定义归 `desktop-contracts/host-control`。
 
 `packages/profile-manager`：
 
 - 唯一拥有 `ProfileRef`、reconcile、修订恢复和 Safe Mode 投影规则；
-- 以后唯一拥有 generation ledger、事务 journal 和 drift 处理；
+- 以后唯一拥有 generation ledger、事务 journal 和 drift 处理（见[路线图](roadmap.md)）；
 - 不依赖 Electron，也不启动 Host；
-- 共享 home 写入要求调用方持有对应 home lease；M0 私有 home 使用绑定 `userData/m0-dsh-home` 的隔离 authority。
-- M0 隔离 authority 下唯一写入的 profile 文件是 manifest、用户 patch 模板与 profile workspace 配置；Host runner 不成为这些文件的第二权威。
+- 共享 home 写入要求调用方持有对应 home lease；隔离冒烟入口使用绑定 `<userData>/m0-dsh-home` 的隔离 authority；
+- 隔离 authority 下唯一写入的 profile 文件是 manifest、用户 patch 模板与 profile workspace 配置；Host runner 不成为这些文件的第二权威。
 
 `packages/home-lease`：
 
@@ -152,11 +142,10 @@ desktop-recovery-bridge
 
 ## 5. 正常启动
 
-下列是 v1 目标顺序；M0 跳过 lease，并把 home 固定在 Electron `userData/m0-dsh-home`：
-
 ```text
 launcher identity/single-instance
 → resolve DSH home
+→ home compatibility admission（勘察 + 预检，见协议）
 → acquire home lease
 → profile-manager snapshots and reconciles ProfileRef("desktop")
 → host-supervisor creates private channel and Host runner
@@ -168,11 +157,11 @@ launcher identity/single-instance
 → launcher marks profile healthy
 ```
 
-Host-control `ready` 只说明 Host 和 surface publisher 已完成协议侧就绪。应用 `ready` 还要求 BrowserWindow 成功挂载并通过 launcher 的稳定性窗口。
+Host-control `ready` 只说明 Host 和 surface publisher 已完成协议侧就绪。应用 `ready` 还要求 BrowserWindow 成功挂载并通过 launcher 的稳定性窗口。失败分类与恢复语义见[启动恢复分类协议](protocols/startup-recovery.md)。
 
 ## 6. Safe Mode 启动
 
-Safe Mode 已随 M2 交付，也是 E3 的前置能力：
+Safe Mode 是不加载正常 profile 组合的最小恢复会话，也是未来插件市场的前置能力：
 
 ```text
 launcher keeps the same home lease
@@ -182,10 +171,9 @@ launcher keeps the same home lease
 → recovery bridge publishes recovery surface
 → launcher loads the recovery Web UI
 → local recovery controls remain available
-→ E3 later adds explicit targeted profile transactions
 ```
 
-Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，也不自动修改正常 profile。即使 Safe Mode 失败，launcher-owned 最低恢复面仍可显示诊断、重试和退出；更新入口在 E2 再增加。
+Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依赖树或 patch layer，也不自动修改正常 profile。即使 Safe Mode 失败，launcher-owned 最低恢复面仍可显示诊断、重试和退出。
 
 ## 7. 状态权威
 
@@ -198,7 +186,7 @@ Safe Mode 不读取正常 profile 的 `desktop-plugin`、第三方 bundle、依�
 | 原生能力协议        | `desktop-contracts/<capability>`        | Host proxy 与 launcher adapter    |
 | 发行版兼容范围      | machine-readable compatibility manifest | launcher、updater、诊断与文档生成 |
 
-M0 的机器可读事实见 [`compatibility.json`](compatibility.json)。该文件描述源码 smoke，不代表 `.app`/DMG 已打包或签名。
+机器可读事实见 [`compatibility.json`](compatibility.json)。该文件由 `pnpm generate:compatibility` 生成，描述源码基线与发行制品的版本事实。
 
 路径、备份和迁移规则见[数据布局](data-layout.md)。
 
@@ -220,16 +208,18 @@ M0 的机器可读事实见 [`compatibility.json`](compatibility.json)。该文�
 - remote bridge 不是授权权威；
 - 需要在 Host boot 失败时工作的最低机制必须属于 launcher，但正常产品策略仍属于插件。
 
-## 9. 扩展进入条件
+## 9. 未来能力与进入条件
 
-| 路线                | 进入实现前的门槛                                                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| E1 单 Host 多客户端 | 本地 discovery/attach、Host 所有权、客户端 principal 和协议 ADR                                                     |
-| E2 更新             | Developer ID、notarization、签名信任根、last-effective policy、emergency stable source、迁移/降级规则               |
-| E3 市场             | recovery bridge Safe Mode、profile generation journal、plugin package contract、受信 catalog、故障归因与 drift 流程 |
-| E4 远程             | 固定 DSH 基线上的 principal 传播和逐方法授权 prototype、设备撤销、TLS/可信 relay 与审计设计                         |
+各项能力的完整规划见[路线图](roadmap.md)。进入实现前的共同门槛：
 
-这些门槛是 just-in-time 设计关卡，不要求 M0 提前实现未来产品能力。
+| 能力                 | 进入实现前的门槛                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 单 Host 多客户端     | 本地 discovery/attach、Host 所有权、客户端 principal 和协议 ADR                                                     |
+| 更新                 | Developer ID、notarization、签名信任根、last-effective policy、emergency stable source、迁移/降级规则               |
+| 插件市场             | recovery bridge Safe Mode、profile generation journal、plugin package contract、受信 catalog、故障归因与 drift 流程 |
+| 远程                 | 固定 DSH 基线上的 principal 传播和逐方法授权 prototype、设备撤销、TLS/可信 relay 与审计设计                         |
+
+这些门槛是 just-in-time 设计关卡，不要求当前版本提前实现未来产品能力。
 
 ## 10. 架构变更流程
 

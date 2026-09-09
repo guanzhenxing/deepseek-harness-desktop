@@ -1,17 +1,9 @@
 # 开发指南
 
-- 状态：M0–M6 已验收合并；**v0.1.0 已发布**（候选 `v0.1.0-darwin-arm64-a11dfd9`，链 17/17，见 [v0.1.0 验收](validation/v0.1.0-acceptance.md)；基线 DSH 0.1.2-rc.1）
-- 日期：2026-09-08
+- 入门与贡献流程见[贡献指南](../CONTRIBUTING.md)
+- 架构与边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)
 
-## 1. 当前阶段
-
-仓库已完成 M0、M1（共享 home + lease + dsh-native）、M2（失败分类、修订事务恢复、恢复窗口、有界重试、cache 隔离、Safe Mode）、M3（托盘/菜单/窗口生命周期、外链策略、home 兼容性准入门、打包候选 DMG 与安装级冒烟）、M4（版本闭包与升级演练）、M5（确定性 SBOM、许可证清单、统一发行证据与合成插件引入）与 M6（安装制品启动性能测量与优化）验收。当前 DSH 基线为 0.1.2-rc.1；验收记录见 [validation](validation/)。
-
-实施范围由[纯 DSH 桌面壳实施方案](native-dsh-desktop-plan.md)定义，稳定边界见[架构](architecture.md)，不可逆决策见 [ADR 索引](adr/README.md)。
-
-M1–M4 的逐任务执行文档与 zcode 首轮交接指令见[执行路线](superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)；Post-M4 交付列车（rc.1 升级资格 → M5 → M6）的计划文档见 [superpowers/plans](superpowers/plans/)。`verify:release`、`verify:release-evidence`、`verify:plugin-intake`、`rehearse:upgrade` 等命令均已交付并在制品级验证。
-
-## 2. 开发环境
+## 1. 开发环境
 
 要求：
 
@@ -19,7 +11,7 @@ M1–M4 的逐任务执行文档与 zcode 首轮交接指令见[执行路线](su
 - Node.js 24.11.1；
 - pnpm 11.7.0；
 - Git 2.47 或兼容版本；
-- M0 打包阶段需要可运行对应架构 Electron 应用的本机环境。
+- Xcode Command Line Tools（编译原生 lease helper 与打包）。
 
 Node engines 与上游 DSH 基线保持为 `^22.19.0 || >=24.0.0`，本仓库开发和 CI 选择固定的 24.11.1。pnpm 11.7.0 与当前 DSH 基线一致。
 
@@ -30,42 +22,55 @@ corepack pnpm@11.7.0 install --frozen-lockfile
 corepack pnpm@11.7.0 check
 ```
 
-当前可用命令：
+## 2. 命令清单
 
-| 命令                       | 用途                                                    |
-| -------------------------- | ------------------------------------------------------- |
-| `pnpm build`               | 构建全部 TypeScript project references                  |
-| `pnpm format:check`        | 检查格式但不修改文件                                    |
-| `pnpm lint`                | 静态规则与依赖边界                                      |
-| `pnpm typecheck`           | Host、client 与脚本 TypeScript 类型检查                 |
-| `pnpm test:unit`           | 纯函数、schema、state machine 和组件单元测试            |
-| `pnpm test:integration`    | 构建后用隔离 home 启动真实 DSH Host 和官方 Web surface  |
-| `pnpm build:icons`         | 从原创 SVG 生成 ICNS 与托盘模板（macOS 自带工具）       |
-| `pnpm stage:runtime`       | 物化自含 staging 闭包（Host/CLI/Node/pnpm/helper）      |
-| `pnpm verify:runtime-tree` | 校验 staging 完整性、符号链接闭包、singleton 与原生 ABI |
-| `pnpm package:dir`         | icons → staging → 校验 → 未打包 `.app`（ad-hoc 签名）   |
-| `pnpm package:dmg`         | 在 staging 之上生成 DMG 候选                            |
-| `pnpm smoke:dsh-ui`        | 独立 Electron/Host PID 的最小官方 DSH UI 闭环           |
-| `pnpm smoke:host-crash`    | 只终止 Host，验证 launcher 恢复页与最终无残留进程       |
-| `pnpm check:docs`          | 检查必需文档、兼容性事实、本地链接与文本格式            |
-| `pnpm check`               | 合并当前阶段要求的全部快速阻塞门禁                      |
+| 命令                                        | 用途                                                        |
+| ------------------------------------------- | ----------------------------------------------------------- |
+| `pnpm build`                                | 构建全部 TypeScript project references                      |
+| `pnpm build:icons`                          | 从原创 SVG 生成 ICNS 与托盘模板（macOS 自带工具）           |
+| `pnpm build:native`                         | 编译原生 lease helper（需要 Xcode CLT）                     |
+| `pnpm format:check`                         | 检查格式但不修改文件                                        |
+| `pnpm lint`                                 | 静态规则与依赖边界                                          |
+| `pnpm typecheck`                            | 全仓库 TypeScript 类型检查                                  |
+| `pnpm test:unit`                            | 纯函数、schema、state machine 和组件单元测试                |
+| `pnpm test:integration`                     | 构建后用隔离 home 启动真实 DSH Host 和官方 Web surface      |
+| `pnpm test:shared-home`                     | 双向共享 home 会话接续（Desktop/CLI 互续）                  |
+| `pnpm stage:runtime`                        | 物化自含 staging 闭包（Host/CLI/Node/pnpm/helper）          |
+| `pnpm verify:runtime-tree`                  | 校验 staging 完整性、符号链接闭包、singleton 与原生 ABI     |
+| `pnpm generate:compatibility`               | 生成机器可读兼容性清单                                      |
+| `pnpm verify:compatibility`                 | 校验清单与依赖锁一致                                        |
+| `pnpm verify:dsh-closure`                   | lockfile/清单侧 DSH 依赖闭包对账                            |
+| `pnpm verify:patches`                       | 本地补丁账本校验                                            |
+| `pnpm package:dir`                          | icons → staging → 校验 → 未打包 `.app`（ad-hoc 签名）       |
+| `pnpm package:dmg`                          | 在 staging 之上生成 DMG 候选                                |
+| `pnpm verify:artifacts`                     | DMG SHA 与内嵌清单校验                                      |
+| `pnpm smoke:dsh-ui`                         | 独立 Electron/Host PID 的最小官方 DSH UI 闭环               |
+| `pnpm smoke:host-crash`                     | 只终止 Host，验证 launcher 恢复页与最终无残留进程           |
+| `pnpm smoke:profile-recovery`               | 修订恢复不变量                                              |
+| `pnpm smoke:safe-mode`                      | Safe Mode 隔离                                              |
+| `pnpm smoke:conversation`                   | 创建会话、发送一轮、重启后恢复                              |
+| `pnpm smoke:auth` / `smoke:navigation`      | 认证 URL 与导航/外链策略                                    |
+| `pnpm smoke:lifecycle`                      | 关窗隐藏、托盘唤出、重复启动聚焦、退出无残留                |
+| `pnpm smoke:package`                        | 安装级制品冒烟（对 `.app`/DMG 副本执行）                    |
+| `pnpm smoke:startup-performance`            | 启动性能测量                                                |
+| `pnpm generate:release-evidence`            | 生成确定性 SBOM、许可证清单等发行证据                       |
+| `pnpm verify:release-evidence`              | 统一校验候选与证据绑定                                      |
+| `pnpm verify:plugin-intake`                 | 插件引入制品级隔离演练                                       |
+| `pnpm rehearse:upgrade`                     | 跨版本升级/降级演练（副本 fixture）                         |
+| `pnpm verify:release`                       | 完整发布链（见 §8）                                         |
+| `pnpm check:docs`                           | 检查必需文档、兼容性事实、本地链接与文本格式                |
+| `pnpm check`                                | 全部快速阻塞门禁                                            |
+| `pnpm dsh-native -- <args>`                 | 配套 CLI 开发入口（持 lease）                               |
 
-`pnpm smoke:package` 及后续交付的 `verify:release` / `verify:release-evidence` / `verify:plugin-intake` / `rehearse:upgrade` 都在安装制品（`.app`/DMG 副本）上执行，源码 smoke 不构成安装包验收。打包固定
-electron-builder 26.15.3（配置 schema 以安装包内的 app-builder-lib 为准）；Host/CLI 运行时全部来自
-`release/staging`（pnpm `--prod` deploy + 官方 Node/pnpm 制品校验），`.app` 内不依赖仓库
-node_modules、pnpm store、系统 Node/pnpm 或 ASAR 虚拟路径。
+打包固定 electron-builder 26.15.3（配置 schema 以安装包内的 app-builder-lib 为准）；Host/CLI 运行时全部来自 `release/staging`（pnpm `--prod` deploy + 官方 Node/pnpm 制品校验），`.app` 内不依赖仓库 `node_modules`、pnpm store、系统 Node/pnpm 或 ASAR 虚拟路径。
+
+`pnpm smoke:package`、`verify:release`、`verify:release-evidence`、`verify:plugin-intake`、`rehearse:upgrade` 都在安装制品（`.app`/DMG 副本）上执行，源码 smoke 不构成安装包验收。
 
 命令名是仓库契约；package 内部脚本可以变化，但 CI 和开发文档不引用临时实现路径。
 
 ## 3. 工作项分类
 
-每个变更先有一个可追踪的 issue 或本地 spec，至少写清：
-
-- 用户或维护问题；
-- 范围和明确不改的内容；
-- 影响的进程、数据和信任边界；
-- 可观察验收条件；
-- 回滚或失败行为。
+每个变更先有一个可追踪的 issue 或本地 spec，至少写清：用户或维护问题、范围和明确不改的内容、影响的进程/数据和信任边界、可观察验收条件、回滚或失败行为。
 
 以下变化必须先建立 ADR：
 
@@ -82,14 +87,12 @@ node_modules、pnpm store、系统 Node/pnpm 或 ASAR 虚拟路径。
 
 采用 trunk-based workflow：
 
-- `main` 始终保持当前阶段可验证；
+- `main` 始终保持可验证；
 - 使用短生命周期 `feat/<name>`、`fix/<name>`、`docs/<name>` 或 `chore/<name>`；
 - 一个分支只解决一个可独立审查的问题；
 - 提交保持小而完整，使用 `feat:`、`fix:`、`docs:`、`test:`、`refactor:`、`chore:` 前缀；
 - 不把 DSH baseline 升级与壳架构重构或产品功能放在同一分支；
 - 不提交真实 DSH home、credentials、authenticated URL、签名私钥或脱敏前日志。
-
-仓库首次 bootstrap 可以直接建立 `main`；此后的功能开发使用短分支或独立 worktree。
 
 ## 5. 实施循环
 
@@ -110,7 +113,7 @@ issue/spec
 
 ### 5.1 最小纵向切片
 
-优先交付可观察的端到端路径，而不是先铺满所有抽象。例如 M0 第一条切片必须从 launcher 创建 Host runner，一直走到 `desktop-plugin` 发布 surface 并挂载官方 UI；不能只完成一组没有运行路径的 package skeleton。
+优先交付可观察的端到端路径，而不是先铺满所有抽象：一条切片必须从 launcher 创建 Host runner，一直走到 `desktop-plugin` 发布 surface 并挂载官方 UI；不能只完成一组没有运行路径的 package skeleton。
 
 ### 5.2 Contract-first 与 TDD
 
@@ -160,15 +163,17 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 ## 7. 文档规则
 
-| 文档                              | 内容权威                       | 何时更新                         |
-| --------------------------------- | ------------------------------ | -------------------------------- |
-| `README.md`                       | 用户入口、当前状态和最小命令   | 用户可见范围或启动方式变化       |
-| `docs/architecture.md`            | 当前组件、进程、信任和依赖边界 | 架构现状变化                     |
-| `docs/native-dsh-desktop-plan.md` | v1 里程碑与未来路线            | 交付范围、顺序或估时变化         |
-| `docs/adr/**`                     | 不可逆决策及依据               | 新决策、替代或废弃旧决策         |
-| `docs/protocols/**`               | normative 跨边界协议           | schema、状态机或版本支持变化     |
-| `docs/data-layout.md`             | 路径、所有权、备份和迁移       | 新持久化状态或迁移出现           |
-| `SECURITY.md`                     | 威胁模型和安全进入条件         | 信任边界、公开发行或报告流程变化 |
+| 文档                          | 内容权威                       | 何时更新                         |
+| ----------------------------- | ------------------------------ | -------------------------------- |
+| `README.md`                   | 用户入口、范围和最小命令       | 用户可见范围或启动方式变化       |
+| `CHANGELOG.md`                | 版本级显著变更                 | 每次发布                         |
+| `CONTRIBUTING.md`             | 贡献入口与工作流               | 流程或门禁变化                   |
+| `docs/architecture.md`        | 当前组件、进程、信任和依赖边界 | 架构现状变化                     |
+| `docs/roadmap.md`             | 范围外能力与进入条件           | 范围或规划变化                   |
+| `docs/adr/**`                 | 不可逆决策及依据               | 新决策、替代或废弃旧决策         |
+| `docs/protocols/**`           | normative 跨边界协议           | schema、状态机或版本支持变化     |
+| `docs/data-layout.md`         | 路径、所有权、备份和迁移       | 新持久化状态或迁移出现           |
+| `SECURITY.md`                 | 威胁模型和安全进入条件         | 信任边界、发行或报告流程变化     |
 
 版本事实只从依赖锁或 [`compatibility.json`](compatibility.json) 生成。不要在多个 Markdown 文件中手工维护不同的“当前版本”。
 
@@ -176,26 +181,34 @@ profile、lease、会话和迁移测试只使用[数据布局](data-layout.md)�
 
 ## 8. 发布流程
 
-v1 只发布本机候选 DMG：
+发布本机候选 DMG 的完整链（`pnpm verify:release`）：
 
-1. 从短生命周期 release candidate 分支构建；
-2. 生成 Desktop/DSH/plugin API/format compatibility manifest；
-3. 运行 unit、integration 和全部桌面冒烟；
-4. 对安装后的 `.app`/DMG 而不是源码入口执行测试；
-5. 生成 SHA-256、补丁清单和测试摘要；
-6. 使用复制的数据 fixture 做升级、重启和禁止不安全降级；
-7. 人工使用一个观察周期；
-8. 观察通过后才标记为当前版本，并保留上一健康 DMG。
+1. 链首干净树门（只允许已提交字节）；
+2. `pnpm check`（format/lint/types/unit/docs）；
+3. `generate:compatibility` + `verify:dsh-closure` + `verify:patches`（清单再生成、闭包零漂移、补丁账本）；
+4. `test:integration` 与 `test:shared-home`；
+5. `package:dir` + `verify:compatibility`（fresh staging）；
+6. `package:dmg` + `verify:artifacts`（DMG 摘要绑定）；
+7. `smoke:package`（安装级制品冒烟）；
+8. `generate:release-evidence` + `verify:release-evidence`（sourceCommit/DMG/清单/冒烟证据绑定）；
+9. 归档候选并 `rehearse:upgrade`（历史保留、第三方 bundle 不被触碰、降级/未知格式拒绝负例）；
+10. `verify:plugin-intake`（当前交付的引入能力轮次）；
+11. 链尾干净树门 + `git diff --check`。
+
+链外要求：人工使用一个观察周期后才把候选标记为当前版本；保留上一健康 DMG 作为二进制回退候选。手动升级与回退步骤见[升级指南](upgrade-guide.md)。
 
 公开分发前必须另立 ADR，完成 Developer ID、hardened runtime、notarization、正式许可证、隐私说明、安全联系和更新通道。
 
-## 9. M0 完成证据
+## 9. 测试与证据基线
 
-- `desktop-contracts`、`profile-manager`、`desktop-plugin`、`host-supervisor` 与 `shell-core` 均有自动测试；
+当前基线（合并任何变更前必须保持继续通过）：
+
+- `desktop-contracts`、`profile-manager`、`desktop-plugin`、`desktop-recovery-bridge`、`host-supervisor` 与 `shell-core` 均有自动测试；
 - Electron Main 的监督器根入口不导出 Host runner，只有独立 `host-entry` 加载 DSH；
 - `pnpm test:integration` 从独立 Node PID 验证 authenticated official boot graph；
+- `pnpm test:shared-home` 验证 Desktop/CLI 双向会话接续与互斥；
 - `pnpm smoke:dsh-ui` 验证官方 modules、侧栏、会话输入区域和设置入口；
 - `pnpm smoke:host-crash` 验证 Host 崩溃不带走 launcher，并验证最终无残留 PID；
 - 所有测试和开发启动使用显式隔离 home，不触碰默认 DSH home。
 
-进入 M1 时必须先保持这些证据继续通过，再引入 home lease 和共享数据测试。
+引入新的进程、恢复或共享 home 行为时，先保持这些证据继续通过，再扩展对应测试。

@@ -72,7 +72,7 @@ jobs:
       - name: Run lifecycle smoke
         run: pnpm smoke:lifecycle
 
-  # M3: build the packaged candidate on macOS and keep the artifacts as
+  # Build the packaged candidate on macOS and keep the artifacts as
   # private job output (no public release). The artifact-level smoke runs
   # against the DMG candidate exactly as locally.
   macos-package:

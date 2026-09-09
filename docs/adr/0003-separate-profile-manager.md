@@ -2,7 +2,6 @@
 
 - 日期：2026-09-01
 - 状态：已接受
-- 决策人：Jesen（guanzhenxing）
 
 ## 1. 问题
 
@@ -18,15 +17,15 @@
 - `reconcileDesktopProfile(ProfileRef)`；
 - 白名单、修改前后 SHA-256 和修订校验恢复；
 - Safe Mode profile 投影；
-- E3 引入后的不可变 generation ledger；
+- 插件市场路线引入后的不可变 generation ledger；
 - 持久化事务 journal、故障恢复、定点禁用和回滚；
 - 受管 profile 的 drift 检测与显式导入/修复。
 
-调用方必须先取得目标 DSH home 的写入 authority。共享/用户 home 使用 home lease；M0 的 launcher 私有 `<userData>/m0-dsh-home` 使用显式隔离 authority。profile-manager 自己不创建第二套锁语义，也不启动或停止 Host。
+调用方必须先取得目标 DSH home 的写入 authority。共享/用户 home 使用 home lease；隔离冒烟入口的 `<userData>/m0-dsh-home` 使用显式隔离 authority。profile-manager 自己不创建第二套锁语义，也不启动或停止 Host。
 
 `shell-core` 只编排 `home-lease`、`profile-manager`、`host-supervisor` 与 Electron 资源。`desktop-plugin`、市场 UI 和 launcher 都不能直接把 profile 文件当作第二权威来源。
 
-M0 只实现 `ProfileRef`、reconcile 和所需的修订快照边界。generation ledger、Safe Mode 投影和事务 journal 在相应路线进入实施时添加，但必须留在同一包和同一数据权威内。
+当前实现覆盖 `ProfileRef`、reconcile、修订事务与 Safe Mode 投影。generation ledger 在插件市场路线进入实施时添加，但必须留在同一包和同一数据权威内。
 
 ## 3. Generation 事务约束
 
@@ -56,8 +55,8 @@ staging
 
 需要承担：
 
-- M0 多一个 workspace package 和明确接口；
-- 调用方必须证明所需 authority 已持有（M0 为专属 userData 子目录；共享 home 为 lease），并处理 profile-manager 的结构化错误；
+- 多一个 workspace package 和明确接口；
+- 调用方必须证明所需 authority 已持有（隔离入口为专属 userData 子目录；共享 home 为 lease），并处理 profile-manager 的结构化错误；
 - 后期市场不能绕开 profile-manager 直接调用 pnpm 修改活跃 profile。
 
 ## 5. 被否决的备选

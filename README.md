@@ -1,34 +1,30 @@
 # DeepSeek Harness
 
-DeepSeek Harness 是面向 macOS 个人本机使用的原生 DSH 桌面壳。它使用独立 DSH bundle 插件承载 Desktop 集成，并由薄 Electron launcher 负责启动、Host 监督、窗口以及 Host 无法启动时仍可用的最低恢复控制面。（历史产品名 `DeepSeek Harness Desktop` 仍冻结为 Electron userData 数据目录名，不随展示名改名迁移。）
+DeepSeek Harness 是面向 macOS 的原生 DSH 桌面壳。官方 DSH（DeepSeek Harness）Web UI 运行在原生窗口、Dock 与托盘中；产品逻辑由一个独立 DSH bundle 插件（`desktop-plugin`）承载，一个很薄的 Electron launcher 负责启动、Host 进程监督、窗口以及 Host 无法启动时仍可用的最低恢复控制面。配套 CLI `dsh-native` 与桌面端顺序共享同一个 DSH home（默认 `~/.dsh`）。
 
-## 当前状态
+> 历史产品名 `DeepSeek Harness Desktop` 仍冻结为 Electron userData 数据目录名，不随展示名改名迁移。
 
-M1 共享 home 已完成源码级验收：Desktop 与配套 CLI `dsh-native` 顺序共享同一 DSH home，任何 Host boot、profile 写入前都必须先取得整 home lease（原子 `mkdir` 锁 + OS 进程启动身份 + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）。CLI 子进程在 lease 上登记 OS 身份并等待授权后才 import 官方 `@deepseek-ai/dsh` 入口；`dsh-native doctor --unlock` 在确认没有活跃 owner 后清理残留锁，不提供 force 绕过。双向会话接续（CLI 创建→Desktop 继续、Desktop 创建→CLI 继续）有真实官方 DSH 图 + mock LLM 的集成与冒烟证据。
+## 功能特性
 
-Desktop 默认解析 `$DSH_HOME`/`~/.dsh`；开发冒烟仍走专用临时 home。M4 发布兼容性已完成制品级演练验收：schema-2 发行清单（闭包/补丁/格式证据可机检，`generate:compatibility` + `verify:dsh-closure`/`verify:patches`）、home 格式勘察 + 预检 + marker 写入预约（未知格式/更高 epoch/需迁移数据在写入前拒绝，`HOME_FORMAT_*`/`HOME_MIGRATION_REQUIRED`）、以及真实制品升级演练（M3 DMG → M4 candidate：历史保留、第三方 bundle 不被触碰、降级/未知格式拒绝 15/15 步通过）。手动升级与回退流程见 [升级指南](docs/upgrade-guide.md)；上游基线与补丁对账见 [upstream-baseline](docs/upstream-baseline.md)。M3 打包（托盘/菜单/窗口生命周期、受控外链、自含 Host/CLI 运行时 DMG）与 M2 非破坏性恢复、M1 共享 home/lease 见 [验收记录](docs/validation/)；验收详情：[M5 验收](docs/validation/m5-acceptance.md)、[M4 验收](docs/validation/m4-acceptance.md)、[DSH 0.1.2-rc.1 升级资格](docs/validation/dsh-0.1.2-rc.1-acceptance.md)。M5 增加发行证据（确定性 SBOM、许可证清单、统一候选绑定验证 `verify:release-evidence`）与合成插件引入（[plugin-intake](docs/plugin-intake.md)）保证；不包含公开分发、签名、公证、更新器或插件市场。**当前发布：v0.1.0**（候选 `v0.1.0-darwin-arm64-a11dfd9`，`verify:release` 17/17 含跨版本演练 19/19，见 [v0.1.0 验收](docs/validation/v0.1.0-acceptance.md)；第三方 bundle 的 profile 内启动不在本版能力内，见 [ADR-0010](docs/adr/0010-plugin-intake-trust-boundary.md)）。
-
-v1 目标：
-
-- macOS 本机安装的 DMG；
-- 官方 DSH Web UI 的原生窗口、Dock、托盘和生命周期；
-- DSH Host 在独立 Node-capable 子进程运行；
-- 默认使用 `desktop` profile 和 `~/.dsh`；
-- Desktop 与配套 CLI 顺序共享凭据、设置、会话和 storages；
-- profile 修订恢复不覆盖 home 级用户数据。
-
-插件市场、远程访问、自动更新、setup wizard、桌面终端和多 profile UI 不进入 v1，但架构已经为它们保留独立插件、原生 adapter 和版本化契约边界。
+- 官方 DSH Web UI 的原生窗口、Dock、托盘、菜单与单实例生命周期；
+- DSH Host 运行在独立 Node-capable 子进程中；Host 崩溃或启动失败时桌面壳保持存活，进入带结构化诊断的恢复窗口；
+- 默认使用 `desktop` profile 与 `~/.dsh`；桌面端与 `dsh-native` CLI 在整 home lease 下顺序共享凭据、设置、会话与 storages（双向会话接续）；
+- 非破坏性启动恢复：profile 走逐文件修订事务，只在修订校验通过时回滚本次自动修改，绝不自动覆盖 home 级用户数据；
+- Safe Mode：不加载正常 `desktop-plugin` 与第三方 bundle 的最小恢复会话；
+- home 兼容性准入：跨版本数据 epoch 与格式预检，未知格式与不安全降级在写入前拒绝；
+- 可复现的打包与发行证据：schema-2 发行清单、确定性 SBOM、许可证清单、DMG 摘要绑定与升级/降级演练；
+- 插件引入（plugin intake）审查工作流：声明式 intake 记录 + 逐字节校验 + 制品级隔离演练。
 
 ## 重要并发限制
 
 “共享 `~/.dsh`”表示 Desktop 与 CLI 在不同时间读取同一份磁盘数据，不表示两个 DSH Host 可以同时写入该 home。
 
-v1 的受支持入口遵循整份 home 单 Host 规则：
+受支持的入口遵循整份 home 单 Host 规则：
 
 - Desktop 运行时，`dsh-native` 的 boot 与 `plugin` 变更会被 home lease 拒绝（退出码 3）；反之亦然；不同 profile 不构成例外；
 - `dsh-native` 是唯一受本项目支持并遵守 lease 的 CLI；其他裸 `dsh` 不经过本项目拦截，使用前必须完全退出 Desktop 与 `dsh-native`；
 - 残留锁用 `dsh-native doctor --unlock` 在确认无活跃 owner 后清理；
-- 长期路线是一个 Host 被 Electron、本地 CLI 和授权远程客户端复用。
+- 长期路线是一个 Host 被 Electron、本地 CLI 和授权远程客户端复用，见[路线图](docs/roadmap.md)。
 
 ## 架构摘要
 
@@ -44,15 +40,39 @@ Electron launcher / dsh-native wrapper
 
 正常 Desktop 产品逻辑属于 `desktop-plugin`；进程创建、boot 前 lease、Electron 资源和 boot-independent 恢复属于 launcher。第三方 DSH 插件与 Host 同权运行，独立 Host 进程是故障边界而不是权限 sandbox。
 
+组件、进程与信任边界详见[架构](docs/architecture.md)。
+
+## 安装
+
+当前发布为本地自用构建（未签名/未公证）：Gatekeeper 首次启动需要右键打开。从源码构建 DMG：
+
+```bash
+corepack pnpm@11.7.0 install --frozen-lockfile
+corepack pnpm@11.7.0 build
+corepack pnpm@11.7.0 package:dmg
+```
+
+构建产物位于 `release/dist/`，SHA-256 与内嵌清单见 `release/artifacts.json`。手动升级、回退与升级演练见[升级指南](docs/upgrade-guide.md)。
+
+## 使用
+
+```bash
+# CLI（与桌面端顺序共享 ~/.dsh）
+corepack pnpm@11.7.0 dsh-native -- --profile web "..."
+corepack pnpm@11.7.0 dsh-native -- doctor --unlock   # 确认无活跃 owner 后清理残留锁
+```
+
+`dsh-native` 转发完整 CLI 参数给固定版官方 `@deepseek-ai/dsh`，并在子进程运行期间持有整 home lease。退出码语义见 [home-lease 协议](docs/protocols/home-lease.md)。
+
 ## 开发基线
 
 - Node.js：24.11.1；
 - pnpm：11.7.0；
-- DSH：[`dsh-v0.1.2-rc.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-rc.1)，commit [`a66e4702047846cdaa10c66c9d3df3951f5ea70d`](https://github.com/deepseek-ai/deepseek-harness/commit/a66e4702047846cdaa10c66c9d3df3951f5ea70d)（升级资格验证见 [验收记录](docs/validation/dsh-0.1.2-rc.1-acceptance.md)）。
+- DSH：[`dsh-v0.1.2-rc.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.2-rc.1)，commit [`a66e4702047846cdaa10c66c9d3df3951f5ea70d`](https://github.com/deepseek-ai/deepseek-harness/commit/a66e4702047846cdaa10c66c9d3df3951f5ea70d)。
 
-机器可读版本权威是 [`docs/compatibility.json`](docs/compatibility.json) 与 lockfile；Markdown 中的版本只用于说明，不独立决定兼容性。
+机器可读版本权威是 [`docs/compatibility.json`](docs/compatibility.json) 与 lockfile；Markdown 中的版本只用于说明，不独立决定兼容性。上游基线与补丁对账见 [upstream-baseline](docs/upstream-baseline.md)。
 
-安装并运行当前门禁：
+常用开发命令：
 
 ```bash
 corepack pnpm@11.7.0 install --frozen-lockfile
@@ -63,39 +83,52 @@ corepack pnpm@11.7.0 test:shared-home # 双向共享 home 会话接续
 corepack pnpm@11.7.0 smoke:dsh-ui
 corepack pnpm@11.7.0 smoke:host-crash
 corepack pnpm@11.7.0 smoke:shared-home
-corepack pnpm@11.7.0 smoke:profile-recovery   # M2：修订恢复不变量
-corepack pnpm@11.7.0 smoke:safe-mode          # M2：Safe Mode 隔离
-  corepack pnpm@11.7.0 package:dir              # M3：staging 校验 + 未打包 .app
-  corepack pnpm@11.7.0 package:dmg              # M3：候选 DMG + 制品清单
-  corepack pnpm@11.7.0 verify:artifacts         # M3：DMG SHA 与内嵌清单校验
-  corepack pnpm@11.7.0 smoke:package            # M3：安装级 15 场景验收
-corepack pnpm@11.7.0 dsh-native -- --profile headless "..."   # 开发入口（持 lease）
+corepack pnpm@11.7.0 smoke:profile-recovery
+corepack pnpm@11.7.0 smoke:safe-mode
+corepack pnpm@11.7.0 smoke:package    # 安装级制品冒烟
 ```
+
+完整命令清单与工程规范见[开发指南](docs/development.md)与[贡献指南](CONTRIBUTING.md)。
+
+## 范围与限制
+
+当前发布：**v0.1.0**（darwin-arm64）。
+
+以下能力不在当前版本内（进入条件见[路线图](docs/roadmap.md)）：自动更新、插件市场、远程访问、setup wizard、桌面终端、多 profile UI、Windows/Linux 支持、签名与公证。
+
+已知限制：
+
+- 第三方 bundle 的引入审查（校验、隔离装入、字节复验）可用，但第三方 bundle 在 profile 内启动不在本版能力内（上游 loader 按名解析的布局限制，见 [ADR-0010](docs/adr/0010-plugin-intake-trust-boundary.md)）；`verify:plugin-intake` 的启动轮在该设计落地前保持失败；
+- Dock 右键退出与 Dock 图标存在已知问题。
 
 ## 文档
 
-- [M1–M4 执行路线与 zcode 交接](docs/superpowers/plans/2026-09-02-m1-m4-execution-roadmap.md)：各阶段目标、依赖、执行指令与验收记录要求；M1、M2、M3 已合并 `main`；M4 已实施并通过制品级演练验收（`codex/m4-release-compatibility`，见 [M4 验收](docs/validation/m4-acceptance.md)）；[Post-M4 交付路线](docs/superpowers/plans/2026-09-07-post-m4-delivery-roadmap.md)：DSH 0.1.2-rc.1 升级资格 GO（[rc.1 验收](docs/validation/dsh-0.1.2-rc.1-acceptance.md)）、M5 发行证据与插件引入已验收（[M5 验收](docs/validation/m5-acceptance.md)）；
-- [实施方案](docs/native-dsh-desktop-plan.md)：v1 范围、里程碑、测试和扩展路线；
 - [架构](docs/architecture.md)：组件、进程、信任边界和依赖方向；
+- [路线图](docs/roadmap.md)：范围外能力与各自的进入条件；
 - [Host-control 1.0](docs/protocols/host-control.md)：launcher/Host normative 协议；
 - [home-lease 协议](docs/protocols/home-lease.md)：整 home 写入互斥、owner 身份与 doctor 清锁（含 `dsh-native` 退出码）；
+- [home-compatibility 协议](docs/protocols/home-compatibility.md)：跨版本数据准入；
+- [启动恢复分类协议](docs/protocols/startup-recovery.md)：失败分类、回滚资格与恢复窗口；
 - [数据布局](docs/data-layout.md)：路径、所有权、恢复和迁移；
+- [插件引入](docs/plugin-intake.md)：第三方 bundle 的审查式引入工作流；
+- [升级指南](docs/upgrade-guide.md)：手动升级、回退与升级演练；
+- [upstream-baseline](docs/upstream-baseline.md)：上游 DSH 基线、闭包与补丁对账；
+- [开发指南](docs/development.md)：环境、命令、测试与发布流程；
 - [安全策略](SECURITY.md)：威胁模型与未来能力进入条件；
-- [开发指南](docs/development.md)：分支、测试、审查和发布流程；
-- [兼容性清单](docs/compatibility.json)：M0 的 Desktop、DSH、Electron、Node、pnpm 与协议版本事实；
-- [ADR 索引](docs/adr/README.md)：已接受的架构决策。
+- [兼容性清单](docs/compatibility.json)：Desktop、DSH、Electron、Node、pnpm 与协议版本的机器可读事实；
+- [ADR 索引](docs/adr/README.md)：架构决策记录。
 
 ## 仓库结构
 
 ```text
 .github/workflows/   # CI 门禁
-docs/                # 方案、架构、协议、ADR 和开发文档
-scripts/             # 仓库验证与后续构建脚本
+docs/                # 架构、协议、ADR、路线图和开发文档
+scripts/             # 仓库验证与构建脚本
 apps/                # Electron launcher、bundled CLI（dsh-native）与独立 Host 入口
-packages/            # 契约、product-config、home-lease、profile、插件、监督器与 shell-core
+packages/            # 契约、home-lease、profile、插件、监督器与 shell-core
 tests/               # 隔离 home 的源码级桌面冒烟与共享 home driver
 ```
 
 ## 许可证
 
-当前仓库是个人使用、未公开发行的私有项目，根 package 标记为 `UNLICENSED`。公开发布或接受外部贡献前必须明确许可证，并记录任何直接移植代码的第三方版权与许可。
+本仓库尚未选择开源许可证（根 package 标记为 `UNLICENSED`）。公开发布或接受外部贡献前必须明确许可证，并记录任何直接移植代码的第三方版权与许可。

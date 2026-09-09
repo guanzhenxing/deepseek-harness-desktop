@@ -3,7 +3,6 @@
 - 日期：2026-08-31
 - 修订：2026-09-01（独立 Host、恢复 surface 与扩展控制面）
 - 状态：已接受
-- 决策人：Jesen（guanzhenxing）
 
 ## 1. 问题
 
@@ -55,7 +54,7 @@ v1 使用 loopback authenticated URL 作为本地 surface transport。这是可�
 
 本 ADR 只固定扩展边界，不选择具体的 market provider、远程 relay、设备凭据格式或 updater channel。每项能力进入实现前单独建立 ADR。
 
-完整实施边界、并发策略、暂缓功能、测试和里程碑由[纯 DSH 桌面壳实施方案](../native-dsh-desktop-plan.md)规定。
+完整实施边界、并发策略、暂缓功能与测试见[路线图](../roadmap.md)、[架构](../architecture.md)与[开发指南](../development.md)。
 
 ## 3. 依据
 
@@ -79,7 +78,7 @@ DSH 插件只有在 Host boot 并加载 profile 后才能运行，因此不能�
 
 因此 Desktop 以插件承载 DSH 集成，以 launcher 承载自举、Host 监督和 Electron 资源所有权。launcher 不是第二套产品逻辑。
 
-M0 只使用 Electron 单实例私有的 `<userData>/m0-dsh-home`，不会访问或共享 `~/.dsh`，因此暂以隔离 home authority 替代 durable lease。M1 在默认 home 切换为 `~/.dsh` 前必须实现本 ADR 的完整 home lease；该分阶段交付不改变 v1 决策。
+受支持的隔离冒烟入口使用 Electron 单实例私有的 `<userData>/m0-dsh-home`，以隔离 home authority 替代 durable lease；正式入口在默认 home `~/.dsh` 上使用本 ADR 的完整 home lease。
 
 Host 与 Electron Main 采用独立进程，原因是第三方插件或 Host 的启动失败、未捕获错误和主动重启不应同时摧毁恢复窗口、更新控制面和应用生命周期监督。launcher 可以在不退出 Electron 的情况下停止正常 Host、启动候选 Host 或 Safe Mode，并在失败后给出诊断。
 
@@ -113,7 +112,7 @@ home lease 是覆盖整个受支持入口写入生命周期的进程所有权协
 
 这些参考实现不是本项目依赖、升级信号、兼容性门或运行时基线。
 
-参考 commit、release 和 vendored DSH 版本记录在实施方案 §7.2；只有以后实际采用了新的外部思路时才更新该记录。
+参考 commit、release 和 vendored DSH 版本记录在 [upstream-baseline](../upstream-baseline.md)；只有以后实际采用了新的外部思路时才更新该记录。
 
 ### 3.6 后续能力仍保持插件化
 
@@ -174,5 +173,4 @@ Desktop 应用、内置 DSH runtime、profile 插件和持久化格式分别拥�
 - 上游在决策时没有官方 Desktop app，`apps/` 以 CLI 和 Web 为主。
 - 外部参考仓库：<https://github.com/anywhere-labs/dsh-desktop>
 - 外部参考仓库：<https://github.com/dataelement/dsh-desktop>
-- anywhere-labs 参考实现的市场默认关闭；“不喜欢插件”不是决定独立实现的唯一理由。
-- 任何带版本号、commit 或“最新”字样的事实都由实施方案的固定参考记录维护，不在本 ADR 中充当长期升级依据。
+- 任何带版本号、commit 或“最新”字样的事实都由 [upstream-baseline](../upstream-baseline.md) 的固定参考记录维护，不在本 ADR 中充当长期升级依据。

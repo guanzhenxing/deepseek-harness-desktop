@@ -4,7 +4,7 @@
 { "name": "startup-recovery", "major": 1, "minor": 1 }
 ```
 
-- 状态：M2 已实现（`packages/shell-core/src/failure-policy.ts`、`packages/shell-core/src/recovery-controller.ts`、`packages/host-supervisor` 阶段化 boot）
+- 状态：已实现（`packages/shell-core/src/failure-policy.ts`、`packages/shell-core/src/recovery-controller.ts`、`packages/host-supervisor` 阶段化 boot）
 - 决策记录：[ADR-0006](../adr/0006-profile-revision-recovery.md)、[ADR-0007](../adr/0007-launcher-recovery-ipc.md)
 
 ## 1. 分类模型
@@ -33,9 +33,9 @@ launcher 侧阶段（shell-core / desktop-recovery）：
 | `recover-transactions` | `RECOVERY_CONFLICT` 等    | unknown（有意不映射） | 中断事务结算失败，永不作为自动回滚依据         |
 | `cache-quarantine`     | `CACHE_QUARANTINE_FAILED` | runtime               | cache 隔离机制自身失败                         |
 
-`lease` 错误（M1 lease 错误码）不进恢复窗口：lease 获取失败保持入口生命周期行为（Desktop 对话框+退出 1，CLI 退出码 3）。
+`lease` 错误码不进恢复窗口：lease 获取失败保持入口生命周期行为（Desktop 对话框+退出 1，CLI 退出码 3）。
 
-¹ 上游 dsh 0.1.2-alpha.3 的 boot 阶段错误统一以 `BOOT_FAILED` 到达，尚不携带结构化的 `MISSING_CREDENTIAL`/`PORT_IN_USE` 码；这两行映射在上游 fatal 信封携带这些 code 时生效，当前这类失败分类为 unknown（绝不从消息文本猜测）。native-ui 同样为接口预留（无生产 producer，M3+ 原生菜单/托盘接入后产生）。
+¹ 上游 dsh 0.1.2-rc.1 的 boot 阶段错误统一以 `BOOT_FAILED` 到达，尚不携带结构化的 `MISSING_CREDENTIAL`/`PORT_IN_USE` 码；这两行映射在上游 fatal 信封携带这些 code 时生效，当前这类失败分类为 unknown（绝不从消息文本猜测）。native-ui 阶段同样为接口预留。
 
 ## 2. 摘要脱敏
 

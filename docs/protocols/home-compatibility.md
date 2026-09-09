@@ -1,6 +1,6 @@
 # Home Compatibility Marker 协议
 
-- 状态：M4 已实现（格式预检 + 写入预约；M3 只读 admission 是其子集）
+- 状态：已实现（`packages/release-compatibility`）
 - 相关决策：[ADR-0009](../adr/0009-home-compatibility-admission.md)
 - 适用入口：Desktop launcher（含 Safe Mode 会话）与 `dsh-native` CLI 的全部会写 home 的路径
 
@@ -8,8 +8,8 @@
 
 本协议定义受支持入口在启动会写路径前的兼容性 admission：
 
-- **M3 交付**：只读 marker reader + fail-closed admission。marker 缺失允许进入（现存 home 早于本机制）；未知 schema、损坏内容、不受支持的 dataEpoch 一律拒绝，且不产生任何 home 写入。
-- **M4 交付**：只读 home 格式勘察（`inspectHomeFormats`）、纯预检判定（`preflightHome`）与写入预约（`reserveHomeWrite`）。受支持入口在写入前将 schema 1 marker 原子落盘；未知格式、不可读格式、更高 epoch、需要迁移的数据在写入前拒绝。
+- **只读 marker 读取 + fail-closed admission**：marker 缺失允许进入（现存 home 早于本机制）；未知 schema、损坏内容、不受支持的 dataEpoch 一律拒绝，且不产生任何 home 写入。
+- **只读 home 格式勘察**（`inspectHomeFormats`）、**纯预检判定**（`preflightHome`）与**写入预约**（`reserveHomeWrite`）：受支持入口在写入前将 schema 1 marker 原子落盘；未知格式、不可读格式、更高 epoch、需要迁移的数据在写入前拒绝。
 - **非目标**：自动数据迁移（preflight 返回 `MIGRATION_REQUIRED`，需独立 ADR）；阻止不受支持入口（裸 CLI、无 guard 旧二进制）写入。
 
 ## 2. Marker 布局与格式
@@ -20,7 +20,7 @@
 {
   "schemaVersion": 1,
   "dataEpoch": 1,
-  "lastWriterReleaseId": "m4-0.0.0-darwin-arm64-98af342",
+  "lastWriterReleaseId": "v0.1.0-darwin-arm64-a11dfd9",
   "formats": {
     "credentials": "dsh-credentials-file-1",
     "settings": "dsh-settings-file-0.1.2-alpha.3",
@@ -34,7 +34,7 @@
 | `schemaVersion`       | `1`                              | marker 自身 schema；非 1 一律按未知处理                                   |
 | `dataEpoch`           | 安全整数                         | 本项目自定义的兼容性分组（见 §4）                                         |
 | `lastWriterReleaseId` | 非空字符串                       | 最后一个预约写入此 home 的发行版标识（诊断用，不构成信任）                |
-| `formats`             | 槽位名 → formatId 的 map（可空） | 首个预约写入者观察到的持久化格式证据；M4 预检用它做 marker/磁盘一致性比对 |
+| `formats`             | 槽位名 → formatId 的 map（可空） | 首个预约写入者观察到的持久化格式证据；预检用它做 marker/磁盘一致性比对 |
 
 读取规则（实现：`packages/release-compatibility/src/home-admission.ts`）：
 
@@ -66,7 +66,7 @@ parse marker → inspectHomeFormats（只读） → preflightHome（纯判定）
 6. marker 记录的槽位与磁盘观察不一致 → `UNKNOWN_FORMAT`（保守拒绝）。唯一例外：两个 ID 同属本 release **某一条格式规则**的 `readable` 集合（rc.1 起投影缓存规则同时可读 v4/v5，marker 记 v4 而盘上已到 v5 的升级中间态放行）；跨规则或不被本 release 可读的 ID 组合仍然拒绝；
 7. 其余 → allow（携带本 release 将写入的 epoch 与格式证据）。
 
-格式勘察（`inspectHomeFormats`）只解析已知文件头/布局，不加载 DSH 或用户插件、不启动 provider：credentials 的 `version:` 头（`refs:` 与 `records:` 两种段落均为本 baseline 已知形态，前者 API-key 引用、后者桌面 Host 写入的连接授权）、settings 的存在性（provider build 即格式身份）、session JSONL 首行 `{type:'session',version:0}`（`.zstd` 必须包含完整 RFC 8878 标准帧：标准帧魔数 `0xFD2FB528`，或完整 skippable 前缀 `0x184D2A50-5F` 后的标准帧；帧头描述符合法、所有 block 声明的负载与可选校验和均须在文件内，文件必须恰好终止于完整帧。block 级语法与参考解码器一致：每个 block 的声明大小不得超过 Block_Maximum_Size=min(Window_Size,128KiB)（窗取自 window descriptor 字节——含 mantissa 分量；single-segment 帧取帧内容大小，0 即零窗）；RLE 块无论再生成多少字节恒占 1 字节负载；帧声明内容大小时，raw/RLE 块的再生成总量必须与之精确相等（compressed 块的份额无法在纯头部勘察中核验，属已记录的有界缺口——损坏的压缩正文同理，有界条件下不做解压）。仅凭扩展名、裸魔数、仅有帧头或真实解码器拒绝的流都不认定格式；同一 session 目录中 plain 与 `.zstd` 并存即拒绝（上游 backend 拒绝双编码））、storage 单元信封（single：`{unit:{name,version}}`；per-record：`global.json` 与**每一条记录文档**均为 `{version,record}`，且每条记录的 version 必须与所在单元的 global 戳记一致。无 `global.json` 的 per-record 域只允许已知的 `session_projcache`，其合法戳记集合（rc.1 起为 v4/v5）来自本 release 的 policy 而非记录自证——迁移中的 home 可合法混存 v4/v5 记录，域身份取在场的最新戳记（任一 v5 即 v5），集合之外的戳记一律拒绝；其他无锚域拒绝——记录不能以彼此一致来自证版本）——上游 storage 后端会静默丢弃版本不符的记录，混版数据必须拒绝；域名取自目录名）、profile manifest 的 `dsh.profile` 形状。**枚举与分类纪律（2026-09-06 两轮修订，取代早期的 ≤32×32/≤64/≤32 采样上限）**：每一层目录用 `opendir` 增量枚举；枚举出的每个条目都做 lstat 外形检查（symlink/FIFO/异形一律计 unknown，绝不跟随）**并且**做头部分类——无法分类的正文在任何位置都拒绝，不存在"采样后放行"。**有界是端到端的**：单目录 65,536 枚举上限之外，一次勘察共享条目数/读取字节数/unknown 数三项预算（`createInspectionBudget`），任一耗尽即把正在走的槽位目录判 unknown（fail-closed），嵌套遍历与输出规模都有全局上界。`profiles/` 的豁免仅限真正的运行时启动根 `.dsh-desktop-run-*` **实目录**；该前缀在共享命名契约层保留（`@dsh-desktop/desktop-contracts/profile-name` 的 `RESERVED_PROFILE_NAME_PREFIX`），profile-manager 的 `createProfileRef` 与 home-lease 的 `validateProfile`（bundled CLI 一切 profile 入口的闸门）一并拒绝，用户 profile 不可能借道（点号名如 `.prod` 合法、照常检查）；同名 symlink 照常拒绝；散落的普通文件（如 `.DS_Store`）不是 profile、运行时也不加载，跳过。`storages` 槽位固定为信封身份（域内增长不翻转槽位值），`projcache` 是独立槽位（域内被 flag 即翻转 foreign）。
+格式勘察（`inspectHomeFormats`）只解析已知文件头/布局，不加载 DSH 或用户插件、不启动 provider：credentials 的 `version:` 头（`refs:` 与 `records:` 两种段落均为本 baseline 已知形态，前者 API-key 引用、后者桌面 Host 写入的连接授权）、settings 的存在性（provider build 即格式身份）、session JSONL 首行 `{type:'session',version:0}`（`.zstd` 必须包含完整 RFC 8878 标准帧：标准帧魔数 `0xFD2FB528`，或完整 skippable 前缀 `0x184D2A50-5F` 后的标准帧；帧头描述符合法、所有 block 声明的负载与可选校验和均须在文件内，文件必须恰好终止于完整帧。block 级语法与参考解码器一致：每个 block 的声明大小不得超过 Block_Maximum_Size=min(Window_Size,128KiB)（窗取自 window descriptor 字节——含 mantissa 分量；single-segment 帧取帧内容大小，0 即零窗）；RLE 块无论再生成多少字节恒占 1 字节负载；帧声明内容大小时，raw/RLE 块的再生成总量必须与之精确相等（compressed 块的份额无法在纯头部勘察中核验，属已记录的有界缺口——损坏的压缩正文同理，有界条件下不做解压）。仅凭扩展名、裸魔数、仅有帧头或真实解码器拒绝的流都不认定格式；同一 session 目录中 plain 与 `.zstd` 并存即拒绝（上游 backend 拒绝双编码））、storage 单元信封（single：`{unit:{name,version}}`；per-record：`global.json` 与**每一条记录文档**均为 `{version,record}`，且每条记录的 version 必须与所在单元的 global 戳记一致。无 `global.json` 的 per-record 域只允许已知的 `session_projcache`，其合法戳记集合（rc.1 起为 v4/v5）来自本 release 的 policy 而非记录自证——迁移中的 home 可合法混存 v4/v5 记录，域身份取在场的最新戳记（任一 v5 即 v5），集合之外的戳记一律拒绝；其他无锚域拒绝——记录不能以彼此一致来自证版本）——上游 storage 后端会静默丢弃版本不符的记录，混版数据必须拒绝；域名取自目录名）、profile manifest 的 `dsh.profile` 形状。**枚举与分类纪律**：每一层目录用 `opendir` 增量枚举；枚举出的每个条目都做 lstat 外形检查（symlink/FIFO/异形一律计 unknown，绝不跟随）**并且**做头部分类——无法分类的正文在任何位置都拒绝，不存在“采样后放行”。**有界是端到端的**：单目录 65,536 枚举上限之外，一次勘察共享条目数/读取字节数/unknown 数三项预算（`createInspectionBudget`），任一耗尽即把正在走的槽位目录判 unknown（fail-closed），嵌套遍历与输出规模都有全局上界。`profiles/` 的豁免仅限真正的运行时启动根 `.dsh-desktop-run-*` **实目录**；该前缀在共享命名契约层保留（`@dsh-desktop/desktop-contracts/profile-name` 的 `RESERVED_PROFILE_NAME_PREFIX`），profile-manager 的 `createProfileRef` 与 home-lease 的 `validateProfile`（bundled CLI 一切 profile 入口的闸门）一并拒绝，用户 profile 不可能借道（点号名如 `.prod` 合法、照常检查）；同名 symlink 照常拒绝；散落的普通文件（如 `.DS_Store`）不是 profile、运行时也不加载，跳过。`storages` 槽位固定为信封身份（域内增长不翻转槽位值），`projcache` 是独立槽位（域内被 flag 即翻转 foreign）。
 
 入口对拒绝的映射：
 
@@ -89,5 +89,5 @@ parse marker → inspectHomeFormats（只读） → preflightHome（纯判定）
 
 ## 6. 演进
 
-- M4 已交付 marker writer（首个受支持写入者落盘）、格式证据清单与预检；schema 1 保持可读。
+- 当前实现已交付 marker writer（首个受支持写入者落盘）、格式证据清单与预检；schema 1 保持可读。
 - 新增字段只做 additive；`schemaVersion` 提升（2+）的 marker 对本版本按 `unknown-schema` 拒绝。

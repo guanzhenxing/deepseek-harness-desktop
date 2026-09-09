@@ -3,7 +3,7 @@
 - 协议名：`dsh-desktop/host-control`
 - major：`1`
 - minor：`0`
-- 状态：M0 normative contract
+- 状态：normative（当前实现）
 - 决策来源：[ADR-0004](../adr/0004-version-native-capabilities-independently.md)
 
 ## 1. 适用范围
@@ -22,12 +22,12 @@ Host-control 是 Electron launcher 与其创建的单个 DSH Host runner 之间�
 
 ## 2. Transport 与 bootstrap
 
-M0 优先使用 Electron `utilityProcess` 的消息端口；若改用打包 Node 子进程，必须提供相同的消息语义和契约测试。
+当前实现使用 Electron `utilityProcess` 的消息端口；若改用打包 Node 子进程，必须提供相同的消息语义和契约测试。
 
 launcher 在启动 Host 前创建：
 
 - 至少 256 bit 的随机 `capability`；
-- 当前 home authority 的随机 `leaseGeneration`；M0 是每次私有隔离 home 启动生成的 channel generation，M1 起绑定 durable home lease generation；
+- 当前 home authority 的随机 `leaseGeneration`：共享 home 绑定 durable home lease generation，隔离冒烟入口使用每次启动生成的 channel generation；
 - 预期 profile、mode 和 Host 进程身份；
 - 专用消息通道。
 
@@ -214,9 +214,9 @@ launcher 至少使用以下稳定错误 code；它们是诊断分类，不是可
 
 普通日志记录 code、阶段、应用版本和匿名 Host generation。不得记录 capability、authenticated URL、完整 home 路径、凭据、会话内容或远程设备秘密。
 
-## 10. M0 契约测试
+## 10. 契约测试
 
-M0 至少覆盖：
+至少覆盖：
 
 - 合法 normal hello → accept → phases → surface → ready；
 - future launcher 与 1.0 Host 的 minor 交集；

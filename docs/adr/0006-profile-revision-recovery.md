@@ -2,11 +2,10 @@
 
 - 日期：2026-09-02
 - 状态：已接受
-- 决策人：Jesen（guanzhenxing）
 
 ## 1. 问题
 
-M1 的 reconcile 会创建/修改 `profiles/desktop` 下最多三个文件（`package.json`、`cordis.patch.yml`、`pnpm-workspace.yaml`）。当启动在 profile 写入之后失败时，桌面必须能安全地把本次自动变更恢复到写入前的状态，且绝不覆盖用户数据：
+reconcile 会创建/修改 `profiles/desktop` 下最多三个文件（`package.json`、`cordis.patch.yml`、`pnpm-workspace.yaml`）。当启动在 profile 写入之后失败时，桌面必须能安全地把本次自动变更恢复到写入前的状态，且绝不覆盖用户数据：
 
 - 只回滚"本次启动自己写的字节"，用户在两次启动之间的手工修改必须原样保留；
 - 不可归因于 profile 的失败（lease、端口、home patch、凭据、打包运行时、原生 UI、未知）一律不回滚；
@@ -14,7 +13,7 @@ M1 的 reconcile 会创建/修改 `profiles/desktop` 下最多三个文件（`pa
 
 ## 2. 决策
 
-`profile-manager` 唯一拥有该机制，形态为**逐文件修订事务**（M2 Task 2 实现）：
+`profile-manager` 唯一拥有该机制，形态为**逐文件修订事务**：
 
 1. reconcile 先计算纯写入计划（`planDesktopReconcile`），对每个将变更的白名单文件记录写入前存在性、字节与 SHA-256；
 2. 持久化 journal（`<home>/run/profile-transactions/<id>/`）先于任何替换落盘，快照仅含三个白名单文件的相对路径；
@@ -23,7 +22,7 @@ M1 的 reconcile 会创建/修改 `profiles/desktop` 下最多三个文件（`pa
 5. `committed` 只在 Host ready 且窗口稳定后写入；明确不可回滚的失败以 `retained` 终态记录，防止下次启动偷偷回滚；
 6. 自动回滚资格由 `shell-core` 的 `shouldRollbackProfile` 判定：未 healthy + 本次确有修改 + 失败归因为 profile-write/profile-composition 三者缺一不可。
 
-与 E3 generation ledger 的边界：generation 记录插件安装代际与定点禁用，服务插件市场；修订事务只服务"启动自愈不破坏用户数据"。两者都由 profile-manager 拥有，但 schema、生命周期与触发条件互不依赖，E3 未定案前不创建 generation 存储。
+与插件市场 generation ledger 的边界：generation 记录插件安装代际与定点禁用，服务插件市场；修订事务只服务"启动自愈不破坏用户数据"。两者都由 profile-manager 拥有，但 schema、生命周期与触发条件互不依赖，其 ADR 定案前不创建 generation 存储。
 
 ## 3. 结果与代价
 

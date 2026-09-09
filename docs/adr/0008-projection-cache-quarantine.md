@@ -2,7 +2,6 @@
 
 - 日期：2026-09-03
 - 状态：已接受
-- 决策人：Jesen（guanzhenxing）
 
 ## 1. 问题
 
@@ -14,7 +13,7 @@ DSH Host 的 session projection cache（`storages/session_projcache/sessions/`�
 
 ## 2. 决策
 
-M2 起，`shell-core` 在**持有整 home lease 且无 Host 运行**时检查该缓存；超过阈值（默认 512 MiB）时：
+`shell-core` 在**持有整 home lease 且无 Host 运行**时检查该缓存；超过阈值（默认 512 MiB）时：
 
 1. 只识别**固定基线布局**（storage root 下恰好一个 `sessions` 目录，各级路径均为真实目录而非 symlink）；任何额外 sibling、symlink 分量或扫描与 rename 之间的 inode 漂移都返回 `unknown-layout`——不移动、只输出结构化诊断行；
 2. 移动方式是**同文件系统 rename** 至 `storages/session_projcache.quarantine-<id>`，绝不复制后删除，`EXDEV` 不降级；

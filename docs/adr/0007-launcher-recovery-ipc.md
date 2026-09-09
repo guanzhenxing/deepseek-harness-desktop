@@ -2,11 +2,10 @@
 
 - 日期：2026-09-02
 - 状态：已接受
-- 决策人：Jesen（guanzhenxing）
 
 ## 1. 问题
 
-M2 需要一个不依赖 DSH Host 的本地恢复面：Host 启动失败后用户要能重试、进入 Safe Mode 或退出。该窗口本质是 privileged launcher UI，任何 renderer 逃逸都会绕过 lease/profile 的安全边界。
+本项目需要一个不依赖 DSH Host 的本地恢复面：：Host 启动失败后用户要能重试、进入 Safe Mode 或退出。该窗口本质是 privileged launcher UI，任何 renderer 逃逸都会绕过 lease/profile 的安全边界。
 
 ## 2. 决策
 

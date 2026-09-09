@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-本项目已完成 M0 源码级闭环及审查验收，目标是个人本机使用的 macOS Desktop。v1 不公开分发、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
+本项目是面向个人本机使用的 macOS Desktop。当前不公开分发、不监听非 loopback 地址，也不实现插件市场安装、远程控制或自动更新。
 
 安全模型由[架构](docs/architecture.md)、[Host-control 协议](docs/protocols/host-control.md)和[数据布局](docs/data-layout.md)共同约束。
 
@@ -12,9 +12,9 @@
 
 - Electron launcher、preload 与打包配置；
 - Host runner、`home-lease`、`profile-manager` 和 `host-supervisor`；
-- `desktop-plugin` 与未来最小 `desktop-recovery-bridge`；
+- `desktop-plugin` 与最小 `desktop-recovery-bridge`；
 - 精确固定并经本项目验证的 DSH runtime；
-- E2 引入后的更新签名信任根。
+- 更新能力引入后的更新签名信任根。
 
 Electron renderer 视为需要隔离的 Web 内容。它不拥有 Node.js、任意 Electron IPC 或 Host-control capability。
 
@@ -58,8 +58,8 @@ Host-process capability 只能证明消息来自 launcher 创建的 Host，不�
 ## DSH home 与 profile
 
 - 同一 home 同时只允许一个受支持 Host writer；
-- 共享或用户选择的 DSH home 在任何 boot、profile mutation 或 cache 隔离前获取 home lease；
-- M1 起 Desktop 与 `dsh-native` 在任何 boot、profile mutation 或 cache 隔离前获取整 home lease（`<home>/run/host.lock` + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）；owner 未知或进程活跃时拒绝清锁，`doctor --unlock` 不提供 force 绕过；M0 的私有 `<userData>/m0-dsh-home` 只保留给受支持 smoke 入口；
+- Desktop 与 `dsh-native` 在任何 boot、profile mutation 或 cache 隔离前获取整 home lease（`<home>/run/host.lock` + guard 短临界区，见 [home-lease 协议](docs/protocols/home-lease.md)）；owner 未知或进程活跃时拒绝清锁，`doctor --unlock` 不提供 force 绕过；
+- 受支持的隔离冒烟入口使用专属 `<userData>/m0-dsh-home`，不触碰共享 home；
 - lease 不按年龄自动抢占；
 - profile 恢复只处理白名单并要求候选 SHA 仍匹配；
 - Desktop 不自动回滚 credentials、settings、home patch、sessions 或 storages；
@@ -84,7 +84,7 @@ Host-process capability 只能证明消息来自 launcher 创建的 Host，不�
 
 Harness 始终绑定 loopback。独立 bridge 只能转发受限 surface，不得成为授权权威。
 
-E4 开始前必须在固定 DSH 基线上证明：
+远程访问开始前必须在固定 DSH 基线上证明：
 
 - principal 从 carrier 传播到 Host；
 - 每个目标方法执行前检查 scope；
@@ -96,7 +96,7 @@ E4 开始前必须在固定 DSH 基线上证明：
 
 ## 更新进入条件
 
-E2 必须提供 Developer ID 签名、hardened runtime、notarization、可信元数据签名和迁移预检。
+更新能力必须提供 Developer ID 签名、hardened runtime、notarization、可信元数据签名和迁移预检。
 
 launcher 保存校验后的 last-effective policy，并内置 Host 插件不能替换的信任根和 emergency stable source。Host 无法 boot 时，只允许使用这两类来源。上一版 DMG 只有在 compatibility manifest 证明格式可读时才能打开升级后的 home。
 
@@ -117,6 +117,6 @@ launcher 保存校验后的 last-effective policy，并内置 Host 插件不能�
 
 ## 报告安全问题
 
-当前仓库是非公开、个人使用项目。发现安全问题时，通过与仓库所有者既有的私有沟通渠道报告，不在公开 issue、日志粘贴或聊天截图中附带 credentials、authenticated URL、home 内容或设备秘密。
+发现安全问题时，通过与仓库所有者既有的私有沟通渠道报告，不在公开 issue、日志粘贴或聊天截图中附带 credentials、authenticated URL、home 内容或设备秘密。
 
-公开分发前必须补充正式安全联系人、支持版本窗口、响应时限和安全公告流程。
+公开分发前会补充正式安全联系人、支持版本窗口、响应时限和安全公告流程。

@@ -14,7 +14,7 @@ ADR 记录本项目难以无成本撤销、会约束后续实现的架构决策�
 | [ADR-0006：以逐文件修订事务实现 profile 非破坏性恢复](0006-profile-revision-recovery.md)                 | 已接受 | profile 修改的事务、回滚资格与 journal 保留策略             |
 | [ADR-0007：launcher 恢复窗口与窄 IPC](0007-launcher-recovery-ipc.md)                                     | 已接受 | 恢复窗口隔离、sender 校验与有界重试                         |
 | [ADR-0008：持 lease 隔离超大 projection cache](0008-projection-cache-quarantine.md)                      | 已接受 | 可重建缓存的固定布局、隔离 rename 与意图 journal            |
-| [ADR-0009：以只读 home compatibility marker 实现最小准入](0009-home-compatibility-admission.md)          | 已接受 | 跨版本 home 数据的 fail-closed 准入与 M4 升级前置           |
+| [ADR-0009：以只读 home compatibility marker 实现最小准入](0009-home-compatibility-admission.md)          | 已接受 | 跨版本 home 数据的 fail-closed 准入与升级/降级前置           |
 | [ADR-0010：插件引入（Plugin Intake）信任边界与持久记录 schema](0010-plugin-intake-trust-boundary.md)     | 已接受 | 第三方 bundle 的审查式引入、硬性拒绝项与封闭 schema 1       |
 
 ## 状态
@@ -39,4 +39,4 @@ ADR 记录本项目难以无成本撤销、会约束后续实现的架构决策�
 
 ## 格式
 
-每份 ADR 包含日期、状态、问题、决策、结果与代价，以及实际评估过的备选。ADR 只固定决策，不复制完整实施里程碑；实施范围见[纯 DSH 桌面壳实施方案](../native-dsh-desktop-plan.md)。
+每份 ADR 包含日期、状态、问题、决策、结果与代价，以及实际评估过的备选。ADR 只固定决策，不复制完整实施计划；实施范围与未来路线见[路线图](../roadmap.md)。
