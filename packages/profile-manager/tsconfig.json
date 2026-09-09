@@ -5,8 +5,13 @@
     "rootDir": "src",
     "tsBuildInfoFile": "lib/.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "references": [
+    {
+      "path": "../desktop-contracts"
+    },
     {
       "path": "../home-lease"
     }
