@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "$comment": "Provenance of the pinned upstream runtime artifacts shipped in a DeepSeek Harness Desktop candidate. The DSH runtime is consumed as official npm publishes of the pinned upstream tag — no forks, no local patches (see docs/upstream-baseline.md once Task 2 lands).",
+  "$comment": "Provenance of the pinned upstream runtime artifacts shipped in a DeepSeek Harness Desktop candidate. The DSH runtime is consumed as official npm publishes of the pinned upstream tag — no forks, no local patches. See docs/upstream-baseline.md.",
   "dsh": {
     "tag": "dsh-v0.1.2-rc.1",
     "commit": "a66e4702047846cdaa10c66c9d3df3951f5ea70d",

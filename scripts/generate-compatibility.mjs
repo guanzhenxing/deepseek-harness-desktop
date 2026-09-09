@@ -315,9 +315,7 @@ export async function generateReleaseManifest({
     encoding: 'utf8',
   }).trim()
   const commitShort = sourceCommit.slice(0, 7)
-  // From v0.1.0 onward the prefix IS the shipped version, not a milestone
-  // label (the m4- prefix was retired at the v0.1.0 release-engineering
-  // decision the rc.1 acceptance deferred here).
+  // Bind the identifier to the shipped version and source commit.
   const releaseId = `v${desktopVersion}-${platform}-${arch}-${commitShort}`
   return buildReleaseManifest({
     ...inputs,

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Full release verification chain (M4): aggregates every gate a v1 candidate
-// must pass before it can be recorded as `candidate-verified`. Fast day-to-day
-// work uses `pnpm check`; `pnpm verify:release` is the heavyweight chain run
-// before recording acceptance evidence.
+// Full release verification chain: aggregates every gate a candidate must pass
+// before it can be recorded as `candidate-verified`. Fast day-to-day work uses
+// `pnpm check`; `pnpm verify:release` is the heavyweight chain run before
+// recording acceptance evidence.
 //
 // Steps run sequentially; the first failure stops the chain (later steps
 // depend on earlier artifacts).
@@ -74,10 +74,9 @@ const steps = [
   {
     name: 'archive candidate + rehearse:upgrade',
     run() {
-      // The rehearsal needs explicit previous/candidate indexes: the previous
-      // candidate is the frozen M4 baseline when present (rc.1 qualification
-      // rehearses M4 → rc.1); release/previous (M3) stays as the historical
-      // fallback for chains that predate the freeze.
+      // The rehearsal needs explicit previous/candidate indexes. Prefer the
+      // frozen compatibility baseline when present; release/previous remains
+      // the fallback for older archived candidates.
       const m4Baseline = path.join(
         repositoryRoot,
         'release',

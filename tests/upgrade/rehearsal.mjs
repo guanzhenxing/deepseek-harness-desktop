@@ -843,7 +843,7 @@ export async function runUpgradeRehearsal(input) {
             ? newerTags.join(', ')
             : 'none'
           : newerTags
-      } — a real cross-version upgrade requires its own codex/upgrade-dsh-<tag> branch`,
+      } — a real cross-version upgrade requires its own chore/upgrade-dsh-<tag> branch`,
     )
   } finally {
     // Log-then-rethrow keeps a teardown failure from silently masking the

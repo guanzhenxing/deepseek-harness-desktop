@@ -9,7 +9,7 @@
 | 变量            | 解析规则                                                                                                                                                                                       |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `<home>`        | `resolveDesktopHome()`（`packages/home-lease`）：`$DSH_HOME` trim 后非空时生效（支持 `~` 展开，相对路径相对进程 cwd），否则为 `~/.dsh`；解析结果不得为 filesystem root。语义与固定版上游 `resolveDshHome` 在隔离进程中对照测试 |
-| `<isolatedHome>` | `<userData>/m0-dsh-home`（目录名为既有约定）；受支持隔离冒烟入口专用，由 Electron 单实例/测试夹具独占，不是共享 `<home>`，不创建 lease                                                             |
+| `<isolatedHome>` | `<userData>` 下的专属隔离 home；受支持隔离冒烟入口专用，由 Electron 单实例/测试夹具独占，不是共享 `<home>`，不创建 lease                                                               |
 | `<profile>`     | `<home>/profiles/desktop`                                                                                                                                                                        |
 | `<safeProfile>` | Safe Mode 使用 `<home>/profiles/desktop-safe-mode`（精确三 bundle），同时是未来插件市场的前置能力                                                                                                |
 | `<userData>`    | Electron 设置产品身份后返回的 `app.getPath('userData')`；macOS 预期位于 Application Support 下冻结的 `DeepSeek Harness Desktop` 目录（`dataDirectoryName`，不随产品展示名改名迁移）                |
@@ -44,7 +44,7 @@
 
 受支持入口在共享 `<home>` 上写入前必须持有 lease（协议细节见 [home-lease 协议](protocols/home-lease.md)）；`<isolatedHome>` 由 Electron 单实例/测试夹具独占，不创建 lease。这不是对共享 home 规则的放宽。
 
-正常启动不接受任意 userData 覆盖。只有 `ui`/`host-crash` smoke 可使用系统临时目录下通过 symlink/实际路径检查的专用目录。profile-manager 的隔离 authority 必须绑定调用方指定 userData 的 `m0-dsh-home` 子目录；该 authority 是受信调用方的写入前提，不是对同用户任意代码的安全沙箱。
+正常启动不接受任意 userData 覆盖。只有 `ui`/`host-crash` smoke 可使用系统临时目录下通过 symlink/实际路径检查的专用目录。profile-manager 的隔离 authority 必须绑定调用方指定 userData 下的专属隔离 home；该 authority 是受信调用方的写入前提，不是对同用户任意代码的安全沙箱。
 
 lease 目录固定为：
 

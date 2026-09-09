@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "milestone": "v0.1.0",
   "status": "release-compatibility-verified",
   "desktopVersion": "0.1.0",
   "dsh": {
@@ -23,7 +22,7 @@
   "profile": {
     "name": "desktop",
     "schemaVersion": 1,
-    "m0HomePolicy": "electron-userData-isolated"
+    "isolatedHomePolicy": "electron-userData-isolated"
   },
   "release": {
     "manifestSchemaVersion": 2,
@@ -32,46 +31,5 @@
     "upstreamArtifacts": "build/upstream-artifacts.json",
     "patchLedger": "patches/manifest.json",
     "$comment": "Mapping to the schema-2 embedded release manifest. The facts above stay the source baseline; the manifest is generated from them plus the policy/upstream/lockfile inputs (pnpm generate:compatibility) and never duplicates artifact SHAs — those stay external in release/artifacts.json."
-  },
-  "verification": [
-    {
-      "date": "2026-09-02",
-      "os": "darwin",
-      "arch": "arm64",
-      "artifact": "development-source",
-      "smokes": ["dsh-ui", "host-crash"]
-    },
-    {
-      "date": "2026-09-03",
-      "os": "darwin",
-      "arch": "arm64",
-      "artifact": "dmg",
-      "releaseId": "m3-0.0.0-darwin-arm64-fa65b48",
-      "smokes": [
-        "dsh-ui",
-        "host-crash",
-        "navigation",
-        "lifecycle",
-        "auth",
-        "conversation",
-        "shared-home",
-        "cli-version",
-        "recovery",
-        "cli-busy",
-        "cli-doctor",
-        "cli-plugin",
-        "controller-recovery",
-        "controller-admission",
-        "controller-safemode"
-      ]
-    },
-    {
-      "date": "2026-09-08",
-      "os": "darwin",
-      "arch": "arm64",
-      "artifact": "dmg",
-      "releaseId": "v0.1.0-darwin-arm64-a11dfd9",
-      "smokes": ["package-16", "rehearsal-19", "plugin-intake-shipped-rounds"]
-    }
-  ]
+  }
 }

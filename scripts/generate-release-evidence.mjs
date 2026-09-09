@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-// Generate the deterministic release-evidence projection for the CURRENT
-// staged runtime closures: release/evidence/sbom.cdx.json (Task 2), later
-// joined by the license inventory and the unified report. Evidence is a
-// projection of the staged tree + lockfile + artifact facts — never a second
-// authority. Repeat runs are byte-identical (canonical JSON, no timestamps,
-// no absolute paths).
+// Generate the deterministic release-evidence projection for the current
+// staged runtime closures: the SBOM, license inventory, and unified report.
+// Evidence is a projection of the staged tree + lockfile + artifact facts —
+// never a second authority. Repeat runs are byte-identical (canonical JSON,
+// no timestamps, no absolute paths).
 import { createRequire } from 'node:module'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'

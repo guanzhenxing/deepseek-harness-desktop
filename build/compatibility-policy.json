@@ -33,7 +33,7 @@
         "fixture:tests/fixtures/home-formats/settings.yaml#db74b2ddfc5f2e203738be3ccac319a727369c716aa8b2374654dab5f2059be7",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "<home>/settings.yaml (or .json) is a schemastery-validated document with NO upstream numeric schema version; the provider build itself is the format identity. No schema version is fabricated. The rule reads the predecessor-build ID as well: these documents carry no upstream numeric schema, so an M4-written home (marker recording the alpha.3 build) crosses this release inside one rule instead of being refused."
+      "$notes": "<home>/settings.yaml (or .json) is a schemastery-validated document with NO upstream numeric schema version; the provider build itself is the format identity. No schema version is fabricated. The rule also reads the predecessor-build ID: these documents carry no upstream numeric schema, so a home whose marker records the alpha.3 build crosses this release inside one rule instead of being refused."
     },
     {
       "provider": "@deepseek-ai/dsh-session-persistence-jsonl",
@@ -61,7 +61,7 @@
         "fixture:tests/fixtures/home-formats/storage-unit-single.json#77f214e92930f98e6ed4ada6cd48f87ac4d41f85709d84575401cb1c5717a82b",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "Single-layout units are one document with a nested {unit:{name,version}} header; per-record units are directories of {version,record} documents (global.json carries the unit version stamp) plus the domain identity from the directory name. Per-domain versions are declared by the owning package and checked with version-mismatch refusal. The rule reads the predecessor-build ID as well: these documents carry no upstream numeric schema, so an M4-written home (marker recording the alpha.3 build) crosses this release inside one rule instead of being refused."
+      "$notes": "Single-layout units are one document with a nested {unit:{name,version}} header; per-record units are directories of {version,record} documents (global.json carries the unit version stamp) plus the domain identity from the directory name. Per-domain versions are declared by the owning package and checked with version-mismatch refusal. The rule also reads the predecessor-build ID: these documents carry no upstream numeric schema, so a home whose marker records the alpha.3 build crosses this release inside one rule instead of being refused."
     },
     {
       "provider": "@deepseek-ai/dsh-session-projection-cache",
@@ -75,7 +75,7 @@
         "fixture:tests/fixtures/home-formats/projcache-unit-v5.json#ae3a3cd053ea11d18edf79c6107215e1e956cbe7f8b7a35be9f6b36be098a8a8",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "The session_projcache storage domain is declared at version 5 (per-record layout) by the rc.1 writer, which also declares versions 3 and 4 readable upstream; this policy reads the v4 records M4 wrote and writes v5, so a home may mix v4/v5 per-session records and the domain identity is the newest stamp present. The cache is derived data — the v5 bump does not raise the data epoch, and an M4 release (which reads only v4) still refuses a v5 cache."
+      "$notes": "The session_projcache storage domain is declared at version 5 (per-record layout) by the rc.1 writer, which also declares versions 3 and 4 readable upstream; this policy reads existing v4 records and writes v5, so a home may mix v4/v5 per-session records and the domain identity is the newest stamp present. The cache is derived data — the v5 bump does not raise the data epoch, and a predecessor release that reads only v4 still refuses a v5 cache."
     },
     {
       "provider": "@deepseek-ai/dsh",
@@ -88,7 +88,7 @@
         "fixture:tests/fixtures/home-formats/profile-package.json#d193ec18a8a948d68b31cd4bc0217cf1659e198cbd591e8d8c0c177621710a9c",
         "upstream:a66e4702047846cdaa10c66c9d3df3951f5ea70d"
       ],
-      "$notes": "A profile directory is a package.json manifest (dsh.profile.bundles) plus cordis.patch.yml plus pnpm-workspace.yaml. The manifest template is app-owned (profile-manager) and pinned to this baseline; the patch layer is the user's. The rule reads the predecessor-build ID as well: these documents carry no upstream numeric schema, so an M4-written home (marker recording the alpha.3 build) crosses this release inside one rule instead of being refused."
+      "$notes": "A profile directory is a package.json manifest (dsh.profile.bundles) plus cordis.patch.yml plus pnpm-workspace.yaml. The manifest template is app-owned (profile-manager) and pinned to this baseline; the patch layer is the user's. The rule also reads the predecessor-build ID: these documents carry no upstream numeric schema, so a home whose marker records the alpha.3 build crosses this release inside one rule instead of being refused."
     }
   ]
 }

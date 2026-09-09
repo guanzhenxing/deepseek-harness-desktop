@@ -299,8 +299,8 @@ async function writeAppShell(version) {
 /**
  * Closure digest for one staged runtime: the exact versions of the watched
  * DSH singletons plus a SHA-256 over the sorted virtual-store entry names.
- * Deterministic for identical dependency sets; the M4 upgrade precheck
- * compares these instead of trusting version strings alone.
+ * Deterministic for identical dependency sets; the upgrade precheck compares
+ * these instead of trusting version strings alone.
  */
 async function closureDigest(closureRoot) {
   const store = path.join(closureRoot, 'node_modules', '.pnpm')

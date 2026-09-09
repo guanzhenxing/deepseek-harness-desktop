@@ -102,7 +102,7 @@ Electron renderer 只加载 Host 发布的 authenticated loopback URL。Host run
 - 唯一拥有 `ProfileRef`、reconcile、修订恢复和 Safe Mode 投影规则；
 - 以后唯一拥有 generation ledger、事务 journal 和 drift 处理（见[路线图](roadmap.md)）；
 - 不依赖 Electron，也不启动 Host；
-- 共享 home 写入要求调用方持有对应 home lease；隔离冒烟入口使用绑定 `<userData>/m0-dsh-home` 的隔离 authority；
+- 共享 home 写入要求调用方持有对应 home lease；隔离冒烟入口使用绑定 `<userData>` 下专属隔离 home 的 authority；
 - 隔离 authority 下唯一写入的 profile 文件是 manifest、用户 patch 模板与 profile workspace 配置；Host runner 不成为这些文件的第二权威。
 
 `packages/home-lease`：

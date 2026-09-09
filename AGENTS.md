@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This pnpm workspace contains the macOS DeepSeek Harness Desktop shell. `apps/desktop-launcher` owns Electron startup and recovery UI; `apps/bundled-cli` provides `dsh-native`. Shared product boundaries live in `packages/`: contracts, home leasing, profiles, host supervision, plugins, recovery bridge, and shell core. Put package-local tests in `<package>/test/`; cross-process smoke drivers and fixtures are under `tests/smoke`, `tests/helpers`, and `tests/fixtures`. Architecture decisions, protocols, and operating guidance belong in `docs/`.
+This pnpm workspace contains the macOS DeepSeek Harness Desktop shell. `apps/desktop-launcher` owns Electron startup and recovery UI; `apps/bundled-cli` provides `dsh-native`. Shared product boundaries live in `packages/`: contracts, home leasing, profiles, host supervision, plugins, recovery bridge, and shell core. Put package-local tests in `<package>/test/`; cross-process smoke drivers and fixtures are under `tests/smoke`, `tests/helpers`, and `tests/fixtures`. Architecture, protocols, and operating guidance belong in `docs/`.
 
 ## Build, Test, and Development Commands
 

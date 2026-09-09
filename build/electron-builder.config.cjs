@@ -1,4 +1,4 @@
-// electron-builder configuration for the M3 packaged desktop candidate.
+// electron-builder configuration for the packaged desktop candidate.
 //
 // Schema verified against the pinned electron-builder 26.15.3 actually
 // installed in node_modules (directories.app/output, asar, mac.category/

@@ -50,11 +50,11 @@ corepack pnpm@11.7.0 rehearse:upgrade -- \
 5. 拒绝负例：更高 epoch marker、未知 schema marker、损坏 marker（对旧版与新版都断言拒绝且不触碰数据）、外来存储格式（对新版断言拒绝）；
 6. 记录升级类型：上游有新 tag 且已演练真实升级时为跨版本升级；否则如实记录 `same-baseline-reinstall`——**不伪造升级成功记录**。
 
-上游出现新 tag 时，真实升级在独立候选分支 `upgrade-dsh-<实际标签>` 上演练（更新 tag/commit/闭包 → 重跑全部门禁 → 演练），与功能分支严格隔离。
+上游出现新 tag 时，真实升级在独立候选分支 `chore/upgrade-dsh-<实际标签>` 上演练（更新 tag/commit/闭包 → 重跑全部门禁 → 演练），与功能分支严格隔离。
 
 ## 6. 已知边界
 
 - 旧 DMG 只回退二进制；它**不承诺**能读取新格式数据（靠 admission 拒绝，不靠运气）。
 - **冻结旧制品的 doctor 与新版共存**：lease 进程身份使用纯进程启动时间；新版 probe 对旧格式身份串（启动时间后缀形式）兼容——旧版活持有者判 `same`，锁不会被新 doctor 删。但**冻结的旧制品反向不兼容**——旧 helper 拿新身份串整串比较会判 `different`，旧版 doctor 因此可能删除新版正在持有的活锁。后果有界且在协议层被阻止：**锁目录布局 v2**（`host.lock/.dsh-writer-sentinel` 哨兵）让一切版本的 doctor 对非空锁目录 `rmdir` 一律拒绝——旧制品的 doctor 即便误读新身份格式，也最多删掉 owner 文件而**永远删不掉 v2 活锁目录**，新入口无法取得新锁，双写在锁布局层被阻止；残留的“无 owner 锁目录”由新版 doctor 清理。**lease watchdog** 作为兜底：supervisor/CLI 在 Host/子进程运行期间周期性复核 lease（默认 2s，guard 竞争不计、连续两次非竞争失败处决己方 Host/子进程），把任何其他路径的锁丢失双写窗口压缩到约一个监视周期。lease 把守的是准入，不是 Host 自身的数据写。限制：升级窗口内不要运行旧制品的 `doctor --unlock`（或任何旧二进制）指向新版正使用的 home；此限制随旧制品淘汰自然消失。
 - marker 只约束受支持入口之间的协作：裸 CLI、无 guard 的旧二进制或手工写入不受保护。
-- 本地自用构建未签名/未公证：Gatekeeper 首次启动需要右键打开；公开分发需另立决策。
+- 本地自用构建未签名/未公证：Gatekeeper 首次启动需要右键打开；公开分发前需先完成发行要求。

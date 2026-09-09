@@ -71,6 +71,6 @@
 
 升级只由以下信号触发：上游发布新 tag、当前基线存在影响本项目的 bug/安全问题/格式变化、真实使用暴露需要新版本解决的问题。是否放行只取决于本项目的依赖闭包、补丁对账、测试和打包产物。
 
-上游出现新 tag 时，真实升级在独立候选分支 `upgrade-dsh-<实际标签>` 上演练：更新 tag/commit/闭包 → 重跑全部门禁 → 升级演练（历史保留、第三方 bundle 不被触碰、降级/未知格式拒绝）。升级失败不阻塞其他交付，回退保留已验证基线。流程细节见[升级指南](upgrade-guide.md)与 [upstream-baseline](upstream-baseline.md)。
+上游出现新 tag 时，真实升级在独立候选分支 `chore/upgrade-dsh-<实际标签>` 上演练：更新 tag/commit/闭包 → 重跑全部门禁 → 升级演练（历史保留、第三方 bundle 不被触碰、降级/未知格式拒绝）。升级失败不阻塞其他交付，回退保留已验证基线。流程细节见[升级指南](upgrade-guide.md)与 [upstream-baseline](upstream-baseline.md)。
 
 涉及不可逆数据迁移的上游版本（如 Session 持久化所有权变化）需要独立的迁移资格计划，不并入常规升级。

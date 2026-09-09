@@ -105,12 +105,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m3-candidate-${{ runner.arch }}
+          name: candidate-${{ runner.arch }}
           path: |
             release/dist/*.dmg
             release/artifacts.json
             release/SHA256SUMS
             release/package-smoke.json
           retention-days: 14
-
 

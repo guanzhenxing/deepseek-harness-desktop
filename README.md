@@ -2,7 +2,7 @@
 
 DeepSeek Harness 是面向 macOS 的原生 DSH 桌面壳。官方 DSH（DeepSeek Harness）Web UI 运行在原生窗口、Dock 与托盘中；产品逻辑由一个独立 DSH bundle 插件（`desktop-plugin`）承载，一个很薄的 Electron launcher 负责启动、Host 进程监督、窗口以及 Host 无法启动时仍可用的最低恢复控制面。配套 CLI `dsh-native` 与桌面端顺序共享同一个 DSH home（默认 `~/.dsh`）。
 
-> 历史产品名 `DeepSeek Harness Desktop` 仍冻结为 Electron userData 数据目录名，不随展示名改名迁移。
+> Electron userData 目录名固定为 `DeepSeek Harness Desktop`，不随展示名变更。
 
 ## 功能特性
 
@@ -48,7 +48,7 @@ Electron launcher / dsh-native wrapper
 
 ```bash
 corepack pnpm@11.7.0 install --frozen-lockfile
-corepack pnpm@11.7.0 build
+corepack pnpm@11.7.0 package:dir
 corepack pnpm@11.7.0 package:dmg
 ```
 

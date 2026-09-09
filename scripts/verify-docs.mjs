@@ -2,18 +2,38 @@ import { access, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { findRetiredStageReferences } from './verify-docs-policy.mjs'
+
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 
 const requiredDocuments = [
   'README.md',
+  'CHANGELOG.md',
+  'CONTRIBUTING.md',
   'SECURITY.md',
   'docs/architecture.md',
+  'docs/roadmap.md',
   'docs/data-layout.md',
   'docs/development.md',
   'docs/compatibility.json',
+  'docs/plugin-intake.md',
+  'docs/upgrade-guide.md',
+  'docs/upstream-baseline.md',
+  'docs/protocols/home-compatibility.md',
   'docs/protocols/host-control.md',
   'docs/protocols/home-lease.md',
   'docs/protocols/startup-recovery.md',
+]
+
+const additionalPublicTextFiles = [
+  '.github/workflows/ci.yml',
+  'build/compatibility-policy.json',
+  'build/electron-builder.config.cjs',
+  'build/upstream-artifacts.json',
+  'docs/compatibility.json',
+  'scripts/generate-compatibility.mjs',
+  'scripts/generate-release-evidence.mjs',
+  'scripts/stage-runtime.mjs',
 ]
 
 const ignoredDirectories = new Set([
@@ -152,6 +172,12 @@ async function verifyMarkdownFile(absolutePath) {
     errors.push(`${relativePath}: missing final newline`)
   }
 
+  for (const reference of findRetiredStageReferences(contents)) {
+    errors.push(
+      `${relativePath}:${reference.line}: retired planning-stage label ${JSON.stringify(reference.value)}`,
+    )
+  }
+
   contents.split('\n').forEach((line, index) => {
     if (/[ \t]+$/u.test(line)) {
       errors.push(`${relativePath}:${index + 1}: trailing whitespace`)
@@ -176,6 +202,21 @@ async function verifyMarkdownFile(absolutePath) {
   }
 }
 
+async function verifyAdditionalPublicTextFile(relativePath) {
+  const absolutePath = path.join(repositoryRoot, relativePath)
+  if (!(await exists(absolutePath))) {
+    errors.push(`missing public metadata file: ${relativePath}`)
+    return
+  }
+
+  const contents = await readFile(absolutePath, 'utf8')
+  for (const reference of findRetiredStageReferences(contents)) {
+    errors.push(
+      `${relativePath}:${reference.line}: retired planning-stage label ${JSON.stringify(reference.value)}`,
+    )
+  }
+}
+
 for (const relativePath of requiredDocuments) {
   if (!(await exists(path.join(repositoryRoot, relativePath)))) {
     errors.push(`missing required document: ${relativePath}`)
@@ -184,6 +225,7 @@ for (const relativePath of requiredDocuments) {
 
 const markdownFiles = await collectMarkdownFiles(repositoryRoot)
 await Promise.all(markdownFiles.map(verifyMarkdownFile))
+await Promise.all(additionalPublicTextFiles.map(verifyAdditionalPublicTextFile))
 await verifyCompatibilityManifest()
 
 try {
